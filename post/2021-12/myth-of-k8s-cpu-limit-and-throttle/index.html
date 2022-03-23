@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Thoughts on k8s CPU limit and throttling - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="You should be careful about setting the CPU limit for loads in k8s. A value that is too small can introduce extra, meaningless latency into your program, and a value that is too large can introduce too large a blast radius and weaken the overall stability of the cluster.
+request and limit One of the major benefits of k8s is resource isolation. By setting the request and limit of the load, we can easily allow different programs to coexist on the right node." /><meta name="keywords" content="k8s, limit, request" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2021-12/myth-of-k8s-cpu-limit-and-throttle/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Thoughts on k8s CPU limit and throttling" />
+<meta property="og:description" content="You should be careful about setting the CPU limit for loads in k8s. A value that is too small can introduce extra, meaningless latency into your program, and a value that is too large can introduce too large a blast radius and weaken the overall stability of the cluster.
+request and limit One of the major benefits of k8s is resource isolation. By setting the request and limit of the load, we can easily allow different programs to coexist on the right node." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2021-12/myth-of-k8s-cpu-limit-and-throttle/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-12-06T15:06:57+08:00" />
+<meta property="article:modified_time" content="2021-12-06T15:06:57+08:00" />
+
+<meta itemprop="name" content="Thoughts on k8s CPU limit and throttling">
+<meta itemprop="description" content="You should be careful about setting the CPU limit for loads in k8s. A value that is too small can introduce extra, meaningless latency into your program, and a value that is too large can introduce too large a blast radius and weaken the overall stability of the cluster.
+request and limit One of the major benefits of k8s is resource isolation. By setting the request and limit of the load, we can easily allow different programs to coexist on the right node."><meta itemprop="datePublished" content="2021-12-06T15:06:57+08:00" />
+<meta itemprop="dateModified" content="2021-12-06T15:06:57+08:00" />
+<meta itemprop="wordCount" content="1104">
+<meta itemprop="keywords" content="k8s," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Thoughts on k8s CPU limit and throttling"/>
+<meta name="twitter:description" content="You should be careful about setting the CPU limit for loads in k8s. A value that is too small can introduce extra, meaningless latency into your program, and a value that is too large can introduce too large a blast radius and weaken the overall stability of the cluster.
+request and limit One of the major benefits of k8s is resource isolation. By setting the request and limit of the load, we can easily allow different programs to coexist on the right node."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Thoughts on k8s CPU limit and throttling</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-12-06 15:06:57 </span>
+        <div class="post-category">
+            <a href="/categories/skills/"> skills </a>
+            </div>
+          <span class="more-meta"> 1104 words </span>
+          <span class="more-meta"> 6 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#request-and-limit">request and limit</a></li>
+        <li><a href="#cpu-utilization">CPU utilization</a></li>
+        <li><a href="#cpu-limiting">CPU limiting</a></li>
+        <li><a href="#avoid-cpu-limit">Avoid CPU limit</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>You should be careful about setting the CPU limit for loads in k8s. A value that is too small can introduce extra, meaningless latency into your program, and a value that is too large can introduce too large a blast radius and weaken the overall stability of the cluster.</p>
+<h2 id="request-and-limit">request and limit</h2>
+<p>One of the major benefits of k8s is resource isolation. By setting the request and limit of the load, we can easily allow different programs to coexist on the right node.</p>
+<p>The request is for scheduling, which ensures that the combined CPU request and memory request for all loads on the node are no greater than the CPU and memory that the node itself can provide, and the limit is for the node (kubelet), which ensures that the load only uses so much CPU and memory on the node. For example, the following configuration means that a single load will be dispatched to a node with a remaining CPU request greater than 0.1 cores and a remaining request memory greater than 200MB, and that the load can run with no more than 0.4 cores of CPU usage (exceeding this will result in a flow limit) and no more than 300MB of memory usage (exceeding this will result in an OOM kill and restart).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span><span class="nt">requests</span><span class="p">:</span><span class="w">
+</span><span class="w">    </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l">200Mi</span><span class="w">
+</span><span class="w">    </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.1&#34;</span><span class="w">
+</span><span class="w">  </span><span class="nt">limits</span><span class="p">:</span><span class="w">
+</span><span class="w">    </span><span class="nt">memory</span><span class="p">:</span><span class="w"> </span><span class="l">300Mi</span><span class="w">
+</span><span class="w">    </span><span class="nt">cpu</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;0.4&#34;</span><span class="w">
+</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><h2 id="cpu-utilization">CPU utilization</h2>
+<p>Unlike memory, CPU is quantitative and has only two states, &ldquo;in use&rdquo; and &ldquo;idle&rdquo;.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/df75842e12724572ac2382cea5ddb590.png" alt=""></p>
+<blockquote>
+<p><strong>I talked to my wife about the difference between CPU and RAM, and she helped me draw an illustration Photo/my wife</strong></p>
+</blockquote>
+<p>When we say that the memory usage is 60%, we are saying that 60% of the memory on <strong>space</strong> has been used, and 40% of the space is available to put in load. But when we say that a core of the CPU is 60% utilized, we are saying that this core of the CPU is busy 60% of the time at <strong>time</strong> during the sampled time period, and 40% of the time is asleep.</p>
+<p>When you set the CPU limit for a load, this temporal difference may have an unexpected effect on you - excessive slowdown and limiting, where the node CPU is obviously not busy, but the node deliberately does not allow your load to use the CPU at full speed, and the service latency rises.</p>
+<h2 id="cpu-limiting">CPU limiting</h2>
+<p>k8s uses CFS (Completely Fair Scheduler) to limit the CPU usage of the load, <a href="https://en.wikipedia.org/wiki/Completely_Fair_Scheduler">the mechanism of CFS itself is more complex</a>, but the k8s documentation gives a <a href="https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/#how-pods-with-resource-limits-are-run">concise explanation</a>, the gist of which is as follows.</p>
+<ul>
+<li>CPU usage is measured in 100ms cycles.</li>
+<li>CPU limit determines the upper limit of CPU time that can be used by the container per metering cycle (100ms).</li>
+<li>If the CPU time usage of the container reaches the upper limit in this cycle, CPU limit starts and the container can only continue execution in the next cycle.</li>
+<li>1 CPU = 100ms CPU time per metered cycle, and so on, 0.2 CPU = 20ms CPU time per metered cycle, 2.5 CPU = 250ms CPU time per metered cycle.</li>
+<li>If the program uses multiple cores, the CPU time statistics are accumulated.</li>
+</ul>
+<p>As an example, suppose an API service uses two threads A, B (2 cores) in response to a request, using 60ms and 80ms respectively, where thread B is triggered 20ms late, we see that the API service can give a response after 100ms.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/86bbb0e9d5114f938a4e13aee7cb5f41.png" alt=""></p>
+<p>If the CPU limit is set to 1 core, i.e. a maximum of 100ms CPU time is used in every 100ms, thread B of the API service is limited once (grey part) and the service responds after 140ms with.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/958fa4e84d94406a8c973909def6372a.png" alt=""></p>
+<p>If the CPU limit is set to 0.6 cores, i.e. a maximum of 60ms CPU time is used in every 100ms, thread A of the API service is limited once (grey part), thread B is limited twice and the service responds after 220ms with.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/cbb7f8c882d9429b82cb14a410ff0e0f.png" alt=""></p>
+<p>Note that <strong>flow limiting will execute just the same even if the CPU has no other work to do at that moment</strong> , which is a rigid and unaccommodating mechanism.</p>
+<p>This is a rather exaggerated example, the average API service is IO intensive and CPU time usage is not that high (you&rsquo;re running model inference?). Forget I said it), but still, you can see that limiting the flow will realistically extend the latency of the API service. Therefore, for latency-sensitive services, we should all try to avoid triggering k8s' flow limiting mechanism.</p>
+<p>The graph below shows the CPU usage and CPU Throttling ratio of an API service at the pod level in my work. We see that CPU Throttling exists most of the day, with the Throttling ratio fluctuating around 10%, which means that the service&rsquo;s work is not done at full speed, and is discounted by 10% in terms of speed. It is worth mentioning that the node where the pod is located still has spare CPU resources at this time, and the overall CPU usage of the node does not exceed 50%.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/bfbf76af24de4a17912512640332066c.png" alt=""></p>
+<p>You may notice that the CPU usage in the monitor chart looks like it is not reaching the CPU limit (orange horizontal line), this is due to the long statistic period (1min) of CPU usage <a href="https://en.wikipedia.org/wiki/Aliasing">Signal Aliasing</a>, if its statistic statistic period is the same as the CFS one (100ms), we would see spikes higher than the CPU limit. (This is not a bug, this is FEATURE)</p>
+<p>However, <a href="https://github.com/kubernetes/kubernetes/issues/67577#issuecomment-466609030">Linux with kernel versions below 4.18 really has a bug that causes unnecessary CPU limit</a>.</p>
+<h2 id="avoid-cpu-limit">Avoid CPU limit</h2>
+<p>Some developers tend to <a href="https://amixr.io/blog/what-wed-do-to-save-from-the-well-known-k8s-incident/">abandon CPU limits altogether</a> and run naked and straight, especially <a href="https://medium.com/omio-engineering/cpu-limits-and-aggressive-throttling-in-kubernetes-c5b20bd8a718">when the kernel version is not buggy enough</a>.</p>
+<p>I think doing so is still too much of a let-down, and if there are bugs in the program that run out of CPU (such as dead loops, which I have unfortunately encountered), the entire node and its load can fall into an unavailable state with too large an explosion radius, especially on larger nodes (16 cores and above).</p>
+<p>I have two suggestions.</p>
+<ol>
+<li>monitor the CPU utilization of the application over time and set a suitable CPU limit based on the utilization (e.g., 95th percentile of daily utilization * 10), while the limit should not take up too large a proportion of the node&rsquo;s CPU cores (e.g., 2/3), so that a balance between performance and security can be achieved.</li>
+<li>Use a tool like <a href="https://github.com/uber-go/automaxprocs">automaxprocs</a> to adapt the program to the CFS scheduling environment. Each language should have similar libraries or execution parameters, and after adjusting them to the characteristics of CFS, <a href="https://github.com/uber-go/automaxprocs/issues/12#issuecomment-405976401">the program is less likely to encounter CPU limiting</a>.</li>
+</ol>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/k8s/">k8s</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2021-12/whys-the-design-tcp-time-wait/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Why does the TCP protocol have a TIME_WAIT state?</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2021-12/go-faker/">
+            <span class="next-text nav-default">go-faker: a mock data generator</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

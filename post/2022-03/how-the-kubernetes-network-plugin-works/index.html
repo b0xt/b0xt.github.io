@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How the Kubernetes Network Plugin Works - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="There are various network solutions for containers, and it is obviously impractical to adapt every network implementation supported, and CNI was invented to be compatible with multiple network solutions.CNI stands for Container Network Interface, which is a standard common interface to connect container management system and network plugins. In simple terms, container runtime provides network namespace for containers, network plug-in is responsible for inserting network interface into the network namespace" /><meta name="keywords" content="kubernetes, Network Plugin" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/how-the-kubernetes-network-plugin-works/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="How the Kubernetes Network Plugin Works" />
+<meta property="og:description" content="There are various network solutions for containers, and it is obviously impractical to adapt every network implementation supported, and CNI was invented to be compatible with multiple network solutions.CNI stands for Container Network Interface, which is a standard common interface to connect container management system and network plugins. In simple terms, container runtime provides network namespace for containers, network plug-in is responsible for inserting network interface into the network namespace" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/how-the-kubernetes-network-plugin-works/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-10T09:26:33+08:00" />
+<meta property="article:modified_time" content="2022-03-10T09:26:33+08:00" />
+
+<meta itemprop="name" content="How the Kubernetes Network Plugin Works">
+<meta itemprop="description" content="There are various network solutions for containers, and it is obviously impractical to adapt every network implementation supported, and CNI was invented to be compatible with multiple network solutions.CNI stands for Container Network Interface, which is a standard common interface to connect container management system and network plugins. In simple terms, container runtime provides network namespace for containers, network plug-in is responsible for inserting network interface into the network namespace"><meta itemprop="datePublished" content="2022-03-10T09:26:33+08:00" />
+<meta itemprop="dateModified" content="2022-03-10T09:26:33+08:00" />
+<meta itemprop="wordCount" content="2428">
+<meta itemprop="keywords" content="kubernetes," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How the Kubernetes Network Plugin Works"/>
+<meta name="twitter:description" content="There are various network solutions for containers, and it is obviously impractical to adapt every network implementation supported, and CNI was invented to be compatible with multiple network solutions.CNI stands for Container Network Interface, which is a standard common interface to connect container management system and network plugins. In simple terms, container runtime provides network namespace for containers, network plug-in is responsible for inserting network interface into the network namespace"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How the Kubernetes Network Plugin Works</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-10 09:26:33 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2428 words </span>
+          <span class="more-meta"> 5 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#flannel">Flannel</a>
+          <ul>
+            <li><a href="#udp-mode">UDP Mode</a></li>
+            <li><a href="#vxlan-mode">VXLAN mode</a></li>
+            <li><a href="#packet-capture-verification">Packet capture verification</a></li>
+            <li><a href="#host-gw-mode">host-gw mode</a></li>
+          </ul>
+        </li>
+        <li><a href="#calico">Calico</a>
+          <ul>
+            <li><a href="#how-it-works">How it works</a></li>
+            <li><a href="#ipip-mode">IPIP mode</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>There are various network solutions for containers, and it is obviously impractical to adapt every network implementation supported, and CNI was invented to be compatible with multiple network solutions.CNI stands for Container Network Interface, which is a standard common interface to connect container management system and network plugins.</p>
+<p>In simple terms, container runtime provides network namespace for containers, network plug-in is responsible for inserting network interface into the network namespace and doing some necessary configuration in the host, and finally configuring IP and routing for the interface in the namespace.</p>
+<p>So the main job of the network plug-in is to provide a network environment for the container, including setting the ip address for the pod and configuring the route to ensure the smooth flow of the network within the cluster. Currently the most popular network plugins are Flannel and Calico.</p>
+<h2 id="flannel">Flannel</h2>
+<p>Flannel primarily provides an overlay network within a cluster and supports three backend implementations: UDP mode, VXLAN mode, and host-gw mode.</p>
+<h3 id="udp-mode">UDP Mode</h3>
+<p>UDP mode, one of the first supported by the Flannel project, is also one of the worst performing. This mode provides a three-layer overlay network, i.e., it first encapsulates the outgoing IP packet in UDP, then decapsulates it at the receiving end to get the original IP packet, which is then forwarded to the destination container. The working principle is shown in the figure below.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/2e521b49287147c6881619c412962ba4.png" alt="k8s UDP Mode"></p>
+<p>When pod1 on node1 requests pod2 on node2, the traffic goes as follows.</p>
+<ol>
+<li>the process in pod1 initiates the request and sends an IP packet.</li>
+<li>the IP packet enters the cni0 bridge based on the veth device pair in pod1.</li>
+<li>since the destination ip of the IP packet is not on node1, it enters flannel0 according to the routing rules created by the flannel on the node. 4.</li>
+<li>at this point the flanneld process receives the packet, flanneld determines which node the packet should be on and encapsulates it in a UDP packet</li>
+<li>finally send it to node2 through the gateway on node1.</li>
+</ol>
+<p>flannel0 is a TUN device (Tunnel device). In Linux, a TUN device is a virtual network device that works at three layers (Network Layer).The function of the TUN device: to pass IP packets between the OS kernel and the user application.</p>
+<p>As you can see, the reason for the poor performance of this mode is that the entire packet UDP encapsulation process is done by the flanneld program, i.e. the user state, and this brings about a kernel-to-user state transition and a user-to-kernel state transition. The cost in context switching and user state operation is actually higher, and UDP mode brings additional performance consumption because of packet encapsulation and unpacketization.</p>
+<h3 id="vxlan-mode">VXLAN mode</h3>
+<p>VXLAN, or Virtual Extensible LAN, is a network virtualization technology that is supported by the Linux kernel itself. By taking advantage of this feature of the Linux kernel, the ability to encapsulate and decapsulate in the kernel state can also be implemented to build overlay networks. The working principle is shown in the following figure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/f673a7e1619d40a38ce069914b579c6a.png" alt="k8s VXLAN mode"></p>
+<p>VXLAN mode flannel creates a VTEP (Virtual Tunnel End Point) device called flannel.1 on the node, which, like UDP mode, encapsulates Layer 2 data frames in UDP packets and forwards them out. Unlike UDP mode, the encapsulation process is done in the kernel state.</p>
+<p>When pod1 on node1 requests pod2 on node2, the traffic goes as follows.</p>
+<ol>
+<li>the process in pod1 initiates the request and sends an IP packet.</li>
+<li>the IP packet enters the cni0 bridge based on the veth device pair in pod1.</li>
+<li>since the destination ip of the IP packet is not on node1, it enters flannel.1 according to the routing rules created by the flannel on the node.</li>
+<li>flannel.1 encapsulates the original IP packet with a destination MAC address into a layer 2 data frame; the kernel then encapsulates the data frame into a UDP packet;</li>
+<li>finally, through the gateway on node1, to node2.</li>
+</ol>
+<h3 id="packet-capture-verification">Packet capture verification</h3>
+<p>Deploy a nginx pod1 on node1 and a nginx pod2 on node2. Then curl the pod2 container on port 80 in the pod1 container.</p>
+<p>The cluster network environment is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">node1 网卡 ens33：192.168.50.10
+pod1 veth：10.244.0.7
+node1 cni0：10.244.0.1/24
+node1 flannel.1：10.244.0.0/32
+
+node2 网卡 ens33：192.168.50.11
+pod2 veth：10.244.1.9
+node2 cni0：10.244.1.1/24
+node2 flannel.1：10.244.1.0/32
+</code></pre></td></tr></table>
+</div>
+</div><p>The routing information on node1 is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">➜  ~ ip route
+default via 192.168.50.1 dev ens33
+10.244.0.0/24 dev cni0 proto kernel scope link src 10.244.0.1
+10.244.1.0/24 via 10.244.1.0 dev flannel.1 onlink
+10.244.2.0/24 via 10.244.2.0 dev flannel.1 onlink
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1
+192.168.50.0/24 dev ens33 proto kernel scope link src 192.168.50.10 metric 100
+</code></pre></td></tr></table>
+</div>
+</div><p>Packet capture for NIC ens33 of node1.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/f396ae1e65da43319af2556dea6c5645.png" alt="Wireshark"></p>
+<p>We can only see UDP packets with source ip node1 ip and destination ip node2 ip. Since flannel.1 has a layer of UDP packets, here we set up Wireshark to parse the UDP packets into VxLAN format (port 8472) by Analyze-&gt;Decode As.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/719f65a7a6c1449d8ccd9479d05b12f2.png" alt="Wireshark VxLAN format"></p>
+<p>Then take a look at the packets received on the node1 NIC.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/098541505aee4ca7aa6a437ca81272bc.png" alt="Wireshark"></p>
+<p>You can see that the source ip is pod1 ip, the destination ip is pod2 ip, and the IP packet is encapsulated in a UDP packet.</p>
+<h3 id="host-gw-mode">host-gw mode</h3>
+<p>The last host-gw mode is a pure Layer 3 network solution. It works by setting the &ldquo;next hop&rdquo; of each Flannel subnet to the IP address of the host corresponding to that subnet, which acts as the &ldquo;gateway&rdquo; in the container communication path. This allows IP packets to reach the destination host through the Layer 2 network, and because of this, the host-gw mode requires that the network between the cluster hosts be Layer 2 connected, as shown in the figure below.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/fe7654f6c6984f7097506794512d5dc3.png" alt="host-gw mode"></p>
+<p>The routing information on the host is set by flanneld, and since the flannel subnet and host information is stored in etcd, flanneld only needs to watch for changes in this data and update the routing table in real time. In this mode, the process of container communication eliminates the performance loss caused by additional packets and unpackets.</p>
+<p>When pod1 on node1 requests pod2 on node2, the traffic goes as follows.</p>
+<ol>
+<li>the process in pod1 initiates the request and sends out IP packets, which are encapsulated into frames from the network layer into the link layer.</li>
+<li>the data frames arrive on Node 2 from Node 1 through the host&rsquo;s Layer 2 network according to the routing rules on the host.</li>
+</ol>
+<h2 id="calico">Calico</h2>
+<p>Instead of using CNI&rsquo;s bridge mode, Calico treats the nodes as border routers, forming a fully connected network that exchanges routes via the BGP protocol. Therefore, Calico&rsquo;s CNI plug-in also requires a routing rule on the host for each container&rsquo;s Veth Pair device to receive incoming IP packets.</p>
+<p>Calico&rsquo;s components:</p>
+<ol>
+<li>CNI plug-in: the part of Calico that interfaces with Kubernetes</li>
+<li>Felix: responsible for inserting routing rules on the host (i.e., writing to the Linux kernel&rsquo;s FIB forwarding information base) and maintaining the network devices required by Calico, etc.</li>
+<li>BIRD (BGP Route Reflector): is a client of BGP and is specifically responsible for distributing routing rule information in the cluster.</li>
+</ol>
+<p>All three components are installed through a DaemonSet; the CNI plugin is installed through initContainer; and Felix and BIRD are two containers of the same pod.</p>
+<h3 id="how-it-works">How it works</h3>
+<p>Calico uses BGP, a protocol that enables node routing information sharing in large-scale networks. The full name is Border Gateway Protocol, or: Border Gateway Protocol. It is a centralless routing protocol that is natively supported by the Linux kernel and is designed to maintain routing information between different &ldquo;autonomous systems&rdquo; in a large-scale data center.</p>
+<p>Since it does not use CNI bridges, Calico&rsquo;s CNI plug-in requires a Veth Pair device for each container, one end of which is placed on the host, and a routing rule on the host for each container&rsquo;s Veth Pair device to receive incoming IP packets. This is shown in the figure below.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/7e641ece13ed4d9f9d8c5de35259cbb5.png" alt="How Calico works"></p>
+<p>You can check the node connectivity of node1 using calicoctl.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">~ calicoctl get no
+NAME
+node1
+node2
+node3
+~ calicoctl node status
+Calico process is running.
+
+IPv4 BGP status
++---------------+-------------------+-------+------------+-------------+
+| PEER ADDRESS  |     PEER TYPE     | STATE |   SINCE    |    INFO     |
++---------------+-------------------+-------+------------+-------------+
+| 192.168.50.11 | node-to-node mesh | up    | 2020-09-28 | Established |
+| 192.168.50.12 | node-to-node mesh | up    | 2020-09-28 | Established |
++---------------+-------------------+-------+------------+-------------+
+
+IPv6 BGP status
+No IPv6 peers found.
+</code></pre></td></tr></table>
+</div>
+</div><p>You can see that there are 3 nodes on the entire calico cluster, node1 and the other two nodes are in a connected state with the mode &ldquo;Node-to-Node Mesh&rdquo;. Then look at the routing information on node1 as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">~ ip route
+default via 192.168.50.1 dev ens33 proto static metric <span class="m">100</span>
+10.244.104.0/26 via 192.168.50.11 dev ens33 proto bird
+10.244.135.0/26 via 192.168.50.12 dev ens33 proto bird
+10.244.166.128 dev cali717821d73f3 scope link
+blackhole 10.244.166.128/26 proto bird
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1
+192.168.50.0/24 dev ens33 proto kernel scope link src 192.168.50.10 metric <span class="m">100</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The routing rule in #2 indicates that packets from the 10.244.104.0/26 network segment are sent from the ens33 device to the gateway 192.168.50.11 via the bird protocol. this also defines the destination ip as the direction of the pod request on node2. Routing rule #3 is similar.</p>
+<h4 id="packet-capture-verification-1">packet capture verification</h4>
+<p>As above, an http request is sent from pod1 on node1 to pod2 on node2.</p>
+<p>The cluster network environment is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">node1 网卡 ens33：192.168.50.10
+pod1 ip：10.244.166.128
+
+node2 网卡 ens33：192.168.50.11
+pod2 ip：10.244.104.1
+</code></pre></td></tr></table>
+</div>
+</div><p>Packet capture for NIC ens33 of node1.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/37391eac37e7499ebd1d3e4c243b36ec.png" alt="winsharek"></p>
+<h3 id="ipip-mode">IPIP mode</h3>
+<p>IPIP mode is used to solve the problem that two nodes are not on the same subnet. Just set the environment variable CALICO_IPV4POOL_IPIP to &ldquo;Always&rdquo; for the daemonset named calico-node. As follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="w">            </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">CALICO_IPV4POOL_IPIP</span><span class="w">
+</span><span class="w">              </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;Off&#34;</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>IPIP mode calico uses the tunl0 device, which is an IP tunneling device. after the IP packet enters tunl0, the kernel encapsulates the original IP packet directly in the IP packet of the host; the destination address of the encapsulated IP packet is the next hop address, which is the IP address of node2. Since the hosts have already configured Layer 3 forwarding between them using a router, this IP packet can pass through the router after leaving node 1 and eventually be sent to node 2. This is shown in the figure below.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/9a3532fdf039432581b6f8f9a3684a18.png" alt="IPIP mode"></p>
+<p>Since the cluster&rsquo;s network performance is affected by the extra packet sealing and unpacking process of Calico in IPIP mode, it is recommended not to use IPIP mode when the cluster&rsquo;s Layer 2 network is through.</p>
+<p>Take a look at the routing information on node1.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">~ ip route
+default via 192.168.50.1 dev ens33 proto static metric <span class="m">100</span>
+10.244.104.0/26 via 192.168.50.11 dev tunl0 proto bird onlink
+10.244.135.0/26 via 192.168.50.12 dev tunl0 proto bird onlink
+blackhole 10.244.166.128/26 proto bird
+10.244.166.129 dev calif3c799362a5 scope link
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1
+192.168.50.0/24 dev ens33 proto kernel scope link src 192.168.50.10 metric <span class="m">100</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>You can see that, unlike before, the packet with destination IP Pod on node2 is sent to gateway 192.168.50.11 via tunl0.</p>
+<h4 id="packet-capture-verification-2">Packet capture verification</h4>
+<p>Send an http request from pod1 on node1 to pod2 on node2.</p>
+<p>The cluster network environment is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">node1 网卡 ens33：192.168.50.10
+node1 tunl0：10.244.166.128/32
+pod1 ip：10.244.166.129
+
+node2 网卡 ens33：192.168.50.11
+pod2 ip：10.244.104.2
+node2 tunl0：10.244.104.0/32
+</code></pre></td></tr></table>
+</div>
+</div><p>Packet capture for tunl0 devices.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/22c6ff17a7a3488b9ecf4130de39dec5.png" alt="Winsharek"></p>
+<p>Packet capture for node1 NIC ens33.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/4f643eb23bdf41c49b92b0c912d31c0c.png" alt="winshark"></p>
+<p>You can see that the IP packet is encapsulated into another IP packet in the tunl0 device with the destination IP of node2 and the source IP of node1.</p>
+<h2 id="summary">Summary</h2>
+<p>This article analyzes the working principle of Flannel and Calico, which are the two most common ones in the community, and analyzes the direction of network packets by capturing packets for the scenario of communication between pods of different nodes in the cluster.</p>
+<p>Flannel mainly provides an overlay network solution; UDP mode is gradually abandoned by the community because its packet unpacking process involves multiple context switches, resulting in poor performance; VXLAN mode has a much better performance than UDP because its packet unpacking process is in the kernel state, and is the most frequently used mode; host-gw mode does not involve packet unpacking, so its performance is relatively high, but requires Layer 2 interoperability between nodes.</p>
+<p>Calico mainly uses BGP protocol to exchange routes without cni0 bridge. When the Layer 2 network is not available, IPIP mode can be used, but the performance is relatively weak due to the packet unpacking process, which is comparable to Flannel&rsquo;s VXLAN mode.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/kubernetes/">kubernetes</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/kubelet-pod-creation-workflow/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Kubelet pod creation workflow</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/implement-a-kubernetes-network-plugin/">
+            <span class="next-text nav-default">How to Implement a Kubernetes Network Plugin</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

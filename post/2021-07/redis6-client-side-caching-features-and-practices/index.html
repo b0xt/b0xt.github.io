@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Redis6 Client Side Caching Features and Practices - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Redis 6.0 has been released more than a year ago.
+The new features in Redis 6.0 have been identified through step-by-step discussions and optimizations.
+Many of these features have already been introduced in previous releases such as RC.
+However, there are some new changes in the official GA release:
+ SSL ACL: better, command support RESP3 Client side caching: redesigned Threaded I/O Diskless replication on replicas Cluster support in Redis-benchmark and improved redis-cli cluster support Disque in beta as a module of Redis: starting to invade the message queue space Redis Cluster Proxy Support for immediate deletion when the RDB is no longer in use, for scenarios where the disk is not dropped PSYNC2: Optimized replication protocol More friendly timeout setting support Faster RDB loading, 20% ~ 30% improvement STRALGO, new string command, currently only one implementation of LCS (longest common subsequence)  @antirez mentioned that it was only the largest version update in Redis history, so it was prudent to recommend more testing and evaluation of the product in the application, and promised to release version 6." /><meta name="keywords" content="redis6,client-side-caching" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2021-07/redis6-client-side-caching-features-and-practices/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Redis6 Client Side Caching Features and Practices" />
+<meta property="og:description" content="Redis 6.0 has been released more than a year ago.
+The new features in Redis 6.0 have been identified through step-by-step discussions and optimizations.
+Many of these features have already been introduced in previous releases such as RC.
+However, there are some new changes in the official GA release:
+ SSL ACL: better, command support RESP3 Client side caching: redesigned Threaded I/O Diskless replication on replicas Cluster support in Redis-benchmark and improved redis-cli cluster support Disque in beta as a module of Redis: starting to invade the message queue space Redis Cluster Proxy Support for immediate deletion when the RDB is no longer in use, for scenarios where the disk is not dropped PSYNC2: Optimized replication protocol More friendly timeout setting support Faster RDB loading, 20% ~ 30% improvement STRALGO, new string command, currently only one implementation of LCS (longest common subsequence)  @antirez mentioned that it was only the largest version update in Redis history, so it was prudent to recommend more testing and evaluation of the product in the application, and promised to release version 6." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2021-07/redis6-client-side-caching-features-and-practices/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-07-16T10:33:44+08:00" />
+<meta property="article:modified_time" content="2021-07-16T10:33:44+08:00" />
+
+<meta itemprop="name" content="Redis6 Client Side Caching Features and Practices">
+<meta itemprop="description" content="Redis 6.0 has been released more than a year ago.
+The new features in Redis 6.0 have been identified through step-by-step discussions and optimizations.
+Many of these features have already been introduced in previous releases such as RC.
+However, there are some new changes in the official GA release:
+ SSL ACL: better, command support RESP3 Client side caching: redesigned Threaded I/O Diskless replication on replicas Cluster support in Redis-benchmark and improved redis-cli cluster support Disque in beta as a module of Redis: starting to invade the message queue space Redis Cluster Proxy Support for immediate deletion when the RDB is no longer in use, for scenarios where the disk is not dropped PSYNC2: Optimized replication protocol More friendly timeout setting support Faster RDB loading, 20% ~ 30% improvement STRALGO, new string command, currently only one implementation of LCS (longest common subsequence)  @antirez mentioned that it was only the largest version update in Redis history, so it was prudent to recommend more testing and evaluation of the product in the application, and promised to release version 6."><meta itemprop="datePublished" content="2021-07-16T10:33:44+08:00" />
+<meta itemprop="dateModified" content="2021-07-16T10:33:44+08:00" />
+<meta itemprop="wordCount" content="2269">
+<meta itemprop="keywords" content="redis," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Redis6 Client Side Caching Features and Practices"/>
+<meta name="twitter:description" content="Redis 6.0 has been released more than a year ago.
+The new features in Redis 6.0 have been identified through step-by-step discussions and optimizations.
+Many of these features have already been introduced in previous releases such as RC.
+However, there are some new changes in the official GA release:
+ SSL ACL: better, command support RESP3 Client side caching: redesigned Threaded I/O Diskless replication on replicas Cluster support in Redis-benchmark and improved redis-cli cluster support Disque in beta as a module of Redis: starting to invade the message queue space Redis Cluster Proxy Support for immediate deletion when the RDB is no longer in use, for scenarios where the disk is not dropped PSYNC2: Optimized replication protocol More friendly timeout setting support Faster RDB loading, 20% ~ 30% improvement STRALGO, new string command, currently only one implementation of LCS (longest common subsequence)  @antirez mentioned that it was only the largest version update in Redis history, so it was prudent to recommend more testing and evaluation of the product in the application, and promised to release version 6."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Redis6 Client Side Caching Features and Practices</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-07-16 10:33:44 </span>
+        <div class="post-category">
+            <a href="/categories/skills/"> skills </a>
+            <a href="/categories/database/"> database </a>
+            </div>
+          <span class="more-meta"> 2269 words </span>
+          <span class="more-meta"> 11 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#test-environment-construction">Test environment construction</a></li>
+        <li><a href="#bcast-broadcast-mode-client-tracking-on"><code>BCAST</code> Broadcast mode (client tracking on)</a></li>
+        <li><a href="#tracking-prefix-specific-key-client-tracking-on"><code>tracking</code> prefix-specific <code>key</code> (<code>client tracking on</code>)</a></li>
+        <li><a href="#opt-in">Opt-in</a></li>
+        <li><a href="#opt-out">Opt out</a></li>
+        <li><a href="#noloop">NOLOOP</a></li>
+        <li><a href="#redirect">REDIRECT</a></li>
+        <li><a href="#reference-documents">Reference Documents</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Redis 6.0 has been released more than a year ago.</p>
+<p>The new features in Redis 6.0 have been identified through step-by-step discussions and optimizations.</p>
+<p>Many of these features have already been introduced in previous releases such as RC.</p>
+<p>However, there are some new changes in the official GA release:</p>
+<ul>
+<li><a href="https://redis.io/topics/encryption">SSL</a></li>
+<li><a href="https://redis.io/topics/acl">ACL</a>: better, command support</li>
+<li><a href="https://github.com/antirez/RESP3/blob/master/spec.md">RESP3</a></li>
+<li><a href="https://redis.io/topics/client-side-caching">Client side caching</a>: redesigned</li>
+<li>Threaded I/O</li>
+<li><a href="https://redis.io/topics/replication">Diskless replication on replicas</a></li>
+<li>Cluster support in Redis-benchmark and improved redis-cli cluster support</li>
+<li><a href="https://github.com/antirez/disque-module">Disque in beta as a module of Redis</a>: starting to invade the message queue space</li>
+<li><a href="https://github.com/RedisLabs/redis-cluster-proxy">Redis Cluster Proxy</a></li>
+<li>Support for immediate deletion when the RDB is no longer in use, for scenarios where the disk is not dropped</li>
+<li>PSYNC2: Optimized replication protocol</li>
+<li>More friendly timeout setting support</li>
+<li>Faster RDB loading, 20% ~ 30% improvement</li>
+<li>STRALGO, new string command, currently only one implementation of LCS (longest common subsequence)</li>
+</ul>
+<p><a href="https://twitter.com/antirez">@antirez</a> mentioned that it was only the largest version update in Redis history, so it was prudent to recommend more testing and evaluation of the product in the application, and promised to release version 6.0.1 as soon as a major bug was encountered. As expected, version 6.0.1 was released a day later, fixing an allocator bug that was introduced for optimization purposes and is now temporarily removed.</p>
+<blockquote>
+<p>I just released Redis 6.0.1. Unfortunately there was a bug in Redis 6.0.0 introduced just a few days before the release, that only happens when using the non-default allocator (libc malloc in this case triggers it). Optimization reverted, 6.0.1 released. Sorry for the issue.</p>
+</blockquote>
+<p>This article focuses on the feature of <code>Client side caching</code>.</p>
+<p><a href="https://github.com/smallnest/resp3">smallnest/RESP3</a> is a parsing library for the Redis RESP3 protocol, which you can use to communicate with the underlying Redis or package to implement a new version of the Redis client library or Redis Server side.</p>
+<p>A year ago, when <a href="https://twitter.com/antirez">@antirez</a> woke up in a hostel at 5:30 after attending the Redis Conference in New York, facing the beautiful view of the streets of Manhattan and pondering the future of Redis amidst the crowds. This includes client-side caching.</p>
+<p>Actually, the client-side caching feature was influenced by Ben Malec at Redis Conf 2018, which immediately opened @antirez&rsquo;s mind. We know that many companies use Redis as a caching system, and it is very good at improving data access performance, but many companies still cache some of the hot data on the client side of redis in order to further respond to hot data, and use it to respond to hot events. For example, in Weibo we often encounter star cheating, star splitting, breaking events, etc. There are several breaking events every year. Weibo, in addition to using Redis as a cache to avoid direct access to the database, will add more cache layers in front, such as <code>L1 cache</code>, and use products such as memcached as a cache for hot data. Ben provides a very interesting idea.</p>
+<p>Standing on the streets of Manhattan, @antirez got deep in thought and later returned to the hotel where he started implementing the first version of client-side caching. Of course, the final Redis 6.0 implementation was very different from this initial implementation, but it is clear that we can see the trade-offs @antirez made in the evolution of the client side. We won&rsquo;t go too much into the history of this article, as we are more interested in what this feature will eventually look like.</p>
+<p>What Redis implements is a server-assisted client-side cache called <code>tracking</code>. The command for client-side caching is :</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">CLIENT TRACKING ON|OFF [REDIRECT client-id] [PREFIX prefix] [BCAST] [OPTIN] [OPTOUT] [NOLOOP]
+</code></pre></td></tr></table>
+</div>
+</div><p>When <code>tracking</code> is turned on, Redis &ldquo;remembers&rdquo; the key requested by each client and sends an invalidation message to the client when the value of the key is found to have changed. The invalidation message can be sent to the requesting client via the RESP3 protocol, or forwarded to a different connection (RESP2+ Pub/Sub is supported).</p>
+<p>When broadcasting mode is enabled, a client participating in <code>tracking</code> will receive notifications about the key it subscribed to by prefix, even if it did not request the corresponding key. Also provides <code>OPTIN</code>, <code>OPTOUT</code> and other modes.</p>
+<blockquote>
+<p>Failure message: When a key&rsquo;s data is modified, it needs to tell the client that its previously cached data has failed, and then redis will actively send a failure message</p>
+</blockquote>
+<ul>
+<li><strong>REDIRECT</strong> : Forwards the failure message to another client. When we don&rsquo;t use RESP3 but use the old RESP2 to communicate with Redis, the client itself doesn&rsquo;t support handling failure messages, so you can enable a Pub/Sub client to handle failure messages. Of course, if the client supports RESP3, it can also forward the failure messages to another client. This cace we put at the end to demonstrate.</li>
+<li><strong>BCAST</strong> : Start <code>tracking</code> using broadcast mode. In this mode the client needs to set the prefix of the keys that will be tracked, and the failure messages for these keys will be broadcast to all participating clients, regardless of whether they requested/cached the keys or not.</li>
+<li><strong>PREFIX</strong> : Only broadcast mode is applied, registering a key prefix. All keys starting with this prefix will send a failure message when there is a modification. Multiple prefixes can be registered. If no prefix is set, then broadcast mode will track every key.</li>
+<li><strong>OPTIN</strong> : When broadcast mode is not active, normal <strong>will not</strong> track keys for read-only commands unless they are called after <code>CLIENT CACHING yes</code>.</li>
+<li><strong>OPTOUT</strong> : When broadcast mode is not active, normal <strong>will</strong> track the keys of read-only commands unless they are invoked after <code>CLIENT CACHING off</code>.</li>
+<li><strong>NOLOOP</strong> : Does not send keys modified by the client itself.</li>
+</ul>
+<p>Let us introduce each option one by one.</p>
+<h2 id="test-environment-construction">Test environment construction</h2>
+<p>First let&rsquo;s introduce the options related to the RESP3 protocol, <code>REDIRECT &lt;id&gt;</code> is presented at the end.</p>
+<p>Before trying this, you first need to install a version of redis 6.x, in this case 6.0.1. The source code is available for download on the official website, and compiling and installing it is as simple as</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">make distclean
+make
+make <span class="nb">test</span>
+sudo make install
+</code></pre></td></tr></table>
+</div>
+</div><p>Perhaps there is a compiled binary package available for download now.</p>
+<p>Start server, it will start a service on port 6379</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">redis-server
+</code></pre></td></tr></table>
+</div>
+</div><p>Use <code>redis-cli</code> to access, by default, the local 6379 instance:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">redis-cli
+</code></pre></td></tr></table>
+</div>
+</div><p>Of course you can view additional parameter configurations via <code>-h</code>, such as using other ports, etc. Here we use the simplest example and focus on understanding the characteristics of client-side caching.</p>
+<p>Sometimes we use <code>telnet</code> instead of <code>redis-cli</code> as client to connect to redis in order to better observe the results returned by redis, because <code>redis-cli</code> does processing of the results, especially the failure messages, which you may not be able to observe.</p>
+<h2 id="bcast-broadcast-mode-client-tracking-on"><code>BCAST</code> Broadcast mode (client tracking on)</h2>
+<p>Start the redis server:</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/07/16/8f55444e25574e5c8cddb06415aff278.png" alt=" "></p>
+<p>Start redis-cli:</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/07/16/7af429e0a82b40d08484f1a35077d11a.png" alt=" "></p>
+<p>Of course, we use <code>telnet</code> to test, it is convenient to observe the return results of <code>redis</code>, just now <code>redis-cli</code> is used to update the key value, to assist in testing.
+After connecting, send <code>hello 3</code> to open the <code>RESP3</code> protocol.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">➜  ~ telnet localhost 6379
+Trying ::1...
+Connected to localhost.
+Escape character is &#39;^]&#39;.
+hello 3
+%7
+$6
+server
+$5
+redis
+$7
+version
+$5
+6.0.1
+......
+</code></pre></td></tr></table>
+</div>
+</div><p>Then try to turn on tracking and read the value of a:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">client tracking on
++OK
+set a 1
++OK
+get a
+$1
+1
+</code></pre></td></tr></table>
+</div>
+</div><p>At this point, if you use <code>redis-cli</code> as another client to update the value of a, telnet this client and you should get a notification:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">127.0.0.1:6379&gt; <span class="nb">set</span> a <span class="m">2</span>
+OK
+</code></pre></td></tr></table>
+</div>
+</div><p>Observing telnet, it receives a failure message.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">&gt;2
+<span class="nv">$10</span>
+invalidate
+*1
+<span class="nv">$1</span>
+a
+</code></pre></td></tr></table>
+</div>
+</div><p>Note that it uses the PUSH type (&gt;) in RESP3.</p>
+<p>If this uses you to update the value of a again using redis-cli, telnet will not receive the failure message again. Unless the telnet client gets a again and retracks the value of a.</p>
+<p>You can untracking at any time:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">client tracking off
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="tracking-prefix-specific-key-client-tracking-on"><code>tracking</code> prefix-specific <code>key</code> (<code>client tracking on</code>)</h2>
+<p>The above way will track all keys, but if you want to track only specific keys, redis currently provides a way to match prefixes. You can track only the keys with a specific prefix.
+It applies broadcast mode to the value.</p>
+<p>To set the prefix and enable tracking using the telnet client.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">hello <span class="m">3</span>
+.......
+client tracking on prefix a bcast
++OK
+client tracking on prefix user bcast
++OK
+</code></pre></td></tr></table>
+</div>
+</div><p>We are tracking two prefixes, all the keys starting with a and all the keys starting with user, all the keys starting with a and all the keys starting with user (including a and user) should receive messages when their keys change.</p>
+<p>Then we use redis-cli to update three keys: abc, user:32432723213 and feed:6532343243432:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">127.0.0.1:6379&gt; set abc 100
+OK
+127.0.0.1:6379&gt; set user:32432723213 good
+OK
+127.0.0.1:6379&gt; set feed:6532343243432 abc
+OK
+</code></pre></td></tr></table>
+</div>
+</div><p><code>telnet client</code> receives expiration messages for <code>abc</code> and <code>user:32432723213</code>, but not for <code>feed:6532343243432</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">&gt;2
+<span class="nv">$10</span>
+invalidate
+*1
+<span class="nv">$3</span>
+abc
+&gt;2
+<span class="nv">$10</span>
+invalidate
+*1
+<span class="nv">$16</span>
+user:32432723213
+</code></pre></td></tr></table>
+</div>
+</div><p>You can stop client caching with <code>client tracking off</code>. Currently it seems that you can&rsquo;t stop <code>tracking</code> only for individual prefixes. Even if you use <code>client tracking off prefix user</code> it is still canceling <code>tracking</code> for all <code>key</code>s.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">......
+<span class="o">}</span> <span class="k">else</span> <span class="k">if</span> <span class="o">(</span>!strcasecmp<span class="o">(</span>c-&gt;argv<span class="o">[</span>2<span class="o">]</span>-&gt;ptr,<span class="s2">&#34;off&#34;</span><span class="o">))</span> <span class="o">{</span>
+    disableTracking<span class="o">(</span>c<span class="o">)</span><span class="p">;</span>
+<span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+......
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="opt-in">Opt-in</h2>
+<p>If you use <code>OPTIN</code>, you can selectively enable tracking. Only the key of the next read-only command after you send <code>client caching yes</code> will track, otherwise the key of other read-only commands will not track.</p>
+<p>First we start <code>optin</code>, read the a finger, at this time use <code>redis-cli client</code> to change the value of a to 1000, we do not receive the a failure message.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">client tracking on optin
++OK
+get a
+$1
+2
+</code></pre></td></tr></table>
+</div>
+</div><p>Next we send client caching yes, followed by getting the value of a. At this time, if you modify the value of a again, you can receive a message of a failure</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">client caching yes
++OK
+get a
+<span class="nv">$4</span>
+<span class="m">1000</span>
+&gt;2
+<span class="nv">$10</span>
+invalidate
+*1
+<span class="nv">$1</span>
+a
+</code></pre></td></tr></table>
+</div>
+</div><p>Does it have to be immediately followed by <code>client caching yes</code>? Yes, for example, if you send the following command, it will only be tracking b, not a:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">client caching yes
++OK
+get b
+_
+get a
+$4
+2000
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="opt-out">Opt out</h2>
+<p>If you use <code>OPTOUT</code>, you can also opt out of <code>tracking</code>. Only the key of the next read-only command after you send <code>client caching off</code> will stop <code>tracking</code>, otherwise <strong>the keys of all other read-only commands will be tracked</strong>.</p>
+<p>You can see that it is the opposite of <code>OPTIN</code>, so you can choose according to your scenario.</p>
+<p>For example, in the following example, with <code>OPTOUT</code> on, changes to any key will receive a failure message.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">client tracking on optout
++OK
+get a
+<span class="nv">$4</span>
+<span class="m">3000</span>
+&gt;2
+<span class="nv">$10</span>
+invalidate
+*1
+<span class="nv">$1</span>
+a
+</code></pre></td></tr></table>
+</div>
+</div><p>At this time, if we want to exclude the key b, we can set it only for it:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">client caching no
++OK
+get b
+<span class="nv">$1</span>
+<span class="m">3</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Subsequent changes to b do not receive an expiration message for b.</p>
+<p><strong>NOTE</strong> : <code>OPTIN</code> and <code>OPTOUT</code> are for non-BCAST scenarios, i.e. only if you send a read-only command for a key, the corresponding key will be tracked, while broadcast mode sends a failure message for the corresponding key (or a key with matching prefix) whenever redis modifies the key, regardless of whether you have sent a read-only command for the key.</p>
+<h2 id="noloop">NOLOOP</h2>
+<p>When set normally, the expiration message is sent to all participating clients, but if NOLOOP is set, it will not be sent to the client who updated this key.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">client tracking on bcast noloop
++OK
+<span class="nb">set</span> a <span class="m">1</span>
++OK
+client tracking off
++OK
+client tracking on bcast
++OK
+<span class="nb">set</span> a <span class="m">1</span>
++OK
+&gt;2
+<span class="nv">$10</span>
+invalidate
+*1
+<span class="nv">$1</span>
+a
+</code></pre></td></tr></table>
+</div>
+</div><p>Note that to cancel tracking, simply call <code>client tracking off</code>.</p>
+<h2 id="redirect">REDIRECT</h2>
+<p>Finally, let&rsquo;s look at the handling of forwarded messages. This is to be compatible with the RESP2 protocol a way to handle the forwarding of failure messages to another client.</p>
+<p>First we look at the client id of redis-cli:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">127.0.0.1:6379&gt; client list
+<span class="nv">id</span><span class="o">=</span><span class="m">4</span> <span class="nv">addr</span><span class="o">=</span>127.0.0.1:61017 <span class="nv">fd</span><span class="o">=</span><span class="m">8</span> <span class="nv">name</span><span class="o">=</span> <span class="nv">age</span><span class="o">=</span><span class="m">33103</span> <span class="nv">idle</span><span class="o">=</span><span class="m">0</span> <span class="nv">flags</span><span class="o">=</span>N <span class="nv">db</span><span class="o">=</span><span class="m">0</span> <span class="nv">sub</span><span class="o">=</span><span class="m">0</span> <span class="nv">psub</span><span class="o">=</span><span class="m">0</span> <span class="nv">multi</span><span class="o">=</span>-1 <span class="nv">qbuf</span><span class="o">=</span><span class="m">26</span> qbuf-free<span class="o">=</span><span class="m">32742</span> <span class="nv">obl</span><span class="o">=</span><span class="m">0</span> <span class="nv">oll</span><span class="o">=</span><span class="m">0</span> <span class="nv">omem</span><span class="o">=</span><span class="m">0</span> <span class="nv">events</span><span class="o">=</span>r <span class="nv">cmd</span><span class="o">=</span>client <span class="nv">user</span><span class="o">=</span>defau
+</code></pre></td></tr></table>
+</div>
+</div><p>Use telnet to connect to redis and check the client id:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">client id
+:12
+</code></pre></td></tr></table>
+</div>
+</div><p>The telnet client opens a subscription to failure messages.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">SUBSCRIBE __redis__:invalidate
+*3
+<span class="nv">$9</span>
+subscribe
+<span class="nv">$20</span>
+__redis__:invalidate
+:1
+</code></pre></td></tr></table>
+</div>
+</div><p>Then we can forward the redis-cli failure message to the telnet client:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">client tracking on bcast redirect <span class="m">12</span>
+127.0.0.1:6379&gt; <span class="nb">set</span> a <span class="m">1000</span>
+OK
+</code></pre></td></tr></table>
+</div>
+</div><p>The telnet client can be seen to have received the failure message.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">*3
+<span class="nv">$7</span>
+message
+<span class="nv">$20</span>
+__redis__:invalidate
+*1
+<span class="nv">$1</span>
+a
+</code></pre></td></tr></table>
+</div>
+</div><p>If the destination client you are forwarding to has the RESP3 protocol enabled, you don&rsquo;t need RESP3 Pub/Sub, because RESP3 natively supports Push messages.</p>
+<p>The code to implement the tracking feature of redis is in :<a href="https://github.com/antirez/redis/blob/unstable/src/tracking.c">tracking.c</a>.</p>
+<h2 id="reference-documents">Reference Documents</h2>
+<ol>
+<li><a href="https://www.youtube.com/watch?v=kliQLwSikO4">https://www.youtube.com/watch?v=kliQLwSikO4</a></li>
+<li><a href="http://antirez.com/news/130">http://antirez.com/news/130</a></li>
+<li><a href="https://groups.google.com/d/msg/redis-db/xfcnYkbutDw/kTwCozpBBwAJ">https://groups.google.com/d/msg/redis-db/xfcnYkbutDw/kTwCozpBBwAJ</a></li>
+</ol>
+<hr>
+<p>Reference <code>https://colobu.com/2020/05/02/redis-client-side-caching/</code></p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/redis/">redis</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2021-07/automating-docker-publishing-with-github-action/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Automating Docker Publishing With GitHub Action</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2021-07/data-reading-in-golang/">
+            <span class="next-text nav-default">Data Reading in Golang</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Stack memory and escape analysis in Go language - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="The memory of an application is generally divided into heap and stack areas, and the program can actively request memory space from the heap area during runtime. This memory is allocated by the memory allocator and reclaimed by the garbage collector. We have analyzed the process of requesting and releasing heap memory in detail in the last two sections, and this section will introduce the management of Go language stack" /><meta name="keywords" content="golang, Stack escape Analysis" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2021-12/golang-stack-management/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Stack memory and escape analysis in Go language" />
+<meta property="og:description" content="The memory of an application is generally divided into heap and stack areas, and the program can actively request memory space from the heap area during runtime. This memory is allocated by the memory allocator and reclaimed by the garbage collector. We have analyzed the process of requesting and releasing heap memory in detail in the last two sections, and this section will introduce the management of Go language stack" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2021-12/golang-stack-management/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-12-05T11:22:15+08:00" />
+<meta property="article:modified_time" content="2021-12-05T11:22:15+08:00" />
+
+<meta itemprop="name" content="Stack memory and escape analysis in Go language">
+<meta itemprop="description" content="The memory of an application is generally divided into heap and stack areas, and the program can actively request memory space from the heap area during runtime. This memory is allocated by the memory allocator and reclaimed by the garbage collector. We have analyzed the process of requesting and releasing heap memory in detail in the last two sections, and this section will introduce the management of Go language stack"><meta itemprop="datePublished" content="2021-12-05T11:22:15+08:00" />
+<meta itemprop="dateModified" content="2021-12-05T11:22:15+08:00" />
+<meta itemprop="wordCount" content="4002">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Stack memory and escape analysis in Go language"/>
+<meta name="twitter:description" content="The memory of an application is generally divided into heap and stack areas, and the program can actively request memory space from the heap area during runtime. This memory is allocated by the memory allocator and reclaimed by the garbage collector. We have analyzed the process of requesting and releasing heap memory in detail in the last two sections, and this section will introduce the management of Go language stack"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Stack memory and escape analysis in Go language</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-12-05 11:22:15 </span>
+        <div class="post-category">
+            <a href="/categories/skills/"> skills </a>
+            </div>
+          <span class="more-meta"> 4002 words </span>
+          <span class="more-meta"> 8 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#design-principles">Design Principles</a>
+          <ul>
+            <li><a href="#registers">Registers</a></li>
+            <li><a href="#thread-stack">Thread stack</a></li>
+            <li><a href="#escape-analysis">Escape Analysis</a></li>
+            <li><a href="#stack-memory-space">Stack memory space</a></li>
+          </ul>
+        </li>
+        <li><a href="#stack-operations">Stack operations</a>
+          <ul>
+            <li><a href="#stack-initialization">Stack initialization</a></li>
+            <li><a href="#stack-allocation">Stack allocation</a></li>
+            <li><a href="#stack-expansion">Stack expansion</a></li>
+            <li><a href="#stack-shrinkstack">Stack shrinkstack</a></li>
+            <li><a href="#summary">Summary</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>The memory of an application is generally divided into heap and stack areas, and the program can actively request memory space from the heap area during runtime.</p>
+<p>This memory is allocated by the memory allocator and reclaimed by the garbage collector. We have analyzed the process of requesting and releasing heap memory in detail in the last two sections, and this section will introduce the management of Go language stack memory.</p>
+<h2 id="design-principles">Design Principles</h2>
+<p>The memory in the stack area is generally allocated and released automatically by the compiler, which stores the function entry parameters and local variables. These parameters are created with the creation of the function and die out when the function returns, and generally do not exist in the program for a long time. This linear memory allocation strategy has a very high efficiency, but the engineer also often has no control over the allocation of the stack memory, and this part of the work is basically done by the compiler.</p>
+<h3 id="registers">Registers</h3>
+<p>Registers are a scarce resource in the central processing unit (CPU). They have very limited storage capacity, but provide the fastest read and write speeds, and taking full advantage of register speed can build high-performance applications. Registers are very limited on physical machines, yet operations in the stack area will use more than two registers, which is a good indication of the importance of the presence of applications within the stack.</p>
+<p>The stack register is one of the CPU registers, and its main role is to keep track of the function call stack. The Go language assembly code contains two stack registers, BP and SP, which store the base address pointer of the stack and the address of the top of the stack, respectively. The stack memory is very closely related to the function calls, and we have introduced the stack area in the section on function calls, and the memory between BP and SP is the current function call stack.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/3edb1de6269d4cf9bc0ed25c32f2dcca.png" alt=""></p>
+<p>For historical reasons, stack memory is expanded from high addresses to low addresses, and applications only need to modify the SP register value when requesting or releasing stack memory.</p>
+<h3 id="thread-stack">Thread stack</h3>
+<p>If we execute the pthread_create system call in the Linux OS, the process starts a new thread and if the user does not specify the size of the thread stack through the soft resource limit RLIMIT_STACK, the OS chooses a different default stack size depending on the architecture.</p>
+<table>
+<thead>
+<tr>
+<th>architecture</th>
+<th>default stack size</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>i386</td>
+<td>2 MB</td>
+</tr>
+<tr>
+<td>IA-64</td>
+<td>32 MB</td>
+</tr>
+<tr>
+<td>PowerPC</td>
+<td>4 MB</td>
+</tr>
+<tr>
+<td>&hellip;</td>
+<td>&hellip;</td>
+</tr>
+<tr>
+<td>x86_64</td>
+<td>2 MB</td>
+</tr>
+</tbody>
+</table>
+<p>Most architectures have a default stack size of about 2-4 MB, and very few architectures use a 32 MB stack on which user programs can store function parameters and local variables. However, this fixed stack size is not the right value in some scenarios. If the program needs to run hundreds or even thousands of threads at the same time, most of these threads will only use a small amount of stack space, and when the function call stack is very deep, the fixed stack size will not meet the needs of the user program.</p>
+<p>Threads and processes are both contexts for code execution, but if an application contains hundreds or thousands of execution contexts and each context is a thread, it can take up a lot of memory space and incur other additional overhead.</p>
+<h3 id="escape-analysis">Escape Analysis</h3>
+<p>In programming languages such as C and C++, which require manual memory management, the allocation of objects or structures to the stack or heap is at the discretion of the engineer, and this poses a challenge for the engineer&rsquo;s work. If the engineer can accurately allocate a reasonable amount of space to each variable, then the overall program must run most efficiently and use memory efficiently, but manually allocating memory leads to two problems as follows.</p>
+<ol>
+<li>objects allocated to the heap that do not need to be allocated to the heap are allocated to the heap - wasting memory space.</li>
+<li>objects that need to be allocated to the heap are allocated to the stack - hanging pointers, compromising memory safety.</li>
+</ol>
+<p>Compared to hanging pointers, wasting memory space is a minor problem. In C, it is a common error for a variable on the stack to be returned to the caller as the return value of a function. In the code shown below, the variable i on the stack is incorrectly returned.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kt">int</span> <span class="o">*</span><span class="nf">dangling_pointer</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="nx">i</span> <span class="p">=</span> <span class="mi">2</span><span class="p">;</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">i</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When the dangling_pointer function returns, its local variable is reclaimed by the compiler and the caller gets a dangerously hanging pointer, a problem that is more difficult to detect and locate in large projects when we are not sure if the value the current pointer is pointing to is legal.</p>
+<p>In compiler optimization, escape analysis is the method used to determine the dynamic scope of a pointer. The Go language compiler uses escape analysis to determine which variables should be allocated on the stack and which variables should be allocated on the heap, which includes memory implicitly allocated using methods such as new, make, and literals, and the Go language escape analysis follows two invariants.</p>
+<ol>
+<li>a pointer to a stack object cannot exist in the heap.</li>
+<li>a pointer to a stack object cannot survive the recycling of the stack object.</li>
+</ol>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/b7bb53af63ef40a6ba7263f2a065f8e0.png" alt=""></p>
+<p>When we violate the first invariant, the green pointer on the heap points to the yellow memory on the stack. Once the function returns, the function stack will be recycled and the value pointed to by the green pointer is no longer legal; if we violate the second invariant, the memory pointed to by the yellow pointer is no longer legal because the memory under the register SP has been freed due to the function return.</p>
+<p>Escape analysis is a kind of static analysis, after the compiler parses the Go language source file, it can get the abstract syntax tree (AST) of the whole program, the compiler can analyze the static data flow according to the abstract syntax tree, we will realize the whole process of static analysis by the following steps.</p>
+<ol>
+<li>construct a directed graph with weights, where the vertex cmd/compile/internal/gc.EscLocation indicates the assigned variable, the edge cmd/compile/internal/gc.EscEdge indicates the assignment relationship between variables, and the weights indicate the number of addressing and fetching addresses.</li>
+<li>traverse the object assignment graph and look for variable assignment relationships that violate two invariants, if a variable on the heap points to a variable on the stack, then the variable needs to be assigned on the heap.</li>
+<li>recording the flow of data from the call parameters of a function to the heap and to the return value to enhance the escape analysis of function parameters.</li>
+</ol>
+<p>Deciding whether a variable is on the stack or the heap, although important, is a relatively well-defined problem, and we can make decisions uniformly through the compiler. To ensure absolute memory safety, the compiler may incorrectly assign some variables to the heap, but because the heap is also scanned by the garbage collector, it does not cause memory leaks and safety issues such as hanging pointers, freeing up the engineer&rsquo;s productivity.</p>
+<h3 id="stack-memory-space">Stack memory space</h3>
+<p>The Go language uses the user-state thread Goroutine as the execution context, which has much less additional overhead and default stack size than threads, however the stack memory space and stack structure of Goroutine has also undergone some changes in earlier versions.</p>
+<ol>
+<li>v1.0 ~ v1.1 - minimum stack memory space of 4KB.</li>
+<li>v1.2 - raised the minimum stack memory to 8KB7.</li>
+<li>v1.3 - replaced the segmented stack of the previous version with a contiguous stack8.</li>
+<li>v1.4 - reduced the minimum stack memory to 2KB9.</li>
+</ol>
+<p>The initial stack memory of Goroutine was modified several times in the first few versions, and the increase from 4KB to 8KB was a temporary solution to mitigate the performance impact of stack splitting in segmented stacks; after the introduction of continuous stacks in v1.3, the initial stack size of Goroutine was reduced to 2KB, further reducing the amount of memory occupied by Goroutine. memory space.</p>
+<h4 id="segmented-stack">segmented stack</h4>
+<p>The segmented stack is a pre v1.3 implementation of the Go language, where all Goroutines are initialized by calling `runtime.stackalloc:go1.2 to allocate a fixed size block of memory, denoted by runtime.StackMin:go1.2, which is 8KB in v1.2.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">void</span><span class="o">*</span> <span class="nx">runtime</span><span class="err">·</span><span class="nf">stackalloc</span><span class="p">(</span><span class="kt">uint32</span> <span class="nx">n</span><span class="p">)</span> <span class="p">{</span>
+	<span class="kt">uint32</span> <span class="nx">pos</span><span class="p">;</span>
+	<span class="nx">void</span> <span class="o">*</span><span class="nx">v</span><span class="p">;</span>
+	<span class="k">if</span><span class="p">(</span><span class="nx">n</span> <span class="o">==</span> <span class="nx">FixedStack</span> <span class="o">||</span> <span class="nx">m</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">mallocing</span> <span class="o">||</span> <span class="nx">m</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">gcing</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">if</span><span class="p">(</span><span class="nx">m</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">stackcachecnt</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+			<span class="nf">stackcacherefill</span><span class="p">();</span>
+		<span class="nx">pos</span> <span class="p">=</span> <span class="nx">m</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">stackcachepos</span><span class="p">;</span>
+		<span class="nx">pos</span> <span class="p">=</span> <span class="p">(</span><span class="nx">pos</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="nx">StackCacheSize</span><span class="p">;</span>
+		<span class="nx">v</span> <span class="p">=</span> <span class="nx">m</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">pos</span><span class="p">];</span>
+		<span class="nx">m</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">stackcachepos</span> <span class="p">=</span> <span class="nx">pos</span><span class="p">;</span>
+		<span class="nx">m</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">stackcachecnt</span><span class="o">--</span><span class="p">;</span>
+		<span class="nx">m</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">stackinuse</span><span class="o">++</span><span class="p">;</span>
+		<span class="k">return</span> <span class="nx">v</span><span class="p">;</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">runtime</span><span class="err">·</span><span class="nf">mallocgc</span><span class="p">(</span><span class="nx">n</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">FlagNoProfiling</span><span class="p">|</span><span class="nx">FlagNoGC</span><span class="p">|</span><span class="nx">FlagNoZero</span><span class="p">|</span><span class="nx">FlagNoInvokeGC</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If the memory requested by this method is a fixed 8KB in size or if other conditions are met, the runtime will find a free block of memory in the global stack cache chain and return it as the stack space for the new Goroutine; in the rest of the cases, the stack memory space will request a suitable block of memory from the heap.</p>
+<p>As the Goroutine calls more and more function levels or local variables, the runtime calls runtime.morestack:go1.2 and runtime.newstack:go1.2 to create a new stack space that is not contiguous, but multiple stack spaces of the current Goroutine are linked in a chain These stack spaces are not contiguous, but the multiple stack spaces of the current Goroutine are linked together in a chain, and the runtime finds the contiguous stack fragments by means of pointers to</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/6bbb03a1b1b64f98a961d7983c1e86a4.png" alt=""></p>
+<p>Once the stack space requested by a Goroutine is no longer needed, the runtime calls runtime.lessstack:go1.2 and runtime.oldstack:go1.2 to free up the memory space that is no longer in use.</p>
+<p>While the segmented stack mechanism can allocate memory for the current Goroutine on demand and reduce the memory footprint in a timely manner, it also has two major problems.</p>
+<ol>
+<li>if the current Goroutine&rsquo;s stack is almost full, then any function call will trigger stack expansion, which in turn will trigger stack shrinkage when the function returns, and if the function is called in a loop, the allocation and release of the stack will cause significant additional overhead, which is known as the hot split problem.</li>
+<li>once the memory used by the Goroutine crosses the expansion and contraction threshold of the segmented stack, the runtime triggers the expansion and contraction of the stack, resulting in additional workload.</li>
+</ol>
+<h4 id="continuous-stack">Continuous Stack</h4>
+<p>The core principle is that whenever a program runs out of stack space, a larger stack is initialized and all the values in the original stack are migrated to the new stack, so that new local variables or function calls have sufficient memory space. When using the continuous stack mechanism, the expansion due to lack of stack space goes through the following steps.</p>
+<ol>
+<li>allocating a larger amount of stack memory space in the memory space.</li>
+<li>copying all the contents of the old stack to the new stack.</li>
+<li>redirecting the pointers to the variables corresponding to the old stack to the new stack.</li>
+<li>destroying and reclaiming the memory space of the old stack.</li>
+</ol>
+<p>The most important step in the expansion process is the third step of adjusting the pointers, which ensures the correctness of the pointers to the stack, because the memory of all the variables in the stack changes, so the pointers that were pointing to the variables in the stack need to be adjusted as well. We mentioned earlier that Go language programs that undergo escape analysis follow the following invariant &ndash; pointers to stack objects cannot exist in the heap, so pointers to variables on the stack can only be on the stack, and we only need to adjust all variables on the stack to ensure memory safety.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/655e179bc842452388dc30f9e4106548.png" alt=""></p>
+<p>Because of the need to copy variables and adjust pointers, the contiguous stack adds additional overhead to the stack expansion, but the performance problems caused by hot splits can be avoided by a reasonable stack shrinkage mechanism. If the Goroutine uses a quarter of the stack memory during GC, it will be reduced by half, so that it will only be expanded once when the stack memory is almost full and will not be expanded and shrunk as often as function calls.</p>
+<h2 id="stack-operations">Stack operations</h2>
+<p>The execution stack in Go is represented by runtime.stack, which contains only two fields, representing the top of the stack and the bottom of the stack, each representing a memory space in the range [lo, hi).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">stack</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">lo</span> <span class="kt">uintptr</span>
+	<span class="nx">hi</span> <span class="kt">uintptr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The structure of the stack is very simple, but to understand how the Goroutine stack is implemented, we need to start with two phases, during compilation and at runtime.</p>
+<ol>
+<li>the compiler will insert the runtime.morestack or runtime.morestack_noctxt function before calling the function at the compilation stage via cmd/internal/obj/x86.stacksplit.</li>
+<li>the runtime will call runtime.stackalloc in runtime.malg when creating a new Goroutine to request new stack memory and check for sufficient stack space in runtime.morestack inserted by the compiler.</li>
+</ol>
+<p>Note that the Go compiler does not insert runtime.morestack for all functions, it only inserts instructions when necessary to reduce additional runtime overhead. The compiler instruction nosplit can skip the stack overflow check, which reduces some of the overhead, but there is also a risk of overflow with a fixed size stack. This section analyzes the initialization of the stack, the allocation of the stack when the Goroutine is created, the expansion of the stack by the compiler and the runtime, and the shrinking process when the stack space is underutilized.</p>
+<h3 id="stack-initialization">Stack initialization</h3>
+<p>The stack space contains two important global variables in the runtime, runtime.stackpool and runtime.stackLarge, which represent the global stack cache, which can allocate less than 32KB of memory, and the large stack cache, which is used to allocate stack space larger than 32KB.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">stackpool</span> <span class="p">[</span><span class="nx">_NumStackOrders</span><span class="p">]</span><span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">item</span> <span class="nx">stackpoolItem</span>
+	<span class="nx">_</span>    <span class="p">[</span><span class="nx">cpu</span><span class="p">.</span><span class="nx">CacheLinePadSize</span> <span class="o">-</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">stackpoolItem</span><span class="p">{})</span><span class="o">%</span><span class="nx">cpu</span><span class="p">.</span><span class="nx">CacheLinePadSize</span><span class="p">]</span><span class="kt">byte</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">stackpoolItem</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">mu</span>   <span class="nx">mutex</span>
+	<span class="nx">span</span> <span class="nx">mSpanList</span>
+<span class="p">}</span>
+
+<span class="kd">var</span> <span class="nx">stackLarge</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">lock</span> <span class="nx">mutex</span>
+	<span class="nx">free</span> <span class="p">[</span><span class="nx">heapAddrBits</span> <span class="o">-</span> <span class="nx">pageShift</span><span class="p">]</span><span class="nx">mSpanList</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Both of these global variables for allocating space are related to the memory management unit runtime.mspan, and we can assume that Go&rsquo;s stack memory is allocated on the heap, and that runtime initialization calls runtime.stackinit to initialize these global variables.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">stackinit</span><span class="p">()</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">stackpool</span> <span class="p">{</span>
+		<span class="nx">stackpool</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">item</span><span class="p">.</span><span class="nx">span</span><span class="p">.</span><span class="nf">init</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">stackLarge</span><span class="p">.</span><span class="nx">free</span> <span class="p">{</span>
+		<span class="nx">stackLarge</span><span class="p">.</span><span class="nx">free</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nf">init</span><span class="p">()</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>From the experience of scheduler and memory allocation, if only global variables are used to allocate memory at runtime, it will inevitably cause lock competition between threads and thus affect the execution efficiency of the program. stack memory is more closely related to threads, so we add a stack cache to each thread cache runtime.mcache to reduce the impact of lock competition.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">mcache</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">stackcache</span> <span class="p">[</span><span class="nx">_NumStackOrders</span><span class="p">]</span><span class="nx">stackfreelist</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">stackfreelist</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">list</span> <span class="nx">gclinkptr</span>
+	<span class="nx">size</span> <span class="kt">uintptr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/b14f4632c89b4b15b739f49189435be1.png" alt=""></p>
+<p>The runtime allocates less than 32KB of stack memory using the global runtime.stackpool and the free chain table in the thread cache, and more than 32KB using the global runtime.stackLarge and heap memory to improve the performance of locally allocated stack memory.</p>
+<h3 id="stack-allocation">Stack allocation</h3>
+<p>The runtime.stackalloc is called in the Goroutine&rsquo;s initialization function runtime.malg to allocate a stack memory space of sufficient size. Depending on the size of the thread cache and the requested stack, the function allocates the stack space in three different ways.</p>
+<ol>
+<li>if the stack space is small, allocate memory using the global stack cache or a fixed-size free chain table on the thread cache.</li>
+<li>if the stack space is large, obtain memory space from the global large stack cache runtime.stackLarge.</li>
+<li>if the stack space is large and runtime.stackLarge space is insufficient, request a slice of memory on the heap of sufficient size.</li>
+</ol>
+<p>We will describe here the runtime allocation of stack space in two parts according to the size of the stack. On Linux, _FixedStack = 2048, _NumStackOrders = 4, _StackCacheSize = 32768, i.e. if the requested stack space is less than 32KB, we initialize the memory in the global stack cache pool or in the thread&rsquo;s stack cache at.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">stackalloc</span><span class="p">(</span><span class="nx">n</span> <span class="kt">uint32</span><span class="p">)</span> <span class="nx">stack</span> <span class="p">{</span>
+	<span class="nx">thisg</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="kd">var</span> <span class="nx">v</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+	<span class="k">if</span> <span class="nx">n</span> <span class="p">&lt;</span> <span class="nx">_FixedStack</span><span class="o">&lt;&lt;</span><span class="nx">_NumStackOrders</span> <span class="o">&amp;&amp;</span> <span class="nx">n</span> <span class="p">&lt;</span> <span class="nx">_StackCacheSize</span> <span class="p">{</span>
+		<span class="nx">order</span> <span class="o">:=</span> <span class="nb">uint8</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+		<span class="nx">n2</span> <span class="o">:=</span> <span class="nx">n</span>
+		<span class="k">for</span> <span class="nx">n2</span> <span class="p">&gt;</span> <span class="nx">_FixedStack</span> <span class="p">{</span>
+			<span class="nx">order</span><span class="o">++</span>
+			<span class="nx">n2</span> <span class="o">&gt;&gt;=</span> <span class="mi">1</span>
+		<span class="p">}</span>
+		<span class="kd">var</span> <span class="nx">x</span> <span class="nx">gclinkptr</span>
+		<span class="nx">c</span> <span class="o">:=</span> <span class="nx">thisg</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">mcache</span>
+		<span class="k">if</span> <span class="nx">stackNoCache</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">c</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">thisg</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">preemptoff</span> <span class="o">!=</span> <span class="s">&#34;&#34;</span> <span class="p">{</span>
+			<span class="nx">x</span> <span class="p">=</span> <span class="nf">stackpoolalloc</span><span class="p">(</span><span class="nx">order</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">x</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">list</span>
+			<span class="k">if</span> <span class="nx">x</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nf">stackcacherefill</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="nx">order</span><span class="p">)</span>
+				<span class="nx">x</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">list</span>
+			<span class="p">}</span>
+			<span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">list</span> <span class="p">=</span> <span class="nx">x</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">next</span>
+			<span class="nx">c</span><span class="p">.</span><span class="nx">stackcache</span><span class="p">[</span><span class="nx">order</span><span class="p">].</span><span class="nx">size</span> <span class="o">-=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">n</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">v</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">x</span><span class="p">)</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="o">...</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.stackpoolalloc will fetch new memory in the global stack cache pool runtime.stackpool, and if the stack cache pool does not contain any remaining memory, the runtime will request a piece of memory from the heap; if the thread cache contains enough space, we can fetch memory from the thread&rsquo;s local cache, and once we find that there is not enough space will call runtime.stackcacherefill to get new memory from the heap.</p>
+<p>If the Goroutine requests too much memory space, the runtime will see if there is any space left in runtime.stackLarge, and if there is no space left, it will also request new memory from the heap.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">stackalloc</span><span class="p">(</span><span class="nx">n</span> <span class="kt">uint32</span><span class="p">)</span> <span class="nx">stack</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">n</span> <span class="p">&lt;</span> <span class="nx">_FixedStack</span><span class="o">&lt;&lt;</span><span class="nx">_NumStackOrders</span> <span class="o">&amp;&amp;</span> <span class="nx">n</span> <span class="p">&lt;</span> <span class="nx">_StackCacheSize</span> <span class="p">{</span>
+		<span class="o">...</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="kd">var</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span>
+		<span class="nx">npage</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">n</span><span class="p">)</span> <span class="o">&gt;&gt;</span> <span class="nx">_PageShift</span>
+		<span class="nx">log2npage</span> <span class="o">:=</span> <span class="nf">stacklog2</span><span class="p">(</span><span class="nx">npage</span><span class="p">)</span>
+
+		<span class="k">if</span> <span class="p">!</span><span class="nx">stackLarge</span><span class="p">.</span><span class="nx">free</span><span class="p">[</span><span class="nx">log2npage</span><span class="p">].</span><span class="nf">isEmpty</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nx">s</span> <span class="p">=</span> <span class="nx">stackLarge</span><span class="p">.</span><span class="nx">free</span><span class="p">[</span><span class="nx">log2npage</span><span class="p">].</span><span class="nx">first</span>
+			<span class="nx">stackLarge</span><span class="p">.</span><span class="nx">free</span><span class="p">[</span><span class="nx">log2npage</span><span class="p">].</span><span class="nf">remove</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">s</span> <span class="p">=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nf">allocManual</span><span class="p">(</span><span class="nx">npage</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">stacks_inuse</span><span class="p">)</span>
+			<span class="nf">osStackAlloc</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">n</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">v</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">())</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="nx">stack</span><span class="p">{</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">v</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span> <span class="o">+</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">n</span><span class="p">)}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Note that because OpenBSD 6.4+ has special requirements for stack memory, we need to call runtime.osStackAlloc to do some extra processing whenever we request stack memory from the heap, however, other operating systems do not have this limitation.</p>
+<h3 id="stack-expansion">Stack expansion</h3>
+<p>The compiler inserts a runtime.morestack runtime check for function calls in cmd/internal/obj/x86.stacksplit, which will check if the current Goroutine stack memory is sufficient before almost all function calls, and if the current stack needs to be expanded, we will save some information about the stack and call runtime.newstack to create a new stack.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">newstack</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">thisg</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nx">thisg</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">curg</span>
+	<span class="o">...</span>
+	<span class="nx">preempt</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Loaduintptr</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gp</span><span class="p">.</span><span class="nx">stackguard0</span><span class="p">)</span> <span class="o">==</span> <span class="nx">stackPreempt</span>
+	<span class="k">if</span> <span class="nx">preempt</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nf">canPreemptM</span><span class="p">(</span><span class="nx">thisg</span><span class="p">.</span><span class="nx">m</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">gp</span><span class="p">.</span><span class="nx">stackguard0</span> <span class="p">=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">lo</span> <span class="o">+</span> <span class="nx">_StackGuard</span>
+			<span class="nf">gogo</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="nx">sp</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sp</span>
+	<span class="k">if</span> <span class="nx">preempt</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">preemptShrink</span> <span class="p">{</span>
+			<span class="nx">gp</span><span class="p">.</span><span class="nx">preemptShrink</span> <span class="p">=</span> <span class="kc">false</span>
+			<span class="nf">shrinkstack</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">preemptStop</span> <span class="p">{</span>
+			<span class="nf">preemptPark</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="nf">gopreempt_m</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.newstack will first do some preparation and check if the current Goroutine has issued a preemption request, and if it has issued a preemption request.</p>
+<ol>
+<li>call runtime.gogo directly to trigger scheduling of the scheduler when the current thread is available for seizure.</li>
+<li>call runtime.shrinkstack if the current Goroutine has been marked by runtime.scanstack as needing to shrink the stack during garbage collection.</li>
+<li>if the current Goroutine is hung by the runtime.suspendG function, call runtime.preemptPark to passively relinquish control of the current processor and change the Goroutine&rsquo;s state to _Gpreempted.</li>
+<li>call runtime.gopreempt_m to actively relinquish control of the current processor.</li>
+</ol>
+<p>If the current Goroutine does not need to be preempted, meaning we need new stack space to support function calls and the initialization of local variables, the runtime will first check if the target size stack will overflow.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">newstack</span><span class="p">()</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nx">oldsize</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">lo</span>
+	<span class="nx">newsize</span> <span class="o">:=</span> <span class="nx">oldsize</span> <span class="o">*</span> <span class="mi">2</span>
+	<span class="k">if</span> <span class="nx">newsize</span> <span class="p">&gt;</span> <span class="nx">maxstacksize</span> <span class="p">{</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;runtime: goroutine stack exceeds &#34;</span><span class="p">,</span> <span class="nx">maxstacksize</span><span class="p">,</span> <span class="s">&#34;-byte limit\n&#34;</span><span class="p">)</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;runtime: sp=&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">sp</span><span class="p">),</span> <span class="s">&#34; stack=[&#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">lo</span><span class="p">),</span> <span class="s">&#34;, &#34;</span><span class="p">,</span> <span class="nf">hex</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">hi</span><span class="p">),</span> <span class="s">&#34;]\n&#34;</span><span class="p">)</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;stack overflow&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nf">casgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">,</span> <span class="nx">_Gcopystack</span><span class="p">)</span>
+	<span class="nf">copystack</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">newsize</span><span class="p">)</span>
+	<span class="nf">casgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Gcopystack</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">)</span>
+	<span class="nf">gogo</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If the size of the target stack does not exceed the program&rsquo;s limits, we switch the Goroutine to the _Gcopystack state and call runtime.copystack to start the stack copy. Before copying the stack memory, the runtime will allocate new stack space via runtime.stackalloc.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">copystack</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">,</span> <span class="nx">newsize</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">old</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span>
+	<span class="nx">used</span> <span class="o">:=</span> <span class="nx">old</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sp</span>
+
+	<span class="nx">new</span> <span class="o">:=</span> <span class="nf">stackalloc</span><span class="p">(</span><span class="nb">uint32</span><span class="p">(</span><span class="nx">newsize</span><span class="p">))</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The initialization of the new stack and the copying of the data is a relatively simple process, but this is not the most complicated part of the whole process. We also need to point the memory in the source stack to the new stack, during which we need to adjust the following pointers separately.</p>
+<ol>
+<li>call runtime.adjustsudogs or runtime.syncadjustsudogs to adjust the pointer to the runtime.sudog structure.</li>
+<li>call runtime.memmove to copy the entire slice of memory from the source stack to the new stack.</li>
+<li>calling runtime.adjustctxt, runtime.adjustdefers and runtime.adjustpanics to adjust pointers to the remaining Goroutine-related data structures.</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">copystack</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">,</span> <span class="nx">newsize</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="kd">var</span> <span class="nx">adjinfo</span> <span class="nx">adjustinfo</span>
+	<span class="nx">adjinfo</span><span class="p">.</span><span class="nx">old</span> <span class="p">=</span> <span class="nx">old</span>
+	<span class="nx">adjinfo</span><span class="p">.</span><span class="nx">delta</span> <span class="p">=</span> <span class="nx">new</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">old</span><span class="p">.</span><span class="nx">hi</span> <span class="c1">// 计算新栈和旧栈之间内存地址差
+</span><span class="c1"></span>
+	<span class="nx">ncopy</span> <span class="o">:=</span> <span class="nx">used</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">gp</span><span class="p">.</span><span class="nx">activeStackChans</span> <span class="p">{</span>
+		<span class="nf">adjustsudogs</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="nx">adjinfo</span><span class="p">.</span><span class="nx">sghi</span> <span class="p">=</span> <span class="nf">findsghi</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">old</span><span class="p">)</span>
+		<span class="nx">ncopy</span> <span class="o">-=</span> <span class="nf">syncadjustsudogs</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">used</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nf">memmove</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">new</span><span class="p">.</span><span class="nx">hi</span><span class="o">-</span><span class="nx">ncopy</span><span class="p">),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">old</span><span class="p">.</span><span class="nx">hi</span><span class="o">-</span><span class="nx">ncopy</span><span class="p">),</span> <span class="nx">ncopy</span><span class="p">)</span>
+
+	<span class="nf">adjustctxt</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
+	<span class="nf">adjustdefers</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
+	<span class="nf">adjustpanics</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">adjinfo</span><span class="p">)</span>
+
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span> <span class="p">=</span> <span class="nx">new</span>
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">stackguard0</span> <span class="p">=</span> <span class="nx">new</span><span class="p">.</span><span class="nx">lo</span> <span class="o">+</span> <span class="nx">_StackGuard</span>
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sp</span> <span class="p">=</span> <span class="nx">new</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">used</span>
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">stktopsp</span> <span class="o">+=</span> <span class="nx">adjinfo</span><span class="p">.</span><span class="nx">delta</span>
+	<span class="o">...</span>
+	<span class="nf">stackfree</span><span class="p">(</span><span class="nx">old</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Adjusting pointers to stack memory calls runtime.adjustpointer, which adjusts the pointers using the memory address difference between the new stack and the old stack calculated by runtime.adjustinfo. Once all the pointers have been adjusted, we can update several variables in Goroutine and free the original stack memory space with runtime.stackfree.</p>
+<h3 id="stack-shrinkstack">Stack shrinkstack</h3>
+<p>runtime.shrinkstack The function called when the stack is shrunk, the principle of this function is very simple, most of which is the code to check whether the preconditions for shrinkage are met, the core logic is only the following lines.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">shrinkstack</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nx">oldsize</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">lo</span>
+	<span class="nx">newsize</span> <span class="o">:=</span> <span class="nx">oldsize</span> <span class="o">/</span> <span class="mi">2</span>
+	<span class="k">if</span> <span class="nx">newsize</span> <span class="p">&lt;</span> <span class="nx">_FixedStack</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="nx">avail</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">lo</span>
+	<span class="k">if</span> <span class="nx">used</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">hi</span> <span class="o">-</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sp</span> <span class="o">+</span> <span class="nx">_StackLimit</span><span class="p">;</span> <span class="nx">used</span> <span class="o">&gt;=</span> <span class="nx">avail</span><span class="o">/</span><span class="mi">4</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+
+	<span class="nf">copystack</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">newsize</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If a stack reduction is to be triggered, the new stack will be half the size of the original stack, although the reduction process will stop if the new stack size is below the program&rsquo;s minimum limit of 2KB.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/0c7aaa4941ed4274a0574bafffbfe27e.png" alt=""></p>
+<p>The runtime will only shrink the stack when it is under 1/4 of its memory usage, and the shrink will also call the runtime.copystack used in the expansion to open up new stack space.</p>
+<h3 id="summary">Summary</h3>
+<p>Stack memory is an important memory space in an application that can support local variables and function calls. Variables in the stack space are created and destroyed along with the stack, and this part of the memory space does not require much intervention and management by engineers. Modern programming languages reduce our workload through escape analysis, and understanding the allocation of the stack space is a great help in understanding the runtime of the Go language.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2021-12/golang-garbage-collector/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">The principle of Go language garbage collector implementation</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2021-12/potobuf-to-json-conversion/">
+            <span class="next-text nav-default">Interconversion between Protobuf and JSON</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

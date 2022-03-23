@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Implementing Unlimited Cached Channels in Golang - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="There are two types of channels in Go language, a channel without cache and a buffer with cache, both of which we are familiar with.
+Why am I suddenly talking about this infinite cache channel? The main reason is that I was recently reviewing a colleague&amp;rsquo;s code and I had a problem with a certain design idea that would have been solved by using an infinite cache channel.
+ A dispatcher contains a channel, which holds the URLs to be processed A bunch of workers read tasks from the channel, download and parse the page, extract the links, and put the links into the dispatcher." /><meta name="keywords" content="golang,channel" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2021-06/implementing-unlimited-cached-channels-in-golang/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Implementing Unlimited Cached Channels in Golang" />
+<meta property="og:description" content="There are two types of channels in Go language, a channel without cache and a buffer with cache, both of which we are familiar with.
+Why am I suddenly talking about this infinite cache channel? The main reason is that I was recently reviewing a colleague&rsquo;s code and I had a problem with a certain design idea that would have been solved by using an infinite cache channel.
+ A dispatcher contains a channel, which holds the URLs to be processed A bunch of workers read tasks from the channel, download and parse the page, extract the links, and put the links into the dispatcher." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2021-06/implementing-unlimited-cached-channels-in-golang/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-06-13T17:08:29+08:00" />
+<meta property="article:modified_time" content="2021-06-13T17:08:29+08:00" />
+
+<meta itemprop="name" content="Implementing Unlimited Cached Channels in Golang">
+<meta itemprop="description" content="There are two types of channels in Go language, a channel without cache and a buffer with cache, both of which we are familiar with.
+Why am I suddenly talking about this infinite cache channel? The main reason is that I was recently reviewing a colleague&rsquo;s code and I had a problem with a certain design idea that would have been solved by using an infinite cache channel.
+ A dispatcher contains a channel, which holds the URLs to be processed A bunch of workers read tasks from the channel, download and parse the page, extract the links, and put the links into the dispatcher."><meta itemprop="datePublished" content="2021-06-13T17:08:29+08:00" />
+<meta itemprop="dateModified" content="2021-06-13T17:08:29+08:00" />
+<meta itemprop="wordCount" content="1755">
+<meta itemprop="keywords" content="golang,chan," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Implementing Unlimited Cached Channels in Golang"/>
+<meta name="twitter:description" content="There are two types of channels in Go language, a channel without cache and a buffer with cache, both of which we are familiar with.
+Why am I suddenly talking about this infinite cache channel? The main reason is that I was recently reviewing a colleague&rsquo;s code and I had a problem with a certain design idea that would have been solved by using an infinite cache channel.
+ A dispatcher contains a channel, which holds the URLs to be processed A bunch of workers read tasks from the channel, download and parse the page, extract the links, and put the links into the dispatcher."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Implementing Unlimited Cached Channels in Golang</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-06-13 17:08:29 </span>
+        <div class="post-category">
+            <a href="/categories/skills/"> Skills </a>
+            </div>
+          <span class="more-meta"> 1755 words </span>
+          <span class="more-meta"> 9 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#updated-may-13">Updated May 13</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>There are two types of channels in Go language, a channel without cache and a buffer with cache, both of which we are familiar with.</p>
+<p>Why am I suddenly talking about this infinite cache channel? The main reason is that I was recently reviewing a colleague&rsquo;s code and I had a problem with a certain design idea that would have been solved by using an infinite cache channel.</p>
+<ul>
+<li>A dispatcher contains a channel, which holds the URLs to be processed</li>
+<li>A bunch of workers read tasks from the channel, download and parse the page, extract the links, and put the links into the dispatcher.channel</li>
+</ul>
+<p>This colleague had to use the more complex sync.Mutex and sync.Cond in order to solve the problem of concurrency, and defined a bunch of concurrent methods to handle the logic, and here I would like to talk about my wrong idea.</p>
+<p>When I reviewed this code, I thought that if each worker started a goroutine, processed the url, and then put the link back into the channel without the complicated Mutex+Cond, etc., but I made the mistake that if the current channel was full, then none of the workers could put the parsed If the current channel is full, then none of the workers can put the parsed results into the channel, they are &ldquo;blocked&rdquo; and there are no workers available to consume the url from the channel.</p>
+<p>Of course, you can say that you can create a channel with a very large buffer to avoid being filled up, but, first, a very large buffer takes up a lot of memory, and second, how big is the right size? The key is that you can&rsquo;t guarantee that the channel won&rsquo;t be full.</p>
+<p>It would be nice to have a buffer with unlimited cache length.</p>
+<p>In 2017, a request was made to Go officials (<a href="https://github.com/golang/go/issues/20352">#20352</a>) to provide a buffer with unlimited capacity.</p>
+<p>After a lengthy discussion, Go would not provide an implementation for this &ldquo;rare&rdquo; scenario, and suggested that we implement such a library to handle this scenario by way of a third library, and Griesemer provided an idea to implement such a channel by ringbuffer implementation caching.</p>
+<p>There are two implementations of <a href="https://stackoverflow.com/questions/41906146/why-go-channels-limit-the-buffer-size">Why Go channels limit the buffer size</a> and <a href="https://medium.com/capital-one-tech/building-an-unbounded-channel-in-go-789e175cd2cd">Building an Unbounded Channel in Go</a>, both of which are similar.</p>
+<p>I have wrapped a library: <a href="https://github.com/smallnest/chanx">chanx</a>, based on the first implementation, to provide a generic infinite cache channel.</p>
+<p>You can star this library and put it in your codebase, it may help you one day. And I&rsquo;ve already prepared a generic design, which I&rsquo;ll change to a generic implementation as soon as Go generics are available.</p>
+<p>The cache-infinite channel has the following characteristics.</p>
+<ol>
+<li><strong>Does not block write</strong> . It can always process the write data, either into the channel to be read or into the cache</li>
+<li><strong>When there is no data,</strong> reads are blocked. The goroutine reading from the channel is blocked when there is no readable data.</li>
+<li><strong>Read and write are done through channel operations</strong> . The internal cache is not exposed</li>
+<li><strong>Be able to query the current number of data to be read</strong> . Since there may be pending data in the cache as well, you need to return len(buffer)+len(chan)</li>
+<li><strong>After closing the channel, the unread channel can still be read, and it is only after reading that the channel is finished</strong> . This is the same logic as a normal channel, which is called &ldquo;drain&rdquo; of unread data</li>
+</ol>
+<p>Because we can&rsquo;t modify the internal channel structure, nor can we overload the chan ← and ← chan operators, we can only encapsulate a data structure by means of two channels to provide read and write.</p>
+<p>This data structure is:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">UnboundedChan</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">In</span>     <span class="kd">chan</span><span class="o">&lt;-</span> <span class="nx">T</span> <span class="c1">// channel for write
+</span><span class="c1"></span>    <span class="nx">Out</span>    <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">T</span> <span class="c1">// channel for read
+</span><span class="c1"></span>    <span class="nx">buffer</span> <span class="p">[]</span><span class="nx">T</span>      <span class="c1">// buffer
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The <code>In</code> channel is used to write data, while the <code>Out</code> channel is used to read data. You can close the In channel, and the Out channel will be closed automatically after all the data is read. You can&rsquo;t close the Out channel by yourself, and you can&rsquo;t close it because it is of type &lt;-chan.</p>
+<p>You can get the length of all the data to be read by the <code>Len</code> method, or you can get only the length of the data in the cache, not the length of the data in the outgoing Out channel by BufLen.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-golang" data-lang="golang"><span class="c1">// Len returns len of Out plus len of buffer.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="nx">UnboundedChan</span><span class="p">)</span> <span class="nf">Len</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">buffer</span><span class="p">)</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">Out</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="c1">// BufLen returns len of the buffer.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="nx">UnboundedChan</span><span class="p">)</span> <span class="nf">BufLen</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">buffer</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>So the point is, the main logic of the implementation of the following, I added comments in the code, through the comments and code you can well understand the entire implementation of the logic:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">NewUnboundedChan</span><span class="p">(</span><span class="nx">initCapacity</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">UnboundedChan</span> <span class="p">{</span>
+    <span class="c1">// Create chan type with three fields and unlimited cache
+</span><span class="c1"></span>	<span class="nx">in</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">T</span><span class="p">,</span> <span class="nx">initCapacity</span><span class="p">)</span>
+	<span class="nx">out</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">T</span><span class="p">,</span> <span class="nx">initCapacity</span><span class="p">)</span>
+	<span class="nx">ch</span> <span class="o">:=</span> <span class="nx">UnboundedChan</span><span class="p">{</span><span class="nx">In</span><span class="p">:</span> <span class="nx">in</span><span class="p">,</span> <span class="nx">Out</span><span class="p">:</span> <span class="nx">out</span><span class="p">,</span> <span class="nx">buffer</span><span class="p">:</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">T</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">initCapacity</span><span class="p">)}</span>
+    <span class="c1">// Through a goroutine, the data is continuously read out from in and put into out or buffer
+</span><span class="c1"></span>	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">out</span><span class="p">)</span> <span class="c1">// in is closed, and out is also closed after the data is read
+</span><span class="c1"></span>	<span class="nx">loop</span><span class="p">:</span>
+		<span class="k">for</span> <span class="p">{</span>
+			<span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">in</span> 
+			<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span> <span class="c1">// If in has been closed, exit loop
+</span><span class="c1"></span>				<span class="k">break</span> <span class="nx">loop</span>
+			<span class="p">}</span>
+			<span class="c1">// Otherwise try to put the data read from in into out
+</span><span class="c1"></span>			<span class="k">select</span> <span class="p">{</span>
+			<span class="k">case</span> <span class="nx">out</span> <span class="o">&lt;-</span> <span class="nx">val</span><span class="p">:</span> <span class="c1">//The success of putting in means that out is not full just now and there is no additional data in the buffer to be processed, so go back to the beginning of loop
+</span><span class="c1"></span>				<span class="k">continue</span>
+			<span class="k">default</span><span class="p">:</span>
+			<span class="p">}</span>
+			<span class="c1">// If out is full, you need to put the data into the cache
+</span><span class="c1"></span>			<span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">,</span> <span class="nx">val</span><span class="p">)</span>
+            <span class="c1">// Process the cache and keep trying to put the data in the cache into the out, until there is no more data in the cache,
+</span><span class="c1"></span>            <span class="c1">// In order to avoid blocking the in channel, we also try to read data from in, because out is full at this time, so we put the data directly into the cache
+</span><span class="c1"></span>			<span class="k">for</span> <span class="nb">len</span><span class="p">(</span><span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="k">select</span> <span class="p">{</span>
+				<span class="k">case</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">in</span><span class="p">:</span> <span class="c1">// Read data from in, put it into the cache, if in is closed, exit loop
+</span><span class="c1"></span>					<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span> 
+						<span class="k">break</span> <span class="nx">loop</span>
+					<span class="p">}</span>
+					<span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">,</span> <span class="nx">val</span><span class="p">)</span>
+				<span class="k">case</span> <span class="nx">out</span> <span class="o">&lt;-</span> <span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">[</span><span class="mi">0</span><span class="p">]:</span> <span class="c1">// Put the oldest data in the cache into out and move out the first element
+</span><span class="c1"></span>					<span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span> <span class="p">=</span> <span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+					<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span> <span class="c1">// Avoid memory leaks. If the cache has finished processing, revert to the original state
+</span><span class="c1"></span>						<span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">T</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">initCapacity</span><span class="p">)</span>
+					<span class="p">}</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="c1">// After in is closed and the loop is exited, there may still be unprocessed data in the buffer, which needs to be stuffed into out
+</span><span class="c1"></span>        <span class="c1">// This logic is called &#34;drain&#34;.
+</span><span class="c1"></span>        <span class="c1">// After this piece of logic is processed, the out can be closed out
+</span><span class="c1"></span>		<span class="k">for</span> <span class="nb">len</span><span class="p">(</span><span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">out</span> <span class="o">&lt;-</span> <span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+			<span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span> <span class="p">=</span> <span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+	<span class="k">return</span> <span class="nx">ch</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The logic of this paragraph is still very clear, that is, the details need to pay attention to, it is also a good material for learning the use of channel.</p>
+<h2 id="updated-may-13">Updated May 13</h2>
+<p>I was on a business trip today and had nothing to do for the long 5 hours on the high speed train, so I grabbed my laptop and did two things, one of which was to optimize the infinite cache channel.</p>
+<p>The only thing I&rsquo;m not too happy about is that its buffer cannot be reused, which is related to the processing of <code>ch.buffer = ch.buffer[1:]</code>, sometimes the underlying array is very large, but it has to regenerate new data, resulting in more frequent heap allocations.</p>
+<p>According to the design of one of the three Go giants, the underlying buffer is best implemented using ringbuffer, if the buffer is full should be able to <a href="https://github.com/golang/go/issues/20352#issuecomment-365494616">automatically expand the capacity</a>:</p>
+<blockquote>
+<p>Such a library should do well in cases of very fast, &ldquo;bursty&rdquo; messages. A large enough buffered channel should be able to absorb bursts while a fast dedicated goroutine drains the channel into a ring buffer from which the messages are delivered at a slower pace to the final consumer of the messages. That ring buffer will need to be efficiently implemented, and will need to be able to grow efficiently (irrespective of size) and that will require some careful engineering. Better to leave that code to a library that can be tuned as needed than baking it into the runtime (and then possibly being at the mercy of release cycles).</p>
+</blockquote>
+<p>So I implemented a <a href="https://github.com/smallnest/chanx/blob/main/ringbuffer.go">ringbuffer</a>, which is relatively simple, because here we do not need to consider the problem of concurrency, this ringbuffer will only be used in a goroutine, so its implementation is very simple, you need to pay attention to the &ldquo;read to catch up with the write&rdquo;, and &ldquo;write full&rdquo; these two boundary issues on the good. By using ringbuffer, the above implementation can be changed to the following code, which further reduces the problem of over-allocation during write bursts.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">NewUnboundedChan</span><span class="p">(</span><span class="nx">initCapacity</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">UnboundedChan</span> <span class="p">{</span>
+	<span class="nx">in</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">T</span><span class="p">,</span> <span class="nx">initCapacity</span><span class="p">)</span>
+	<span class="nx">out</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">T</span><span class="p">,</span> <span class="nx">initCapacity</span><span class="p">)</span>
+	<span class="nx">ch</span> <span class="o">:=</span> <span class="nx">UnboundedChan</span><span class="p">{</span><span class="nx">In</span><span class="p">:</span> <span class="nx">in</span><span class="p">,</span> <span class="nx">Out</span><span class="p">:</span> <span class="nx">out</span><span class="p">,</span> <span class="nx">buffer</span><span class="p">:</span> <span class="nf">NewRingBuffer</span><span class="p">(</span><span class="nx">initCapacity</span><span class="p">)}</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">out</span><span class="p">)</span>
+	<span class="nx">loop</span><span class="p">:</span>
+		<span class="k">for</span> <span class="p">{</span>
+			<span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">in</span>
+			<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span> <span class="c1">// in is closed
+</span><span class="c1"></span>				<span class="k">break</span> <span class="nx">loop</span>
+			<span class="p">}</span>
+			<span class="c1">// out is not full
+</span><span class="c1"></span>			<span class="k">select</span> <span class="p">{</span>
+			<span class="k">case</span> <span class="nx">out</span> <span class="o">&lt;-</span> <span class="nx">val</span><span class="p">:</span>
+				<span class="k">continue</span>
+			<span class="k">default</span><span class="p">:</span>
+			<span class="p">}</span>
+			<span class="c1">// out is full
+</span><span class="c1"></span>			<span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">.</span><span class="nf">Write</span><span class="p">(</span><span class="nx">val</span><span class="p">)</span>
+			<span class="k">for</span> <span class="p">!</span><span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">.</span><span class="nf">IsEmpty</span><span class="p">()</span> <span class="p">{</span>
+				<span class="k">select</span> <span class="p">{</span>
+				<span class="k">case</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">in</span><span class="p">:</span>
+					<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span> <span class="c1">// in is closed
+</span><span class="c1"></span>						<span class="k">break</span> <span class="nx">loop</span>
+					<span class="p">}</span>
+					<span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">.</span><span class="nf">Write</span><span class="p">(</span><span class="nx">val</span><span class="p">)</span>
+				<span class="k">case</span> <span class="nx">out</span> <span class="o">&lt;-</span> <span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">.</span><span class="nf">Peek</span><span class="p">():</span>
+					<span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">.</span><span class="nf">Pop</span><span class="p">()</span>
+					<span class="k">if</span> <span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">.</span><span class="nf">IsEmpty</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">.</span><span class="nx">size</span> <span class="p">&gt;</span> <span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">.</span><span class="nx">initialSize</span> <span class="p">{</span> <span class="c1">// after burst
+</span><span class="c1"></span>						<span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">.</span><span class="nf">Reset</span><span class="p">()</span>
+					<span class="p">}</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="c1">// drain
+</span><span class="c1"></span>		<span class="k">for</span> <span class="p">!</span><span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">.</span><span class="nf">IsEmpty</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nx">out</span> <span class="o">&lt;-</span> <span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">.</span><span class="nf">Pop</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">ch</span><span class="p">.</span><span class="nx">buffer</span><span class="p">.</span><span class="nf">Reset</span><span class="p">()</span>
+	<span class="p">}()</span>
+	<span class="k">return</span> <span class="nx">ch</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><hr>
+<p>Reference <code>https://colobu.com/2021/05/11/unbounded-channel-in-go/</code></p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          <a href="/tags/chan/">chan</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2021-06/redis-expired-key-removal-policy/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Redis Expired Key Removal Policy</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/helloworld/">
+            <span class="next-text nav-default">Hello world</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

@@ -1,0 +1,359 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>cockroachdb two-stage commit process - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Previously, I only knew a little bit about percolator, and my impression of it is that it can implement transaction capability on top of a common distributed KV storage, but the overhead of 2PC &#43; raft process is considerable. A few days ago, I heard that cockroachdb has made some engineering optimizations compared to percolator, so I&amp;rsquo;d like to learn how to implement this part.
+The same as percolator, crdb also implements multi-line transaction management according to decentralized transaction manager." /><meta name="keywords" content="cockroachdb , two-stage commit process" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/crdb-txn/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="cockroachdb two-stage commit process" />
+<meta property="og:description" content="Previously, I only knew a little bit about percolator, and my impression of it is that it can implement transaction capability on top of a common distributed KV storage, but the overhead of 2PC &#43; raft process is considerable. A few days ago, I heard that cockroachdb has made some engineering optimizations compared to percolator, so I&rsquo;d like to learn how to implement this part.
+The same as percolator, crdb also implements multi-line transaction management according to decentralized transaction manager." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/crdb-txn/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-12T10:10:19+08:00" />
+<meta property="article:modified_time" content="2022-01-12T10:10:19+08:00" />
+
+<meta itemprop="name" content="cockroachdb two-stage commit process">
+<meta itemprop="description" content="Previously, I only knew a little bit about percolator, and my impression of it is that it can implement transaction capability on top of a common distributed KV storage, but the overhead of 2PC &#43; raft process is considerable. A few days ago, I heard that cockroachdb has made some engineering optimizations compared to percolator, so I&rsquo;d like to learn how to implement this part.
+The same as percolator, crdb also implements multi-line transaction management according to decentralized transaction manager."><meta itemprop="datePublished" content="2022-01-12T10:10:19+08:00" />
+<meta itemprop="dateModified" content="2022-01-12T10:10:19+08:00" />
+<meta itemprop="wordCount" content="2155">
+<meta itemprop="keywords" content="cockroachdb ," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="cockroachdb two-stage commit process"/>
+<meta name="twitter:description" content="Previously, I only knew a little bit about percolator, and my impression of it is that it can implement transaction capability on top of a common distributed KV storage, but the overhead of 2PC &#43; raft process is considerable. A few days ago, I heard that cockroachdb has made some engineering optimizations compared to percolator, so I&rsquo;d like to learn how to implement this part.
+The same as percolator, crdb also implements multi-line transaction management according to decentralized transaction manager."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">cockroachdb two-stage commit process</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-12 10:10:19 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2155 words </span>
+          <span class="more-meta"> 11 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#transactionrecord-and-writeintent">TransactionRecord and WriteIntent</a></li>
+        <li><a href="#what-happens-if-the-coordinator-hangs">What happens if the Coordinator hangs</a></li>
+        <li><a href="#timestamp-cache-and-read-refreshing">Timestamp Cache and Read Refreshing</a></li>
+        <li><a href="#transaction-conflicts">Transaction Conflicts</a></li>
+        <li><a href="#parallel-commit">Parallel Commit</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Previously, I only knew a little bit about percolator, and my impression of it is that it can implement transaction capability on top of a common distributed KV storage, but the overhead of 2PC + raft process is considerable. A few days ago, I heard that cockroachdb has made some engineering optimizations compared to percolator, so I&rsquo;d like to learn how to implement this part.</p>
+<p>The same as percolator, crdb also implements multi-line transaction management according to decentralized transaction manager. The difficulty lies in the fact that each row operation may have concurrent competing conditions. The transaction commit protocol uses a single machine&rsquo;s atomic transaction capability to arbitrate concurrent operations in order to achieve atomic multi-row transaction commits, and also uses a single machine&rsquo;s atomic transaction to promote exception recovery for exceptions at different stages.</p>
+<p>The difference with percolator is that percolator is based on existing lower-level general-purpose KV storage, allowing transaction meta-information to be embedded in common KVs, while crdb can be designed more end-to-end to do some of its own form of storage for transaction meta-information.</p>
+<p>This paper is organized broadly in the following sections.</p>
+<ul>
+<li>Transaction meta-information and regular transaction processes</li>
+<li>Concurrency control</li>
+<li>Parallel Commit Optimization</li>
+</ul>
+<h2 id="transactionrecord-and-writeintent">TransactionRecord and WriteIntent</h2>
+<p>crdb slices data into ranges, similar to regions in tidb, each range is about 64mb in size, and each range can execute a single transaction internally.</p>
+<p>Within each range, crdb allocates separate regions to hold TransactionRecord and WriteIntent, which are the main meta-information related to transactions.</p>
+<ul>
+<li>TransactionRecord will be used to hold the status of the transaction (PENDING, COMMITTED, ABORTED), with a timeout.</li>
+<li>WriteIntent is equivalent to a write lock and a staging area for new data. At most one WriteIntent can exist at the same time for the same Key and is used for pessimistic mutual exclusion, and each WriteIntent in a transaction will point to the same TransactionRecord.</li>
+</ul>
+<p>Recall that the percolator selects the first row written in the transaction as Primary Row, and then makes the other Rows point to Primary Row, and the concurrent operations of other Keys are aligned to Primary Row, and the overall state of the transaction is determined by the commit status saved in Primary Row.</p>
+<p>The first row of the transaction is also selected to play a special role in crdb, and the TransactionRecord is saved in the same range as the first row, so that all WriteIntent in the transaction points to the TransactionRecord. This is where it differs from the percolator at first glance.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/12/e13cd04abdbb42308e1b0fb9917a8882.png" alt="image"></p>
+<p>The Coordinator Node is the node that users connect to when they access the crdb cluster, and it makes itself the Coordinator to drive the transaction process forward.</p>
+<p>Once all the keys have been written in one phase, the Coordinator drives the commit phase, which is a two-phase commit: the Transaction Record is marked as COMMITTED, which serves as a Commit Point to return a successful commit to the user, and the Coordinator drives the asynchronous cleanup of the Write Intent. If a user accesses the WriteIntent during this period, the status of the Transaction Record is queried and a cleanup convergence operation is performed.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/12/d45d266011cd4ea68953660be63556c0.png" alt="image"></p>
+<p>Eventually both the WriteIntent and TransactionRecord are cleared and the transaction is complete.</p>
+<p>Unlike percolator, crdb, as a Serializable isolation level, has only one commit timestamp for the whole transaction, not two timestamps, startTs and commitTs. The timestamp here should only be used for MVCC, and the concurrency control level relies on the pessimistic concurrency control of locking. This single timestamp is also the logical embodiment of Serializable: Serializable is equivalent to all transactions executing sequentially, with transactions starting and ending in an atomic amount of time.</p>
+<h2 id="what-happens-if-the-coordinator-hangs">What happens if the Coordinator hangs</h2>
+<p>Each range already has a Raft, and the upper layers can generally assume they are reliable. But the Coordinator is a single point, and the probability of it hanging in the middle is not low enough to rely on it to guarantee the reliability of transactions. By design, crdb arranges for the Coordinator to drive the full lifecycle of the transaction, but when the Coordinator hangs, other visitors can still make the transaction go through the visitor-driven cleanup process if they encounter a leftover WriteIntent. Here is the same idea as percolator.</p>
+<ul>
+<li>If the transaction execution is interrupted before Commit Point, the key visitor drives the Rollback process, marking the transaction status as interrupted and cleaning up the transaction meta information on the key;</li>
+<li>If there is an interruption after Commit Point, the visitor drives the Roll Forward process to bring the latest value written by the transaction into effect and clean up the transaction meta information.</li>
+</ul>
+<p>Unlike percolator, where each lock has a timeout, the timeout in crdb is maintained in the TransactionRecord, and the WriteIntent has no timeout. coordinator periodically renews the TransactionRecord heartbeat, and other visitors who find the If other visitors find that the TransactionRecord has timed out, they will consider the Coordinator dead and initiate the cleanup process, putting the TransactionRecord into the ABORTED state.</p>
+<p>When a Key is accessed and a Write Intent is found to exist, the TransactionRecord is found along with the reference to the Write Intent and processed differently, taking into account its status.</p>
+<ul>
+<li>If it is found to be in COMMITTED state, the value in the WriteIntent is read directly and WriteIntent cleanup is initiated at the same time.</li>
+<li>If it is in the ABORTED state, the value in this WriteIntent is ignored and cleanup of the WriteIntent is initiated.</li>
+<li>If the PENDING state is encountered, a transaction in progress is considered to have been encountered.
+<ul>
+<li>If the transaction is found to have expired, it is marked in the ABORTED state.</li>
+<li>If the transaction has not expired, conflict detection is performed in conjunction with the timestamp.</li>
+</ul>
+</li>
+</ul>
+<p>The logic for conflict detection is looked at in detail later.</p>
+<h2 id="timestamp-cache-and-read-refreshing">Timestamp Cache and Read Refreshing</h2>
+<p>The Write Intent can be used to track write conflicts, but crdb is Serializable and needs to track read records as well, detecting conflicts for both read and write operations.</p>
+<p>The crdb approach is to keep a Timestamp Cache in each range, which is used to store the timestamp of the last read operation of the Key in the range. As the name implies, the Timestamp Cache is a piece of in-memory data stored in the range and is not raft copied.</p>
+<p>Whenever a write occurs, the timestamp of the current transaction is checked to see if it is less than the latest value of the Key in the Timestamp Cache. If it is, the current transaction&rsquo;s write operation will invalidate the most recent read by another transaction. In a normal Serializable transaction process, the transaction conflict should be declared a failure at this point.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/12/6d10909b977e4259808b224c167e95fa.png" alt="image"></p>
+<p>However, crdb does not exit directly from the transaction conflict here, but still retains a hand. The idea is: the current transaction has a Write after Read conflict with other transactions, can I push the timestamp of the transaction back to the current time, and then run a Write After Read conflict check to be OK.</p>
+<p>However, the Push Timestamp has to satisfy a certain predicate, that is, whether there is a new write operation in the [original timestamp, new timestamp] range for the key read by the current transaction. If unfortunately there is a new write, there is no way to save it, and the transaction conflict is considered to have failed. This check is called Read Refreshing.</p>
+<p>Push Timestamp is lighter and more user-friendly than directly reporting a transaction conflict and then retrying the entire transaction on the upper level of the user. I think this is also a place where pessimistic concurrency control is better than optimistic concurrency control.</p>
+<h2 id="transaction-conflicts">Transaction Conflicts</h2>
+<p>There are several scenarios of transaction conflicts.</p>
+<p>Read after Write: The Write Intent of an uncommitted transaction is read with a timestamp smaller than the current transaction. crdb adds the current transaction to the TxnWaitQueue queue to wait for the completion of dependent transactions. If the timestamp of the Write Intent read is greater than the current transaction, then there is no need to wait and the key is read directly by MVCC, which is equivalent to reading a snapshot of the current transaction moment.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/12/215745cf418f4f428706855f79e7825a.png" alt="image"></p>
+<p>Write after Read: When writing, the timestamp of the current transaction must be greater than or equal to the timestamp of the last time the Key was read, and if there is a conflict, try to Push Timestamp to continue the transaction.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/12/77c1c2b898aa427f96229b874387e9ac.png" alt="image"></p>
+<p>Write after Write: When writing, if an earlier uncompleted Write Intent is encountered, wait for that transaction to complete first. If an updated timestamp is encountered, the timestamp is pushed back by the Push Timestamp itself.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/12/76cd965facfa47ec96dc1ef3eda4df45.png" alt="image"></p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/12/963870211c0c452f8c9e0924bb45ffc1.png" alt="image"></p>
+<p>To summarize, there are two strategies for transactions to encounter conflicts.</p>
+<ol>
+<li>wait: mainly used when the start time of other transactions is earlier than the current transaction, and when a dependency is encountered, the current transaction waits for the other transaction to complete before executing.</li>
+<li>Push Timestamp: mainly used when the start time of the current transaction is earlier than the other transactions, and when a dependency is encountered, the current transaction first tries to push back the timestamp so that it becomes later than the other transactions, but the push back timestamp needs to go through the Read Refreshing precheck to ensure that the current transaction read set has not been modified, otherwise the transaction should also be interrupted.</li>
+</ol>
+<h2 id="parallel-commit">Parallel Commit</h2>
+<p>The performance of the original percolator is very poor: Prewrite of each row of data needs to be replicated, and then each row of data is replicated again by Commit. If the lower level uses Raft to do replication, N rows of data, it is equivalent to perform 2 * N Raft consensus, and each Raft consensus is at least one fsync() trip. In contrast, a standalone DB only fsync() once, no matter how many rows of transactions.</p>
+<p>In order to optimize the performance of commit, crdb first does Write Pipelining, where multiple rows of data written in a transaction are scheduled into a pipeline to initiate the consensus process in parallel, which reduces the waiting time from O(N) to O(2), with Prewrite and Commit going through two rounds of consensus process respectively.</p>
+<p>Is it possible to further optimize the commit process? crdb introduces a new commit protocol, Parallel Commit, which enables one round of consensus process to complete the commit. The general idea is that in a two-stage commit, as long as all pre-writes have completed, the commit will not fail and the user can be safely returned with a successful commit.</p>
+<p>So, how do you determine that all writes are complete? Two changes are made to the Transaction Record: 1. introduce the STAGING state, which indicates that the transaction has entered commit; 2. add the InFlightWrites field, which records the list of keys written by the current transaction. In addition, Transaction Record is no longer created at the beginning of the transaction, but at the time of user Commit(), so that we can know which keys have been modified by the transaction.</p>
+<p>As per the example in the official documentation, the process of a transaction roughly proceeds as follows.</p>
+<ol>
+<li>The client contacts the Transaction Coordinator to create the transaction.</li>
+<li>The client tries to write a Write Intent with the key K1 valued at &ldquo;Apple&rdquo;, which generates the ID of the Transaction Record and makes the Write Intent point to it, but does not actually create the Transaction Record.</li>
+<li>The client tries to write a Write Intent with the key K2 valued at &ldquo;Berry&rdquo;, again making it point to the ID of the Transaction Record, which also does not exist.</li>
+<li>The client initiates a Commit(), which creates the Transaction Record with a status of STAGING and makes its InFlightWrites point to the [&ldquo;Berry&rdquo;, &ldquo;Apple&rdquo;] WriteIntents.</li>
+<li>Wait for concurrent writes of Write Intent and Transaction Record to complete to return success to the user.</li>
+<li>The Coordinator initiates the commit phase, makes the Transaction Record COMMITTED, and causes the Write Intent to be flushed to primary storage.</li>
+</ol>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/12/4f864490e5ff4c4e91db9ee10489077d.png" alt="image"></p>
+<p>If the Coordinator hangs after a commit, the visitor reading the Write Intent&rsquo;s Key first reads the corresponding Transaction Record and then accesses each Key via InFlightWrites to determine if the write was successful.</p>
+<ul>
+<li>If unsuccessful and the Transaction Record has timed out, the visitor drives the Transaction Record into the ABORTED state.</li>
+<li>If all Keys have been written successfully, they are considered to be in the Implicit Committed state, and the visitor drives the Transaction Record into the explicit COMMITTED state and causes the associated Write Intent to be flushed to primary storage.</li>
+</ul>
+<p>It can be seen that while Parallel significantly reduces the wait time for the commit process, the visitor-driven exception recovery process becomes more expensive. crdb still wants to drive the commit process through the Coordinator as soon as possible in the normal process, so that the visitor-driven recovery process only serves as a last resort.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/cockroachdb/">cockroachdb </a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/rocksdb-tx/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Rocksdb transactions</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/go-generic-supports-specialization-no/">
+            <span class="next-text nav-default">Go Generic Programming: Specialization Support</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

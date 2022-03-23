@@ -1,0 +1,572 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How to report errors via Kubernetes events - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="There is a Kubernetes webhook maintained within the group that intercepts pod creation requests and makes some changes (e.g. adding environment variables, adding init-container, etc.). The business logic itself is simple, but it&amp;rsquo;s hard to handle if errors are generated in the process. Either you directly prevent the pod from being created, then there is a risk that the application will not start. Either ignore the business logic, then it" /><meta name="keywords" content="Kubernetes, Events, Error Reporting" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/error-reporting-with-kubernetes-events/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="How to report errors via Kubernetes events" />
+<meta property="og:description" content="There is a Kubernetes webhook maintained within the group that intercepts pod creation requests and makes some changes (e.g. adding environment variables, adding init-container, etc.). The business logic itself is simple, but it&rsquo;s hard to handle if errors are generated in the process. Either you directly prevent the pod from being created, then there is a risk that the application will not start. Either ignore the business logic, then it" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/error-reporting-with-kubernetes-events/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-06T16:24:57+08:00" />
+<meta property="article:modified_time" content="2022-03-06T16:24:57+08:00" />
+
+<meta itemprop="name" content="How to report errors via Kubernetes events">
+<meta itemprop="description" content="There is a Kubernetes webhook maintained within the group that intercepts pod creation requests and makes some changes (e.g. adding environment variables, adding init-container, etc.). The business logic itself is simple, but it&rsquo;s hard to handle if errors are generated in the process. Either you directly prevent the pod from being created, then there is a risk that the application will not start. Either ignore the business logic, then it"><meta itemprop="datePublished" content="2022-03-06T16:24:57+08:00" />
+<meta itemprop="dateModified" content="2022-03-06T16:24:57+08:00" />
+<meta itemprop="wordCount" content="1081">
+<meta itemprop="keywords" content="k8s," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How to report errors via Kubernetes events"/>
+<meta name="twitter:description" content="There is a Kubernetes webhook maintained within the group that intercepts pod creation requests and makes some changes (e.g. adding environment variables, adding init-container, etc.). The business logic itself is simple, but it&rsquo;s hard to handle if errors are generated in the process. Either you directly prevent the pod from being created, then there is a risk that the application will not start. Either ignore the business logic, then it"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How to report errors via Kubernetes events</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-06 16:24:57 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1081 words </span>
+          <span class="more-meta"> 3 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#what-are-eventsevent-in-kubernetes">What are Events/Event in Kubernetes?</a></li>
+        <li><a href="#how-to-report-events">How to report events</a>
+          <ul>
+            <li><a href="#how-to-access-the-kubernetes-api">How to access the Kubernetes API</a></li>
+            <li><a href="#how-to-create-escalate-events">How to create, escalate events</a></li>
+          </ul>
+        </li>
+        <li><a href="#usage-scenarios">Usage Scenarios</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>There is a Kubernetes webhook maintained within the group that intercepts pod creation requests and makes some changes (e.g. adding environment variables, adding init-container, etc.).</p>
+<p>The business logic itself is simple, but it&rsquo;s hard to handle if errors are generated in the process. Either you directly prevent the pod from being created, then there is a risk that the application will not start. Either ignore the business logic, then it will lead to silent failure and no one will know that an error has occurred here.</p>
+<p>So the plain idea is to tap into the alerting system, but this leads to coupling the current component with the specific alerting system.</p>
+<p>In Kubernetes, there are Event mechanisms that can do the job of logging some events, such as warnings, errors, and other information, which are more suitable for this scenario.</p>
+<h2 id="what-are-eventsevent-in-kubernetes">What are Events/Event in Kubernetes?</h2>
+<p>An Event is one of the many resource objects in Kubernetes that are typically used to record state changes that occur within a cluster, ranging from cluster node exceptions to Pod starts, successful scheduling, and so on.</p>
+<p>For example, if we Describe a pod, we can see the events corresponding to that pod:</p>
+<p><code>kubectl describe pod sc-b-68867c5dcb-sf9hn</code></p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/06/11c935fe454b43a2bd8086a187e0aa7b.png" alt="Events/Event in Kubernetes"></p>
+<p>As you can see, everything from scheduling, to starting, to the eventual failure of this pod to pull the image is recorded by way of an Event.</p>
+<p>Let&rsquo;s look at the structure of an Event.</p>
+<p><code>$ k get events -o json | jq .items[10]</code></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="p">{</span>
+  <span class="nt">&#34;apiVersion&#34;</span><span class="p">:</span> <span class="s2">&#34;v1&#34;</span><span class="p">,</span>
+  <span class="nt">&#34;count&#34;</span><span class="p">:</span> <span class="mi">1</span><span class="p">,</span>
+  <span class="nt">&#34;eventTime&#34;</span><span class="p">:</span> <span class="kc">null</span><span class="p">,</span>
+  <span class="nt">&#34;firstTimestamp&#34;</span><span class="p">:</span> <span class="s2">&#34;2021-12-04T17:02:14Z&#34;</span><span class="p">,</span>
+  <span class="nt">&#34;involvedObject&#34;</span><span class="p">:</span> <span class="p">{</span>
+    <span class="nt">&#34;apiVersion&#34;</span><span class="p">:</span> <span class="s2">&#34;v1&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;fieldPath&#34;</span><span class="p">:</span> <span class="s2">&#34;spec.containers{sc-b}&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;kind&#34;</span><span class="p">:</span> <span class="s2">&#34;Pod&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;name&#34;</span><span class="p">:</span> <span class="s2">&#34;sc-b-68867c5dcb-sf9hn&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;namespace&#34;</span><span class="p">:</span> <span class="s2">&#34;default&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;resourceVersion&#34;</span><span class="p">:</span> <span class="s2">&#34;322554830&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;uid&#34;</span><span class="p">:</span> <span class="s2">&#34;24df4a07-f41e-42c2-ba26-d90940303b00&#34;</span>
+  <span class="p">},</span>
+  <span class="nt">&#34;kind&#34;</span><span class="p">:</span> <span class="s2">&#34;Event&#34;</span><span class="p">,</span>
+  <span class="nt">&#34;lastTimestamp&#34;</span><span class="p">:</span> <span class="s2">&#34;2021-12-04T17:02:14Z&#34;</span><span class="p">,</span>
+  <span class="nt">&#34;message&#34;</span><span class="p">:</span> <span class="s2">&#34;Error: ErrImagePull&#34;</span><span class="p">,</span>
+  <span class="nt">&#34;metadata&#34;</span><span class="p">:</span> <span class="p">{</span>
+    <span class="nt">&#34;creationTimestamp&#34;</span><span class="p">:</span> <span class="s2">&#34;2021-12-04T17:02:14Z&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;name&#34;</span><span class="p">:</span> <span class="s2">&#34;sc-b-68867c5dcb-sf9hn.16bd9bf933d60437&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;namespace&#34;</span><span class="p">:</span> <span class="s2">&#34;default&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;resourceVersion&#34;</span><span class="p">:</span> <span class="s2">&#34;1197082&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;selfLink&#34;</span><span class="p">:</span> <span class="s2">&#34;/api/v1/namespaces/default/events/sc-b-68867c5dcb-sf9hn.16bd9bf933d60437&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;uid&#34;</span><span class="p">:</span> <span class="s2">&#34;f928ff2d-c618-44a6-bf5a-5b0d3d20e95e&#34;</span>
+  <span class="p">},</span>
+  <span class="nt">&#34;reason&#34;</span><span class="p">:</span> <span class="s2">&#34;Failed&#34;</span><span class="p">,</span>
+  <span class="nt">&#34;reportingComponent&#34;</span><span class="p">:</span> <span class="s2">&#34;&#34;</span><span class="p">,</span>
+  <span class="nt">&#34;reportingInstance&#34;</span><span class="p">:</span> <span class="s2">&#34;&#34;</span><span class="p">,</span>
+  <span class="nt">&#34;source&#34;</span><span class="p">:</span> <span class="p">{</span>
+    <span class="nt">&#34;component&#34;</span><span class="p">:</span> <span class="s2">&#34;kubelet&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;host&#34;</span><span class="p">:</span> <span class="s2">&#34;eci&#34;</span>
+  <span class="p">},</span>
+  <span class="nt">&#34;type&#34;</span><span class="p">:</span> <span class="s2">&#34;Warning&#34;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As you can see, an event, the more important fields: * type - the type of the event, can be Warning, Normal, Error, etc.</p>
+<ul>
+<li>type - the type of the event, can be Warning, Normal, Error, etc.</li>
+<li>reason - the reason for the event, can be Failed, Scheduled, Started, Completed, etc.</li>
+<li>message - the description of the event</li>
+<li>involvedObject - the resource object for the event, could be Pod, Node, etc.</li>
+<li>source - the source of the event, can be kubelet, kube-apiserver, etc.</li>
+<li>firstTimestamp,lastTimestamp - the first and last time of the event</li>
+</ul>
+<p>Based on this information, we can do some cluster-level monitoring and alerting, such as Aliyun&rsquo;s ACK, which will <a href="https://help.aliyun.com/document_detail/150476.html">send Event to SLS</a>, and then do alerting according to the corresponding rules.</p>
+<h2 id="how-to-report-events">How to report events</h2>
+<p>The previous section talks about what an Event is in Kubernetes, but we have to report the event to let the Kubernetes cluster know that it happened and thus make subsequent monitoring and alerting.</p>
+<h3 id="how-to-access-the-kubernetes-api">How to access the Kubernetes API</h3>
+<p>The first step in reporting events is to access the Kubernetes API, which is based on the Restful API, and Kubernetes is also based on this API, wrapped with an SDK that is directly available.</p>
+<p>To connect to the Kubernetes API through the SDK, there are <a href="https://kubernetes.io/zh/docs/tasks/administer-cluster/access-cluster-api/#go-client">two ways</a>.</p>
+<p>The first one is accessed through the kubeconfg file (from outside), and the second one is accessed through serviceaccount (from Pod).</p>
+<p>For the sake of simplicity, we use the first way as an example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;flag&#34;</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;path/filepath&#34;</span>
+
+	<span class="s">&#34;k8s.io/client-go/kubernetes&#34;</span>
+	<span class="s">&#34;k8s.io/client-go/tools/clientcmd&#34;</span>
+	<span class="s">&#34;k8s.io/client-go/util/homedir&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">kubeconfig</span> <span class="o">*</span><span class="kt">string</span>
+	<span class="k">if</span> <span class="nx">home</span> <span class="o">:=</span> <span class="nx">homedir</span><span class="p">.</span><span class="nf">HomeDir</span><span class="p">();</span> <span class="nx">home</span> <span class="o">!=</span> <span class="s">&#34;&#34;</span> <span class="p">{</span>
+		<span class="nx">kubeconfig</span> <span class="p">=</span> <span class="nx">flag</span><span class="p">.</span><span class="nf">String</span><span class="p">(</span><span class="s">&#34;kubeconfig&#34;</span><span class="p">,</span> <span class="nx">filepath</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">home</span><span class="p">,</span> <span class="s">&#34;.kube&#34;</span><span class="p">,</span> <span class="s">&#34;config&#34;</span><span class="p">),</span> <span class="s">&#34;(optional) absolute path to the kubeconfig file&#34;</span><span class="p">)</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="nx">kubeconfig</span> <span class="p">=</span> <span class="nx">flag</span><span class="p">.</span><span class="nf">String</span><span class="p">(</span><span class="s">&#34;kubeconfig&#34;</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="s">&#34;absolute path to the kubeconfig file&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">flag</span><span class="p">.</span><span class="nf">Parse</span><span class="p">()</span>
+
+	<span class="nx">config</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">clientcmd</span><span class="p">.</span><span class="nf">BuildConfigFromFlags</span><span class="p">(</span><span class="s">&#34;&#34;</span><span class="p">,</span> <span class="o">*</span><span class="nx">kubeconfig</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">clientset</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">kubernetes</span><span class="p">.</span><span class="nf">NewForConfig</span><span class="p">(</span><span class="nx">config</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">versionInfo</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">clientset</span><span class="p">.</span><span class="nf">ServerVersion</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;Version: %#v\n&#34;</span><span class="p">,</span> <span class="nx">versionInfo</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>By running this code, you can connect to the cluster and get the Kubernetes Server version.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">Version: &amp;version.Info{Major:&#34;1&#34;, Minor:&#34;18+&#34;, GitVersion:&#34;v1.18.8-aliyun.1&#34;, GitCommit:&#34;27f24d2&#34;, GitTreeState:&#34;&#34;, BuildDate:&#34;2021-08-19T10:00:16Z&#34;, GoVersion:&#34;go1.13.15&#34;, Compiler:&#34;gc&#34;, Platform:&#34;linux/amd64&#34;}
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="how-to-create-escalate-events">How to create, escalate events</h3>
+<p>In the above example, with the clientset object, we now have to rely on this object to create an event in the Kuberentes cluster.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">now</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">()</span>
+<span class="nx">message</span> <span class="o">:=</span> <span class="s">&#34;test message at &#34;</span> <span class="o">+</span> <span class="nx">now</span><span class="p">.</span><span class="nf">Format</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">RFC3339</span><span class="p">)</span>
+<span class="c1">// 命名空间为default
+</span><span class="c1"></span><span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">clientset</span><span class="p">.</span><span class="nf">CoreV1</span><span class="p">().</span><span class="nf">Events</span><span class="p">(</span><span class="s">&#34;default&#34;</span><span class="p">).</span><span class="nf">Create</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">apiv1</span><span class="p">.</span><span class="nx">Event</span><span class="p">{</span>
+    <span class="nx">ObjectMeta</span><span class="p">:</span> <span class="nx">metav1</span><span class="p">.</span><span class="nx">ObjectMeta</span><span class="p">{</span>
+        <span class="nx">GenerateName</span><span class="p">:</span> <span class="s">&#34;test-&#34;</span><span class="p">,</span>
+    <span class="p">},</span>
+    <span class="nx">Type</span><span class="p">:</span>           <span class="s">&#34;Warning&#34;</span><span class="p">,</span>
+    <span class="nx">Message</span><span class="p">:</span>        <span class="nx">message</span><span class="p">,</span>
+    <span class="nx">Reason</span><span class="p">:</span>         <span class="s">&#34;OnePilotFail&#34;</span><span class="p">,</span>
+    <span class="nx">FirstTimestamp</span><span class="p">:</span> <span class="nx">metav1</span><span class="p">.</span><span class="nf">NewTime</span><span class="p">(</span><span class="nx">now</span><span class="p">),</span>
+    <span class="nx">LastTimestamp</span><span class="p">:</span>  <span class="nx">metav1</span><span class="p">.</span><span class="nf">NewTime</span><span class="p">(</span><span class="nx">now</span><span class="p">),</span>
+    <span class="nx">InvolvedObject</span><span class="p">:</span> <span class="nx">apiv1</span><span class="p">.</span><span class="nx">ObjectReference</span><span class="p">{</span>
+        <span class="nx">Namespace</span><span class="p">:</span> <span class="s">&#34;default&#34;</span><span class="p">,</span>
+        <span class="nx">Kind</span><span class="p">:</span>      <span class="s">&#34;Deployment&#34;</span><span class="p">,</span>
+        <span class="nx">Name</span><span class="p">:</span>      <span class="s">&#34;sc-b&#34;</span><span class="p">,</span>
+    <span class="p">},</span>
+<span class="p">})</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;create event with err: %v\n&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the above example, we have created an Event under the namespace default starting with <code>test-</code> and the type of this Event is Warning.</p>
+<p>We can also look at the final Event that is generated.</p>
+<p><code>kubectl get events -o json | jq .items[353]</code></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-json" data-lang="json">  <span class="s2">&#34;apiVersion&#34;</span><span class="err">:</span> <span class="s2">&#34;v1&#34;</span><span class="err">,</span>
+  <span class="s2">&#34;eventTime&#34;</span><span class="err">:</span> <span class="kc">null</span><span class="err">,</span>
+  <span class="s2">&#34;firstTimestamp&#34;</span><span class="err">:</span> <span class="s2">&#34;2021-12-04T17:27:06Z&#34;</span><span class="err">,</span>
+  <span class="s2">&#34;involvedObject&#34;</span><span class="err">:</span> <span class="p">{</span>
+    <span class="nt">&#34;kind&#34;</span><span class="p">:</span> <span class="s2">&#34;Deployment&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;name&#34;</span><span class="p">:</span> <span class="s2">&#34;sc-b&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;namespace&#34;</span><span class="p">:</span> <span class="s2">&#34;default&#34;</span>
+  <span class="p">}</span><span class="err">,</span>
+  <span class="s2">&#34;kind&#34;</span><span class="err">:</span> <span class="s2">&#34;Event&#34;</span><span class="err">,</span>
+  <span class="s2">&#34;lastTimestamp&#34;</span><span class="err">:</span> <span class="s2">&#34;2021-12-04T17:27:06Z&#34;</span><span class="err">,</span>
+  <span class="s2">&#34;message&#34;</span><span class="err">:</span> <span class="s2">&#34;test message at 2021-12-05T01:27:06+08:00&#34;</span><span class="err">,</span>
+  <span class="s2">&#34;metadata&#34;</span><span class="err">:</span> <span class="p">{</span>
+    <span class="nt">&#34;creationTimestamp&#34;</span><span class="p">:</span> <span class="s2">&#34;2021-12-04T17:27:06Z&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;generateName&#34;</span><span class="p">:</span> <span class="s2">&#34;test-&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;name&#34;</span><span class="p">:</span> <span class="s2">&#34;test-vvjzp&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;namespace&#34;</span><span class="p">:</span> <span class="s2">&#34;default&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;resourceVersion&#34;</span><span class="p">:</span> <span class="s2">&#34;1198057&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;selfLink&#34;</span><span class="p">:</span> <span class="s2">&#34;/api/v1/namespaces/default/events/test-vvjzp&#34;</span><span class="p">,</span>
+    <span class="nt">&#34;uid&#34;</span><span class="p">:</span> <span class="s2">&#34;f2bcdd1c-442f-4f61-921a-e18637ee5871&#34;</span>
+  <span class="p">}</span><span class="err">,</span>
+  <span class="s2">&#34;reason&#34;</span><span class="err">:</span> <span class="s2">&#34;OnePilotFail&#34;</span><span class="err">,</span>
+  <span class="s2">&#34;reportingComponent&#34;</span><span class="err">:</span> <span class="s2">&#34;&#34;</span><span class="err">,</span>
+  <span class="s2">&#34;reportingInstance&#34;</span><span class="err">:</span> <span class="s2">&#34;&#34;</span><span class="err">,</span>
+  <span class="s2">&#34;source&#34;</span><span class="err">:</span> <span class="p">{}</span><span class="err">,</span>
+  <span class="s2">&#34;type&#34;</span><span class="err">:</span> <span class="s2">&#34;Warning&#34;</span>
+<span class="err">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In this way, people who care about the corresponding events, such as those of the operations and maintenance staff, can do monitoring and alerting based on this information.</p>
+<h2 id="usage-scenarios">Usage Scenarios</h2>
+<p>Unlike business events, Kubernetes events are resources in the cluster, and the people who care about them are mostly the cluster maintainers.</p>
+<p>Therefore, this event reporting mechanism is more suitable for some basic components to use, so that cluster maintainers can understand the current state of the cluster.</p>
+<p>If you need to have more flexible alerting and monitoring, then you can use a time and alerting system that is closer to the business and has richer rules.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/k8s/">k8s</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/array-on-java-type-system/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Are there any flaws with arrays in Java&#39;s type system?</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/grpc-in-memory/">
+            <span class="next-text nav-default">Memory-based communication for gRPC calls</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

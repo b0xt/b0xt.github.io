@@ -1,0 +1,1707 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Principle of memory allocator implementation in Go language - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="The data and variables in a program are allocated to the virtual memory where the program resides, which contains two important areas: the Stack and the Heap. Most of the arguments, return values, and local variables of function calls are allocated to the stack, which is managed by the compiler; different programming languages use different methods to manage the memory in the heap area. The objects in the heap are" /><meta name="keywords" content="golang, Memory, Allocator" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2021-12/golang-memory-allocator/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Principle of memory allocator implementation in Go language" />
+<meta property="og:description" content="The data and variables in a program are allocated to the virtual memory where the program resides, which contains two important areas: the Stack and the Heap. Most of the arguments, return values, and local variables of function calls are allocated to the stack, which is managed by the compiler; different programming languages use different methods to manage the memory in the heap area. The objects in the heap are" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2021-12/golang-memory-allocator/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-12-06T15:51:40+08:00" />
+<meta property="article:modified_time" content="2021-12-06T15:51:40+08:00" />
+
+<meta itemprop="name" content="Principle of memory allocator implementation in Go language">
+<meta itemprop="description" content="The data and variables in a program are allocated to the virtual memory where the program resides, which contains two important areas: the Stack and the Heap. Most of the arguments, return values, and local variables of function calls are allocated to the stack, which is managed by the compiler; different programming languages use different methods to manage the memory in the heap area. The objects in the heap are"><meta itemprop="datePublished" content="2021-12-06T15:51:40+08:00" />
+<meta itemprop="dateModified" content="2021-12-06T15:51:40+08:00" />
+<meta itemprop="wordCount" content="7593">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Principle of memory allocator implementation in Go language"/>
+<meta name="twitter:description" content="The data and variables in a program are allocated to the virtual memory where the program resides, which contains two important areas: the Stack and the Heap. Most of the arguments, return values, and local variables of function calls are allocated to the stack, which is managed by the compiler; different programming languages use different methods to manage the memory in the heap area. The objects in the heap are"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Principle of memory allocator implementation in Go language</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-12-06 15:51:40 </span>
+        <div class="post-category">
+            <a href="/categories/skills/"> skills </a>
+            </div>
+          <span class="more-meta"> 7593 words </span>
+          <span class="more-meta"> 16 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#design-principles">Design Principles</a>
+          <ul>
+            <li><a href="#allocation-methods">Allocation Methods</a></li>
+            <li><a href="#hierarchical-allocation">Hierarchical allocation</a></li>
+            <li><a href="#virtual-memory-layout">Virtual memory layout</a></li>
+            <li><a href="#address-space">Address space</a></li>
+          </ul>
+        </li>
+        <li><a href="#memory-management-components">Memory management components</a>
+          <ul>
+            <li><a href="#memory-management-unit">Memory management unit</a></li>
+            <li><a href="#thread-cache">Thread cache</a></li>
+            <li><a href="#central-cache">Central cache</a></li>
+            <li><a href="#page-heap">Page heap</a></li>
+          </ul>
+        </li>
+        <li><a href="#memory-allocation">Memory allocation</a>
+          <ul>
+            <li><a href="#microobjects">Microobjects</a></li>
+            <li><a href="#small-objects">Small objects</a></li>
+            <li><a href="#large-objects">Large objects</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>The data and variables in a program are allocated to the virtual memory where the program resides, which contains two important areas: the Stack and the Heap. Most of the arguments, return values, and local variables of function calls are allocated to the stack, which is managed by the compiler; different programming languages use different methods to manage the memory in the heap area. The objects in the heap are allocated by the memory allocator and collected by the garbage collector.</p>
+<p>Different programming languages choose different ways to manage memory. This section introduces the Go language memory allocator, analyzing in detail the process of memory allocation and the design and implementation principles behind it.</p>
+<h2 id="design-principles">Design Principles</h2>
+<p>Memory management generally consists of three different components, the user program (Mutator), the allocator (Allocator) and the collector (Collector). When the user program requests memory, it requests new memory through the memory allocator, which is responsible for initializing the corresponding memory area from the heap.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/503e334ae49c418397509d68abc5c034.png" alt=""></p>
+<p>The memory allocator implementation of Go language is very complex. Before analyzing the memory allocator implementation, we need to understand the design principles of memory allocation and master the memory allocation process. The allocation methods of the memory allocator and the hierarchical allocation, virtual memory layout and address space of the Go language memory allocator will be described in detail here.</p>
+<h3 id="allocation-methods">Allocation Methods</h3>
+<p>The programming language memory allocator generally contains two allocation methods, one is the linear allocator (Sequential Allocator, Bump Allocator), and the other is the free-list allocator (Free-List Allocator).</p>
+<h4 id="linear-allocator">Linear Allocator</h4>
+<p>Linear allocation (Bump Allocator) is an efficient method of memory allocation, but has major limitations. When we use a linear allocator, we only need to maintain a pointer to a specific location in memory. If a user program requests memory from the allocator, the allocator only needs to check the remaining free memory, return the allocated memory area and modify the location of the pointer in memory, i.e., move the pointer in the following figure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/ffb8a55270264ca1802eff9b4fd6b4d3.png" alt=""></p>
+<p>Although the linear allocator implementation brings it a faster execution speed and lower implementation complexity, the linear allocator cannot reuse memory when it is freed. As shown in the figure below, the linear allocator cannot reuse memory in red if it has been allocated and reclaimed.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/72492e0bb44b433cbd5a2036c35c45b6.png" alt=""></p>
+<p>Because linear allocators have these characteristics, they need to be used with appropriate garbage collection algorithms, such as Mark-Compact, Copying GC, and Generational GC, which sort out fragments of living objects by copying them and periodically merging free memory so that the efficiency of linear allocators can be used to improve the performance of memory allocators.</p>
+<p>Because linear allocators need to work with garbage collection algorithms that have copy properties, languages such as C and C++ that need to expose pointers directly to the outside world cannot use this strategy, and we will detail the design principles of common garbage collection algorithms in the next section.</p>
+<h4 id="free-link-allocator">Free Link Allocator</h4>
+<p>The Free-List Allocator reuses memory that has already been freed and maintains an internal data structure similar to a chain table. When a user program requests memory, the free-list allocator sequentially traverses the free memory blocks, finds a large enough memory, and then requests new resources and modifies the chain.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/cc5496609904447fb8d8e92d2e9f2719.png" alt=""></p>
+<p>Since different memory blocks form a chain table through pointers, an allocator using this approach can reuse the reclaimed resources, but it has a time complexity of O(n)O(n) because it needs to traverse the chain table when allocating memory. The free link table allocator can choose different strategies to select among the memory blocks in the link table, the most common ones are the following four.</p>
+<ul>
+<li>First-Fit (First-Fit) - traversing from the head of the chain table and selecting the first memory block whose size is larger than the requested memory.</li>
+<li>Cyclic first adaptation (Next-Fit) - traversing from the end position of the last traversal and selecting the first memory block whose size is larger than the requested memory.</li>
+<li>Best-Fit - traverses the entire chain from the head of the chain and selects the most suitable block.</li>
+<li>Segregated-Fit - splitting the memory into multiple chained tables, each with memory blocks of the same size, and requesting memory by first finding the chained table that meets the conditions and then selecting the appropriate memory block from the chained table.</li>
+</ul>
+<p>Without going into the first three of the four strategies mentioned above, the memory allocation strategy used by the Go language is somewhat similar to the fourth strategy, and we understand the principle of this strategy through the following diagram.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/108736ac01d145a0b8947e8c17f360ce.png" alt=""></p>
+<p>As shown above, this policy splits the memory into a chain of 4, 8, 16, and 32-byte memory blocks. When we request 8 bytes of memory from the memory allocator, it finds the free memory block that meets the conditions in the above figure and returns it. The isolation-adapted allocation strategy reduces the number of memory blocks to be traversed and improves the efficiency of memory allocation.</p>
+<h3 id="hierarchical-allocation">Hierarchical allocation</h3>
+<p>Thread-Caching Malloc (TCMalloc) is a mechanism for allocating memory that is much faster than <code>malloc</code> in glibc. The Go language memory allocator borrows from TCMalloc&rsquo;s design for high-speed memory allocation. The core idea is to use a multi-level cache to sort objects by size and implement different allocation strategies by category.</p>
+<h4 id="object-size">Object Size</h4>
+<p>The memory allocator of the Go language selects different processing logic depending on the size of the memory requested to be allocated, and at runtime classifies objects into micro-objects, small objects, and large objects based on their size: the</p>
+<table>
+<thead>
+<tr>
+<th>category</th>
+<th>size</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>micro-objects</td>
+<td>(0, 16B)</td>
+</tr>
+<tr>
+<td>small objects</td>
+<td>[16B, 32KB]</td>
+</tr>
+<tr>
+<td>large objects</td>
+<td>(32KB, +∞)</td>
+</tr>
+</tbody>
+</table>
+<p>Since the majority of objects in your program are under 32KB in size, and the size of the memory requested affects the process and overhead of allocating memory at Go runtime, it is beneficial to handle large and small objects separately to improve the performance of the memory allocator.</p>
+<h4 id="multilevel-caching">Multilevel caching</h4>
+<p>The memory allocator not only treats objects of different sizes differently, but also manages memory at different levels. Both the TCMalloc and Go runtime allocators introduce three components to manage memory hierarchically: Thread Cache, Central Cache, and Page Heap.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/973e0bc0b5ec45e99db623d4483f341f.png" alt=""></p>
+<p>The thread cache belongs to each individual thread, and it can satisfy most of the memory allocation needs on the thread. Since it does not involve multiple threads, there is no need to use mutually exclusive locks to protect memory, which can reduce the performance loss caused by lock contention. When the thread cache cannot meet the demand, the runtime will use the central cache as a supplement to solve the memory allocation for small objects. When encountering objects over 32KB, the memory allocator will choose the page heap to allocate large memory directly.</p>
+<p>This multi-level memory allocation design is somewhat similar to the multi-level cache in computer operating systems, because most objects are small objects and we can provide enough memory space through the thread cache and the central cache, and get more memory resources from higher-level components when resources are found to be insufficient.</p>
+<h3 id="virtual-memory-layout">Virtual memory layout</h3>
+<p>The design and evolution of the Go language&rsquo;s heap memory address space will be described here. In versions of the Go language prior to 1.10, the heap memory space was contiguous; however, in version 1.11, the Go team used a sparse heap memory space instead of contiguous memory, addressing the limitations posed by contiguous memory and the problems that can arise in special scenarios.</p>
+<h4 id="linear-memory">linear memory</h4>
+<p>The 1.10 version of the Go language program initializes an entire area of virtual memory at startup, with the following three areas <code>spans</code>, <code>bitmap</code> and <code>arena</code> reserved for 512MB, 16GB and 512GB of memory respectively, which are not really physical memory, but virtual memory.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/251f3973716747be8d538015ff3048bc.png" alt=""></p>
+<ul>
+<li>spans area stores pointers to memory management units runtime.mspan, each of which manages a few pages of memory space, each of 8KB in size.</li>
+<li>bitmap is used to identify those addresses in the arena area where objects are stored, and each byte in the bitmap indicates whether 32 bytes in the heap area are free or not.</li>
+<li>arena area is the real heap area and the 8KB will be considered as one page at runtime; these memory pages store all the objects initialized on the heap.</li>
+</ul>
+<p>For any given address, we can calculate the number of pages in the arena based on the base address of the arena and get the runtime.mspan that manages that piece of memory from the spans array, where multiple contiguous locations may correspond to the same runtime.mspan structure.</p>
+<p>The Go language uses the procedure described in the previous paragraph to find the runtime.mspan that manages an object in the heap based on the address of the pointer, which is based on the assumption that the memory in the heap is contiguous. While this design is simple and convenient, it can cause crashes when used in a mix of C and Go:</p>
+<ul>
+<li>allocated memory addresses can conflict, causing heap initialization and expansion to fail.</li>
+<li>large chunks of memory that are not reserved may be allocated as C binaries, resulting in a discontinuous heap after expansion.</li>
+</ul>
+<p>Linear heap memory requires a large block of memory space to be reserved, but it is impractical to request a large block of memory space and not use it, while not reserving memory space can cause programs to crash in special scenarios. Although contiguous memory is relatively simple to implement, there is no way to ignore these issues.</p>
+<h4 id="sparse-memory">Sparse memory</h4>
+<p>Sparse memory is a solution proposed by the Go language in 1.11. Using a sparse memory layout not only removes the upper limit on heap size), but also solves address space conflicts when using a mix of C and Go. However, because memory management based on sparse memory loses the assumption of memory continuity, it also makes memory management more complex.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/07339809b2ec4aa296d385c69e57c07b.png" alt=""></p>
+<p>As shown above, the runtime uses a two-dimensional runtime.heapArena array to manage all memory, with each cell managing 64MB of memory space.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">heapArena</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">bitmap</span>       <span class="p">[</span><span class="nx">heapArenaBitmapBytes</span><span class="p">]</span><span class="kt">byte</span>
+	<span class="nx">spans</span>        <span class="p">[</span><span class="nx">pagesPerArena</span><span class="p">]</span><span class="o">*</span><span class="nx">mspan</span>
+	<span class="nx">pageInUse</span>    <span class="p">[</span><span class="nx">pagesPerArena</span> <span class="o">/</span> <span class="mi">8</span><span class="p">]</span><span class="kt">uint8</span>
+	<span class="nx">pageMarks</span>    <span class="p">[</span><span class="nx">pagesPerArena</span> <span class="o">/</span> <span class="mi">8</span><span class="p">]</span><span class="kt">uint8</span>
+	<span class="nx">pageSpecials</span> <span class="p">[</span><span class="nx">pagesPerArena</span> <span class="o">/</span> <span class="mi">8</span><span class="p">]</span><span class="kt">uint8</span>
+	<span class="nx">checkmarks</span>   <span class="o">*</span><span class="nx">checkmarksMap</span>
+	<span class="nx">zeroedBase</span>   <span class="kt">uintptr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The bitmap and spans in this structure correspond to the bitmap and spans regions in linear memory, and the zeroedBase field points to the base address of the memory managed by this structure. The above design slices the original contiguous large memory into sparse small memory, and the meta-information used to manage this memory is also sliced into small pieces.</p>
+<p>The size of the two-dimensional array may be completely different for different platforms and architectures; if our Go language service were running on Linux&rsquo;s x86-64 architecture, the one-dimensional size of the two-dimensional array would be 1, while the two-dimensional size would be 4,194,304, and since each pointer takes up 8 bytes of memory space, the total size of the meta-information would be 32MB. since each runtime. heapArena manages 64MB of memory, the entire heap can manage up to 256TB of memory, which is several orders of magnitude more than the previous 512GB.</p>
+<p>The Go team changed linear memory to sparse memory in version 1.11 with the following commits, removing the 512GB memory limit and the assumption of memory continuity in the heap area.</p>
+<ul>
+<li><a href="https://github.com/golang/go/commit/2b415549b813ba36caafa34fc34d72e47ee8335c">runtime: use sparse mappings for the heap</a></li>
+<li><a href="https://github.com/golang/go/commit/f61057c497e9ccb88dae093778d97aeee941af13">runtime: fix various contiguous bitmap assumptions</a></li>
+<li><a href="https://github.com/golang/go/commit/c0392d2e7fbdcd38aafb959e94daf6bbafe2e4e9">runtime: make the heap bitmap sparse</a></li>
+<li><a href="https://github.com/golang/go/commit/0de5324d61ba6d4c362f9fa76b6522e28155c83d">runtime: abstract remaining mheap.spans access</a></li>
+<li><a href="https://github.com/golang/go/commit/d6e821858157b7cb4ece22fcc1a5c8604478ebaa">runtime: make span map sparse</a></li>
+<li><a href="https://github.com/golang/go/commit/45ffeab549fa4b03b231a0872025364e13c7f7f0">runtime: eliminate most uses of mheap_.arena_*</a></li>
+<li><a href="https://github.com/golang/go/commit/51ae88ee2f9a1063c272a497527751d786291c89">runtime: remove non-reserved heap logic</a></li>
+<li><a href="https://github.com/golang/go/commit/90666b8a3d5545f4295d9c2517ad607ce5d45e52">runtime: move comment about address space sizes to malloc.go</a></li>
+</ul>
+<p>The above changes have a slight impact on garbage collection as memory management becomes more complex, increasing the garbage collection overhead by about 1%, but this is the cost we have to pay to solve the existing problem.</p>
+<h3 id="address-space">Address space</h3>
+<p>Because all memory is ultimately requested from the operating system, the Go language runtime builds the operating system&rsquo;s memory management abstraction layer, which divides the address space managed by the runtime into the following four states</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Explanation</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>None</td>
+<td>Memory is not reserved or mapped and is the default state of the address space</td>
+</tr>
+<tr>
+<td>Reserved</td>
+<td>Runtime holds this address space, but accessing this memory will result in an error</td>
+</tr>
+<tr>
+<td>Prepared</td>
+<td>Memory is reserved and generally does not have a physical memory counterpart. The behavior of accessing this memory is undefined and can be quickly transitioned to the Ready state</td>
+</tr>
+<tr>
+<td>Ready</td>
+<td>can be safely accessed</td>
+</tr>
+</tbody>
+</table>
+<p>Each different operating system will contain a specific set of methods for managing memory that will allow the memory address space to transition between different states, which we can understand in the following diagram.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/547d0ce673a641ef9f6c51dfa2e3c7ed.png" alt=""></p>
+<p>The runtime contains several OS implementations of the state transition methods, all of which are contained in files starting with mem_. This section describes the Linux OS implementation of the methods in the above figure.</p>
+<ul>
+<li>runtime.sysAlloc will fetch a large chunk of free memory space from the operating system, which may be a few hundred KB or a few MB.</li>
+<li>runtime.sysFree will be called when a program runs out of memory (OOM) and return memory unconditionally.</li>
+<li>runtime.sysReserve reserves an area of memory in the operating system, access to which will trigger an exception.</li>
+<li>runtime.sysMap ensures that the memory region can be quickly transitioned to a ready state.</li>
+<li>runtime.sysUsed notifies the operating system that the application needs to use the memory area, ensuring that the memory area can be safely accessed.</li>
+<li>runtime.sysUnused notifies the operating system that the physical memory corresponding to the virtual memory is no longer needed and that the physical memory can be reused.</li>
+<li>runtime.sysFault converts the memory region into a reserved state, mainly for runtime debugging.</li>
+</ul>
+<p>The runtime uses system calls such as <code>mmap</code>, <code>munmap</code> and <code>madvise</code> provided by Linux to implement the memory management abstraction layer of the operating system, smoothing out the differences between different operating systems and providing a more convenient interface for the runtime.</p>
+<h2 id="memory-management-components">Memory management components</h2>
+<p>The memory allocator in Go contains several important components: memory management unit, thread cache, central cache, and page heap. This section will introduce the data structures runtime.mspan, runtime.mcache, runtime.mcentral, and runtime.mheap that correspond to these most important components. We will describe in detail their role in the memory allocator and their implementation.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/2d0e913362574d3b995d21737eec1b16.png" alt=""></p>
+<p>All Go language programs initialize the memory layout shown above at startup. Each processor allocates a thread cache, runtime.mcache, to handle the allocation of micro- and small objects, and they hold the memory management unit runtime.mspan.</p>
+<p>Each type of memory management unit manages objects of a specific size, and when there are no free objects in the memory management unit, they fetch new memory units from the 134 central cache runtime.mcentral held by runtime.mheap, which belongs to the global heap structure runtime.mheap and which will It requests memory from the operating system.</p>
+<p>On an amd64 Linux operating system, runtime.mheap holds 4,194,304 runtime.heapArena, each of which manages 64MB of memory, for a maximum of 256TB of memory for a single Go language program.</p>
+<h3 id="memory-management-unit">Memory management unit</h3>
+<p>runtime.mspan is the basic Go language memory management unit. The structure contains two fields, next and prev, which point to the previous and next runtime.mspan, respectively.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">mspan</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">next</span> <span class="o">*</span><span class="nx">mspan</span>
+	<span class="nx">prev</span> <span class="o">*</span><span class="nx">mspan</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The above structures are concatenated to form a bi-directional chain table as follows. The runtime.mSpanList stores the head and tail nodes of the bi-directional chain table and uses them in the thread cache and the central cache.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/a4c871dc4e6a4489ab13b69a53bccf35.png" alt=""></p>
+<p>Because adjacent management units refer to each other, we can access other nodes in a bidirectional chain table from any of the structures.</p>
+<h4 id="pages-and-memory">Pages and memory</h4>
+<p>Each <code>runtime.mspan</code> manages <code>npages</code> of 8KB in size, which are not OS memory pages, they are integer multiples of OS memory pages, and the structure will manage the allocation and reclamation of memory pages using the following fields.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">mspan</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">startAddr</span> <span class="kt">uintptr</span> <span class="c1">// 起始地址
+</span><span class="c1"></span>	<span class="nx">npages</span>    <span class="kt">uintptr</span> <span class="c1">// 页数
+</span><span class="c1"></span>	<span class="nx">freeindex</span> <span class="kt">uintptr</span>
+
+	<span class="nx">allocBits</span>  <span class="o">*</span><span class="nx">gcBits</span>
+	<span class="nx">gcmarkBits</span> <span class="o">*</span><span class="nx">gcBits</span>
+	<span class="nx">allocCache</span> <span class="kt">uint64</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>startAddr and npages - identifies the memory where the multiple pages managed by this structure are located, each with a size of 8KB.</li>
+<li>freeindex - the initial index of the free object in the scanned page.</li>
+<li>allocBits and gcmarkBits - used to mark memory occupancy and recycling, respectively.</li>
+<li>allocCache - the complement of allocBits, which can be used to quickly find unused memory in memory.</li>
+</ul>
+<p>runtime.mspan takes two different views of managed memory, and when a structure is running low on managed memory, the runtime will request memory from the heap on a page-by-page basis.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/c6e877fad6694f5dbbed17360639562d.png" alt=""></p>
+<p>When a user program or thread requests memory from runtime.mspan, it uses the allocCache field to quickly find the space to be allocated in managed memory on an object-by-object basis.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/552fda37e0364d708125840c9314d3a0.png" alt=""></p>
+<p>If we can find a free memory cell in memory it is returned directly, when memory does not contain free memory, the higher level component runtime.mcache updates the memory management cell for the call to runtime.mcache.refill to meet the need to allocate memory for more objects.</p>
+<h4 id="state">state</h4>
+<p>The runtime uses <code>runtime.mSpanStateBox</code> to store the state of the memory management unit <code>runtime.mSpanState</code></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">mspan</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nx">state</span>       <span class="nx">mSpanStateBox</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This state may be in four cases: mSpanDead, mSpanInUse, mSpanManual and mSpanFree. When runtime.mspan is in the free heap, it will be in the mSpanFree state; when runtime.mspan has been allocated, it will be in the mSpanInUse, mSpanManual state, and the runtime will follow the following rules to convert this state.</p>
+<ul>
+<li>Possible conversion from mSpanFree to mSpanInUse and mSpanManual during any phase of garbage collection.</li>
+<li>Possible conversion from mSpanInUse and mSpanManual to mSpanFree during the purge phase of garbage collection.</li>
+<li>may not be converted from mSpanInUse and mSpanManual to mSpanFree during the mark phase of garbage collection.</li>
+</ul>
+<p>The operation to set the <code>runtime.mspan</code> state must be atomic to avoid the thread contention problem caused by garbage collection.</p>
+<h4 id="span-classes">Span Classes</h4>
+<p><code>runtime.spanClass</code> is the spanning class of [<code>runtime.mspan</code> that determines the size and number of objects stored in the memory management unit.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">mspan</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nx">spanclass</span>   <span class="nx">spanClass</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The Go memory management module contains 67 spanning classes, each of which stores a specific size of object and contains a specific number of pages and objects, all of which are preselected and stored in variables such as runtime.class_to_size and runtime.class_to_allocnpages.</p>
+<table>
+<thead>
+<tr>
+<th>class</th>
+<th>bytes/obj</th>
+<th>bytes/span</th>
+<th>objects</th>
+<th>tail waste</th>
+<th>max waste</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>8</td>
+<td>8192</td>
+<td>1024</td>
+<td>0</td>
+<td>87.50%</td>
+</tr>
+<tr>
+<td>2</td>
+<td>16</td>
+<td>8192</td>
+<td>512</td>
+<td>0</td>
+<td>43.75%</td>
+</tr>
+<tr>
+<td>3</td>
+<td>24</td>
+<td>8192</td>
+<td>341</td>
+<td>0</td>
+<td>29.24%</td>
+</tr>
+<tr>
+<td>4</td>
+<td>32</td>
+<td>8192</td>
+<td>256</td>
+<td>0</td>
+<td>46.88%</td>
+</tr>
+<tr>
+<td>5</td>
+<td>48</td>
+<td>8192</td>
+<td>170</td>
+<td>32</td>
+<td>31.52%</td>
+</tr>
+<tr>
+<td>6</td>
+<td>64</td>
+<td>8192</td>
+<td>128</td>
+<td>0</td>
+<td>23.44%</td>
+</tr>
+<tr>
+<td>7</td>
+<td>80</td>
+<td>8192</td>
+<td>102</td>
+<td>32</td>
+<td>19.07%</td>
+</tr>
+<tr>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+<td>…</td>
+</tr>
+<tr>
+<td>67</td>
+<td>32768</td>
+<td>32768</td>
+<td>1</td>
+<td>0</td>
+<td>12.50%</td>
+</tr>
+</tbody>
+</table>
+<p>The above table shows the size, number of objects stored, and memory space wasted for 67 span classes ranging in size from 8B to 32KB. Take the fourth span class in the table as an example, the maximum object size in runtime.mspan with span class 5 is 48 bytes, manages 1 page, and can store up to 170 objects. Because memory needs to be managed by page, 32 bytes of memory are wasted at the end, and when the objects stored in the page are all 33 bytes, at most 31.52% of the resources are wasted.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/ca23434beec84334919fddd1ac915d4e.png" alt=""></p>
+<p>In addition to the 67 span classes mentioned above, the runtime also contains a special span class with ID 0, which can manage special objects larger than 32KB. We will describe the allocation process for large objects in more detail later, so we will not expand on it here.</p>
+<p>In addition to storing the ID of the class, the span class also stores a noscan token bit that indicates whether the object contains a pointer. We can understand the underlying storage of IDs and tokens by looking at the following functions and methods.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">makeSpanClass</span><span class="p">(</span><span class="nx">sizeclass</span> <span class="kt">uint8</span><span class="p">,</span> <span class="nx">noscan</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">spanClass</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nf">spanClass</span><span class="p">(</span><span class="nx">sizeclass</span><span class="o">&lt;&lt;</span><span class="mi">1</span><span class="p">)</span> <span class="p">|</span> <span class="nf">spanClass</span><span class="p">(</span><span class="nf">bool2int</span><span class="p">(</span><span class="nx">noscan</span><span class="p">))</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">sc</span> <span class="nx">spanClass</span><span class="p">)</span> <span class="nf">sizeclass</span><span class="p">()</span> <span class="kt">int8</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nb">int8</span><span class="p">(</span><span class="nx">sc</span> <span class="o">&gt;&gt;</span> <span class="mi">1</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">sc</span> <span class="nx">spanClass</span><span class="p">)</span> <span class="nf">noscan</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">sc</span><span class="o">&amp;</span><span class="mi">1</span> <span class="o">!=</span> <span class="mi">0</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>runtime.spanClass</code> is an integer of type <code>uint8</code>, the first 7 bits of which store the ID of the span class and the last bit indicates whether it contains a pointer or not. The two methods provided by this type can help us get the corresponding field quickly.</p>
+<h3 id="thread-cache">Thread cache</h3>
+<p><code>runtime.mcache</code> is the thread cache in Go language, it will be bound to the processor on the thread one by one, mainly used to cache tiny objects requested by the user program. Each thread cache holds 68 * 2 <code>runtime.mspan</code>, and these memory management units are stored in the <code>alloc</code> field of the structure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/18e0174d3be74edf905b43ce4dada814.png" alt=""></p>
+<p>The thread cache is not initialized with runtime.mspan, and only when the user application requests memory does it get a new runtime.mspan from a higher-level component to meet the memory allocation requirements.</p>
+<h4 id="initialization">initialization</h4>
+<p>The runtime initializes the processor by calling runtime.allocmcache, which initializes the new runtime.mcache structure on the system stack using the thread cache allocator in runtime.mheap.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">allocmcache</span><span class="p">()</span> <span class="o">*</span><span class="nx">mcache</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">c</span> <span class="o">*</span><span class="nx">mcache</span>
+	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">mheap_</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="nx">c</span> <span class="p">=</span> <span class="p">(</span><span class="o">*</span><span class="nx">mcache</span><span class="p">)(</span><span class="nx">mheap_</span><span class="p">.</span><span class="nx">cachealloc</span><span class="p">.</span><span class="nf">alloc</span><span class="p">())</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">flushGen</span> <span class="p">=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nx">sweepgen</span>
+		<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">mheap_</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+	<span class="p">})</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span> <span class="p">{</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">emptymspan</span>
+	<span class="p">}</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">nextSample</span> <span class="p">=</span> <span class="nf">nextSample</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">c</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As we mentioned above, all runtime.mspan in the initialized runtime.mcache is the empty placeholder emptymspan.</p>
+<h4 id="replacement">replacement</h4>
+<p>runtime.mcache.refill will acquire a memory management unit for the thread cache of the specified span class. The unit being replaced cannot contain free memory space, and the acquired unit needs to contain at least one free object for memory allocation:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcache</span><span class="p">)</span> <span class="nf">refill</span><span class="p">(</span><span class="nx">spc</span> <span class="nx">spanClass</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">spc</span><span class="p">]</span>
+	<span class="nx">s</span> <span class="p">=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nx">central</span><span class="p">[</span><span class="nx">spc</span><span class="p">].</span><span class="nx">mcentral</span><span class="p">.</span><span class="nf">cacheSpan</span><span class="p">()</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">spc</span><span class="p">]</span> <span class="p">=</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As shown in the code above, this method requests a new runtime.mspan from the central cache to be stored in the thread cache, which is the only way to insert a memory management unit into the thread cache.</p>
+<h4 id="microallocators">microallocators</h4>
+<p>The thread cache also contains several fields for allocating micro-objects. The following three fields make up the micro-object allocator, which is dedicated to managing objects of less than 16 bytes.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">mcache</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">tiny</span>             <span class="kt">uintptr</span>
+	<span class="nx">tinyoffset</span>       <span class="kt">uintptr</span>
+	<span class="nx">local_tinyallocs</span> <span class="kt">uintptr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The microallocator will only be used to allocate non-pointer types of memory. tiny of the three fields above will point to a slice of memory in the heap, tinyOffset is the offset where the next free memory is located, and the final local_tinyallocs will keep track of the number of objects allocated in the memory allocator.</p>
+<h3 id="central-cache">Central cache</h3>
+<p>runtime.mcentral is the central cache of the memory allocator. Unlike the thread cache, access to the memory management units in the central cache requires the use of a mutex lock:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">mcentral</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">spanclass</span> <span class="nx">spanClass</span>
+	<span class="nx">partial</span>  <span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="nx">spanSet</span>
+	<span class="nx">full</span>     <span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="nx">spanSet</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Each central cache manages memory management units for a span class, and it holds both runtime.spanSet, which stores memory management units containing free objects and those not containing free objects.</p>
+<h4 id="memory-management-unit-1">Memory Management Unit</h4>
+<p>The thread cache will get the new memory management unit through the runtime.mcentral.cacheSpan method of the central cache, which has a complex implementation that we can divide into the following parts.</p>
+<ol>
+<li>call runtime.mcentral.partialSwept to find a usable memory management unit from a cleared runtime.spanSet structure containing free space.</li>
+<li>call runtime.mcentral.partialUnswept to find a memory management unit that can be used from the uncleared runtime.spanSet structure that has free objects.</li>
+<li>calling runtime.mcentral.fullUnswept to get the memory management unit from an uncleared runtime.spanSet that does not contain free space and clearing its memory space with runtime.mspan.sweep.</li>
+<li>calling runtime.mcentral.grow to request a new memory management unit from the heap.</li>
+<li>updating fields such as allocCache of the memory management unit to help allocate memory quickly.</li>
+</ol>
+<p>First we look for available runtime.mspan in the free set of the central cache, and the runtime will always start by fetching the cleaned memory management units first and checking the uncleared memory management units later.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcentral</span><span class="p">)</span> <span class="nf">cacheSpan</span><span class="p">()</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+	<span class="nx">sg</span> <span class="o">:=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nx">sweepgen</span>
+	<span class="nx">spanBudget</span> <span class="o">:=</span> <span class="mi">100</span>
+
+	<span class="kd">var</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span>
+	<span class="k">if</span> <span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">partialSwept</span><span class="p">(</span><span class="nx">sg</span><span class="p">).</span><span class="nf">pop</span><span class="p">();</span> <span class="nx">s</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">goto</span> <span class="nx">havespan</span>
+	<span class="p">}</span>
+
+	<span class="k">for</span> <span class="p">;</span> <span class="nx">spanBudget</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">spanBudget</span><span class="o">--</span> <span class="p">{</span>
+		<span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">partialUnswept</span><span class="p">(</span><span class="nx">sg</span><span class="p">).</span><span class="nf">pop</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">)</span> <span class="o">==</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nf">sweep</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+			<span class="k">goto</span> <span class="nx">havespan</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When a memory unit is found that needs to be reclaimed, the runtime triggers runtime.mspan.sweep to clean it up. If no managed unit is found in the set containing free space, then the runtime attempts to fetch from the uncleared set.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcentral</span><span class="p">)</span> <span class="nf">cacheSpan</span><span class="p">()</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">for</span> <span class="p">;</span> <span class="nx">spanBudget</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">spanBudget</span><span class="o">--</span> <span class="p">{</span>
+		<span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">fullUnswept</span><span class="p">(</span><span class="nx">sg</span><span class="p">).</span><span class="nf">pop</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">)</span> <span class="o">==</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nf">sweep</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+			<span class="nx">freeIndex</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">nextFreeIndex</span><span class="p">()</span>	
+            <span class="k">if</span> <span class="nx">freeIndex</span> <span class="o">!=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
+				<span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="p">=</span> <span class="nx">freeIndex</span>
+				<span class="k">goto</span> <span class="nx">havespan</span>
+			<span class="p">}</span>
+			<span class="nx">c</span><span class="p">.</span><span class="nf">fullSwept</span><span class="p">(</span><span class="nx">sg</span><span class="p">).</span><span class="nf">push</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If runtime.mcentral does not find a free unit through either of these stages, it calls runtime.mcentral.grow to trigger an expansion to request new memory from the heap.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcentral</span><span class="p">)</span> <span class="nf">cacheSpan</span><span class="p">()</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">grow</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+
+<span class="nx">havespan</span><span class="p">:</span>
+	<span class="nx">freeByteBase</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="o">&amp;^</span> <span class="p">(</span><span class="mi">64</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="nx">whichByte</span> <span class="o">:=</span> <span class="nx">freeByteBase</span> <span class="o">/</span> <span class="mi">8</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nf">refillAllocCache</span><span class="p">(</span><span class="nx">whichByte</span><span class="p">)</span>
+
+	<span class="nx">s</span><span class="p">.</span><span class="nx">allocCache</span> <span class="o">&gt;&gt;=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="o">%</span> <span class="mi">64</span>
+
+	<span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Regardless of the method through which the memory cell is acquired, the method ends by updating the fields such as allocBits and allocCache of the memory cell, allowing the runtime to quickly find free objects when allocating memory.</p>
+<h4 id="scaling">Scaling</h4>
+<p>The central cache&rsquo;s expand method, runtime.mcentral.grow, gets the number of pages to be allocated and the span class based on the pre-calculated class_to_allocnpages and class_to_size and calls runtime.mheap.alloc to get the new runtime.mspan structure.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcentral</span><span class="p">)</span> <span class="nf">grow</span><span class="p">()</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+	<span class="nx">npages</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">class_to_allocnpages</span><span class="p">[</span><span class="nx">c</span><span class="p">.</span><span class="nx">spanclass</span><span class="p">.</span><span class="nf">sizeclass</span><span class="p">()])</span>
+	<span class="nx">size</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">class_to_size</span><span class="p">[</span><span class="nx">c</span><span class="p">.</span><span class="nx">spanclass</span><span class="p">.</span><span class="nf">sizeclass</span><span class="p">()])</span>
+
+	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">,</span> <span class="nx">c</span><span class="p">.</span><span class="nx">spanclass</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+
+	<span class="nx">n</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">npages</span> <span class="o">&lt;&lt;</span> <span class="nx">_PageShift</span><span class="p">)</span> <span class="o">&gt;&gt;</span> <span class="nx">s</span><span class="p">.</span><span class="nx">divShift</span> <span class="o">*</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">divMul</span><span class="p">)</span> <span class="o">&gt;&gt;</span> <span class="nx">s</span><span class="p">.</span><span class="nx">divShift2</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">limit</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()</span> <span class="o">+</span> <span class="nx">size</span><span class="o">*</span><span class="nx">n</span>
+	<span class="nf">heapBitsForAddr</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()).</span><span class="nf">initSpan</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>After getting runtime.mspan, we initialize the limit field and clear the bitmap corresponding to this structure on the heap in the above method.</p>
+<h3 id="page-heap">Page heap</h3>
+<p>runtime.mheap is the core structure for memory allocation, which is stored as a global variable by Go language programs, and all objects initialized on the heap are managed by this structure. This structure contains two very important sets of fields, one of which is the global central cache list central, and the other is the arenas and related fields that manage the memory area of the heap.</p>
+<p>The page heap contains a runtime.mcentral array of length 136, of which 68 are central caches for span classes that require scan, and the other 68 are central caches for noscan.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/35eed2816f794a8c9b3f2579389c11a5.png" alt=""></p>
+<p>We have already described in the Design Principles section that all memory space in Go is managed by a two-dimensional matrix runtime.heapArena as follows, which can be discontinuous.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/4697696686fb413f918b9011afe24e7b.png" alt=""></p>
+<p>In 64-bit operating systems other than Windows, each runtime.heapArena manages 64MB of memory space. The following table shows the size of the heap area managed by Go language programs on different platforms and the memory space occupied by runtime.heapArena.</p>
+<table>
+<thead>
+<tr>
+<th>Platform</th>
+<th>Address Bits</th>
+<th>Arena Size</th>
+<th>One Dimensional Size</th>
+<th>Two Dimensional Size</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>*/64-bit</td>
+<td>48</td>
+<td>64MB</td>
+<td>1</td>
+<td>4M (32MB)</td>
+</tr>
+<tr>
+<td>windows/64-bit</td>
+<td>48</td>
+<td>4MB</td>
+<td>64</td>
+<td>1M (8MB)</td>
+</tr>
+<tr>
+<td>*/32-bit</td>
+<td>32</td>
+<td>4MB</td>
+<td>1</td>
+<td>1024 (4KB)</td>
+</tr>
+<tr>
+<td>*/mips(le)</td>
+<td>31</td>
+<td>4MB</td>
+<td>1</td>
+<td>512 (2KB)</td>
+</tr>
+</tbody>
+</table>
+<p>This section describes the initialization of the page heap, memory allocation, and memory management unit allocation processes that help us understand how the global variable page heap relates to other components and the way it manages memory.</p>
+<h4 id="initialization-1">Initialization</h4>
+<p>The heap area is initialized using the runtime.mheap.init method, which we can see initializes a very large number of structures and fields, but two of the more important types of variables are initialized.</p>
+<ol>
+<li>spanalloc, cachealloc, and arenaHintAlloc free chain table allocators of type runtime.fixalloc.</li>
+<li>central cache of type runtime.mcentral in the central slice.</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">init</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">h</span><span class="p">.</span><span class="nx">spanalloc</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">mspan</span><span class="p">{}),</span> <span class="nx">recordspan</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">h</span><span class="p">),</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">mspan_sys</span><span class="p">)</span>
+	<span class="nx">h</span><span class="p">.</span><span class="nx">cachealloc</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">mcache</span><span class="p">{}),</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">mcache_sys</span><span class="p">)</span>
+	<span class="nx">h</span><span class="p">.</span><span class="nx">specialfinalizeralloc</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">specialfinalizer</span><span class="p">{}),</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">other_sys</span><span class="p">)</span>
+	<span class="nx">h</span><span class="p">.</span><span class="nx">specialprofilealloc</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">specialprofile</span><span class="p">{}),</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">other_sys</span><span class="p">)</span>
+	<span class="nx">h</span><span class="p">.</span><span class="nx">arenaHintAlloc</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">arenaHint</span><span class="p">{}),</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">other_sys</span><span class="p">)</span>
+
+	<span class="nx">h</span><span class="p">.</span><span class="nx">spanalloc</span><span class="p">.</span><span class="nx">zero</span> <span class="p">=</span> <span class="kc">false</span>
+
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">h</span><span class="p">.</span><span class="nx">central</span> <span class="p">{</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nx">central</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">mcentral</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="nf">spanClass</span><span class="p">(</span><span class="nx">i</span><span class="p">))</span>
+	<span class="p">}</span>
+
+	<span class="nx">h</span><span class="p">.</span><span class="nx">pages</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">gc_sys</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The multiple free link allocator initialized in the heap is not much different from the allocator mentioned in the design principles. When we call runtime.fixalloc.init to initialize the allocator, we need to pass in information such as the size of the structure to be initialized, which will help the allocator to partition the memory to be allocated, and it provides the following two methods for allocating and releasing memory.</p>
+<ol>
+<li>runtime.fixalloc.alloc - get the next free memory space.</li>
+<li>runtime.fixalloc.free - free the memory space pointed to by the pointer.</li>
+</ol>
+<p>In addition to these free chain table allocators, we will also initialize all the central caches in this method. These central caches will maintain the global memory management units, and individual threads will fetch new memory units through the central caches.</p>
+<h4 id="memory-management-units">Memory management units</h4>
+<p>runtime.mheap is the core component of the memory allocator and will fetch new runtime.mspan units on the system stack via its runtime.mheap.alloc method.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">spanclass</span> <span class="nx">spanClass</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span>
+	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">h</span><span class="p">.</span><span class="nx">sweepdone</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">h</span><span class="p">.</span><span class="nf">reclaim</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">s</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">allocSpan</span><span class="p">(</span><span class="nx">npages</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="nx">spanclass</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_inuse</span><span class="p">)</span>
+	<span class="p">})</span>
+	<span class="o">...</span>
+	<span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>To stop the large memory footprint and heap growth, we need to call the runtime.mheap.reclaim method to reclaim a portion of memory before allocating the corresponding number of pages, and then the runtime allocates a new memory management unit via runtime.mheap.allocSpan, the execution of which we will split into two parts.</p>
+<ol>
+<li>allocate a new memory page and memory management unit runtime.mspan from the heap.</li>
+<li>initialize the memory management unit and add it to the list of memory units held by runtime.mheap.</li>
+</ol>
+<p>First we need to request the number of npages of memory pages on the heap and initialize runtime.mspan.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">allocSpan</span><span class="p">(</span><span class="nx">npages</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="nx">spanAllocType</span><span class="p">,</span> <span class="nx">spanclass</span> <span class="nx">spanClass</span><span class="p">)</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="nx">base</span><span class="p">,</span> <span class="nx">scav</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+	<span class="nx">pp</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">p</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">pp</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">npages</span> <span class="p">&lt;</span> <span class="nx">pageCachePages</span><span class="o">/</span><span class="mi">4</span> <span class="p">{</span>
+		<span class="nx">c</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">pp</span><span class="p">.</span><span class="nx">pcache</span>
+		<span class="nx">base</span><span class="p">,</span> <span class="nx">scav</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">base</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">s</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">tryAllocMSpan</span><span class="p">()</span>
+			<span class="k">if</span> <span class="nx">s</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">gcBlackenEnabled</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">manual</span> <span class="o">||</span> <span class="nx">spanclass</span><span class="p">.</span><span class="nf">sizeclass</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">goto</span> <span class="nx">HaveSpan</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">base</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">base</span><span class="p">,</span> <span class="nx">scav</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">pages</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">base</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">h</span><span class="p">.</span><span class="nf">grow</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span>
+            <span class="nx">base</span><span class="p">,</span> <span class="nx">scav</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">pages</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">base</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;grew heap, but no adequate free space found&#34;</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">s</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">allocMSpanLocked</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The above methods request memory from the heap through either the processor&rsquo;s page cache, runtime.pageCache, or the global page allocator, runtime.pageAlloc.</p>
+<ol>
+<li>if the requested memory is relatively small, obtains the processor requesting the memory and attempts to call runtime.pageCache.alloc to obtain the base address and size of the memory area.</li>
+<li>if the requested memory is large or the thread is running low on memory in the page cache, it will request memory on the page heap via runtime.pageAlloc.alloc.</li>
+<li>if insufficient memory is found on the page heap, attempts to expand and re-call runtime.pageAlloc.alloc to request memory via runtime.mheap.grow.
+<ol>
+<li>if the memory is requested, it means the expansion is successful.</li>
+<li>if no memory is requested, it means that the expansion failed and the host may not have free memory and will simply abort the current program when it runs.</li>
+</ol>
+</li>
+</ol>
+<p>Whichever way the memory page is obtained, we allocate the new runtime.mspan structure in this function; the remainder of the method initializes its multiple fields with parameters such as the number of pages, memory space, and the span class.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">spanclass</span> <span class="nx">spanClass</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+	<span class="o">...</span>
+<span class="nx">HaveSpan</span><span class="p">:</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="nx">base</span><span class="p">,</span> <span class="nx">npages</span><span class="p">)</span>
+
+	<span class="o">...</span>
+
+	<span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">allocCache</span> <span class="p">=</span> <span class="p">^</span><span class="nb">uint64</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">gcmarkBits</span> <span class="p">=</span> <span class="nf">newMarkBits</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span><span class="p">)</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">allocBits</span> <span class="p">=</span> <span class="nf">newAllocBits</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span><span class="p">)</span>
+	<span class="nx">h</span><span class="p">.</span><span class="nf">setSpans</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">(),</span> <span class="nx">npages</span><span class="p">,</span> <span class="nx">s</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the above code, we initialize the just-allocated runtime.mspan structure by calling runtime.mspan.init to set the parameters and establish the connection between the page heap and the memory cell via runtime.mheaps.setSpans.</p>
+<h4 id="expand">expand</h4>
+<p>runtime.mheap.grow will request more memory space from the operating system. The number of pages passed in is aligned to get the desired memory size, and we can divide the execution of this method into the following parts.</p>
+<ol>
+<li>obtain the size of the memory space expected to be allocated and the base address of the memory from the number of pages passed in.</li>
+<li>calling runtime.mheap.sysAlloc to request more memory from the operating system if there is not enough space in the arena area.</li>
+<li>expanding the arena area held by runtime.mheap and updating the page allocator&rsquo;s meta information.</li>
+<li>in some scenarios, calling runtime.pageAlloc.scavenge to reclaim free memory pages that are no longer in use.</li>
+</ol>
+<p>During the page heap expansion, runtime.mheap.sysAlloc is the method used by the page heap to request virtual memory, and we will describe the implementation of this method in several parts. First, the method attempts to request memory in a pre-reserved area.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">sysAlloc</span><span class="p">(</span><span class="nx">n</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">(</span><span class="nx">v</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">size</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">n</span> <span class="p">=</span> <span class="nf">alignUp</span><span class="p">(</span><span class="nx">n</span><span class="p">,</span> <span class="nx">heapArenaBytes</span><span class="p">)</span>
+
+	<span class="nx">v</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">arena</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">n</span><span class="p">,</span> <span class="nx">heapArenaBytes</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_sys</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">v</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">size</span> <span class="p">=</span> <span class="nx">n</span>
+		<span class="k">goto</span> <span class="nx">mapped</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The above code calls runtime.linearAlloc.alloc of the linear allocator to request a usable space in the pre-reserved memory. If no space is available, we will try to expand it at the target address based on the arenaHints of the page heap.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">sysAlloc</span><span class="p">(</span><span class="nx">n</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">(</span><span class="nx">v</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">size</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">for</span> <span class="nx">h</span><span class="p">.</span><span class="nx">arenaHints</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">hint</span> <span class="o">:=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">arenaHints</span>
+		<span class="nx">p</span> <span class="o">:=</span> <span class="nx">hint</span><span class="p">.</span><span class="nx">addr</span>
+		<span class="nx">v</span> <span class="p">=</span> <span class="nf">sysReserve</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">p</span><span class="p">),</span> <span class="nx">n</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">hint</span><span class="p">.</span><span class="nx">addr</span> <span class="p">=</span> <span class="nx">p</span>
+			<span class="nx">size</span> <span class="p">=</span> <span class="nx">n</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nx">arenaHints</span> <span class="p">=</span> <span class="nx">hint</span><span class="p">.</span><span class="nx">next</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nx">arenaHintAlloc</span><span class="p">.</span><span class="nf">free</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">hint</span><span class="p">))</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+	<span class="nf">sysMap</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">size</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_sys</span><span class="p">)</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.sysReserve and runtime.sysMap are the core parts of the above code that request memory from the operating system and convert it to the Prepared state.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">sysAlloc</span><span class="p">(</span><span class="nx">n</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">(</span><span class="nx">v</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">size</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+<span class="nx">mapped</span><span class="p">:</span>
+	<span class="k">for</span> <span class="nx">ri</span> <span class="o">:=</span> <span class="nf">arenaIndex</span><span class="p">(</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">v</span><span class="p">));</span> <span class="nx">ri</span> <span class="o">&lt;=</span> <span class="nf">arenaIndex</span><span class="p">(</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span><span class="o">+</span><span class="nx">size</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span> <span class="nx">ri</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">l2</span> <span class="o">:=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">arenas</span><span class="p">[</span><span class="nx">ri</span><span class="p">.</span><span class="nf">l1</span><span class="p">()]</span>
+		<span class="nx">r</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">heapArena</span><span class="p">)(</span><span class="nx">h</span><span class="p">.</span><span class="nx">heapArenaAlloc</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="o">*</span><span class="nx">r</span><span class="p">),</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">gc_sys</span><span class="p">))</span>
+		<span class="o">...</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nx">allArenas</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">allArenas</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nx">allArenas</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">]</span>
+		<span class="nx">h</span><span class="p">.</span><span class="nx">allArenas</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nx">allArenas</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="p">=</span> <span class="nx">ri</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">StorepNoWB</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l2</span><span class="p">[</span><span class="nx">ri</span><span class="p">.</span><span class="nf">l2</span><span class="p">()]),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">r</span><span class="p">))</span>
+	<span class="p">}</span>
+	<span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The runtime.mheap.sysAlloc method at the end initializes a new runtime.heapArena to manage the memory space just requested, which is added to the two-dimensional matrix of the page heap.</p>
+<h2 id="memory-allocation">Memory allocation</h2>
+<p>All objects on the heap are allocated memory by calling the runtime.newobject function, which calls runtime.mallocgc to allocate memory space of the specified size, which is the mandatory function for user programs to request memory space on the heap.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+	<span class="nx">mp</span> <span class="o">:=</span> <span class="nf">acquirem</span><span class="p">()</span>
+	<span class="nx">mp</span><span class="p">.</span><span class="nx">mallocing</span> <span class="p">=</span> <span class="mi">1</span>
+
+	<span class="nx">c</span> <span class="o">:=</span> <span class="nf">gomcache</span><span class="p">()</span>
+	<span class="kd">var</span> <span class="nx">x</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+	<span class="nx">noscan</span> <span class="o">:=</span> <span class="nx">typ</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">typ</span><span class="p">.</span><span class="nx">ptrdata</span> <span class="o">==</span> <span class="mi">0</span>
+	<span class="k">if</span> <span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">maxSmallSize</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">noscan</span> <span class="o">&amp;&amp;</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="nx">maxTinySize</span> <span class="p">{</span>
+			<span class="c1">// 微对象分配
+</span><span class="c1"></span>		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="c1">// 小对象分配
+</span><span class="c1"></span>		<span class="p">}</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="c1">// 大对象分配
+</span><span class="c1"></span>	<span class="p">}</span>
+
+	<span class="nf">publicationBarrier</span><span class="p">()</span>
+	<span class="nx">mp</span><span class="p">.</span><span class="nx">mallocing</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="nf">releasem</span><span class="p">(</span><span class="nx">mp</span><span class="p">)</span>
+
+	<span class="k">return</span> <span class="nx">x</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The above code uses runtime.gomcache to get the thread cache and determine if the requested memory type is a pointer. We can see from this code snippet that runtime.mallocgc performs different allocation logic depending on the size of the object. As also described in the previous section, the runtime classifies objects into micro, small and large objects based on their size, and here different allocation logic is chosen based on size.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/cddf6955f45d4f96b3b41ffd5a24ed88.png" alt=""></p>
+<ol>
+<li>micro-object (0, 16B) - use the micro-allocator first, then try to allocate memory using the thread cache, the central cache and the heap in that order.</li>
+<li>small objects [16B, 32KB] - try to allocate memory using the thread cache, the central cache and the heap, in that order.</li>
+<li>large objects (32KB, +∞) - allocate memory directly on the heap.</li>
+</ol>
+<p>We will introduce the process of allocating micro-objects, small objects and large objects at runtime in turn to sort out the core execution flow of memory allocation.</p>
+<h3 id="microobjects">Microobjects</h3>
+<p>The Go language runtime classifies objects smaller than 16 bytes as microobjects, and it improves the performance of microobject allocation using a microallocator on the thread cache, which we mainly use to allocate smaller strings and escaped temporary variables. The microallocator can combine multiple smaller memory allocation requests into the same memory block, and the whole memory may be reclaimed only when all objects in the memory block need to be reclaimed.</p>
+<p>The objects managed by the microallocator cannot be of pointer type. The size of the memory block for managing multiple objects, maxTinySize, is adjustable, and by default the memory block size is 16 bytes. The larger the value of maxTinySize, the higher the possibility of combining multiple objects and the more memory is wasted; the smaller the maxTinySize, the less memory is wasted. However, no matter how you tune it, a multiple of 8 is a good choice.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/06/30bbc98d43f94511bb5cc2dcbd019c09.png" alt=""></p>
+<p>As shown above, the microallocator has allocated 12 bytes of objects in a 16-byte block of memory. If the next object to be allocated is less than 4 bytes, it will use the remainder of the above block directly, reducing memory fragmentation, although the block will only be reclaimed if all objects are marked as garbage.</p>
+<p>The tiny field in the thread cache runtime.mcache points to a block of size maxTinySize, which will be fetched and returned by the runtime with the base address and offset if the current block still contains free memory of the right size.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">maxSmallSize</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">noscan</span> <span class="o">&amp;&amp;</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="nx">maxTinySize</span> <span class="p">{</span>
+			<span class="nx">off</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">tinyoffset</span>
+			<span class="k">if</span> <span class="nx">off</span><span class="o">+</span><span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">maxTinySize</span> <span class="o">&amp;&amp;</span> <span class="nx">c</span><span class="p">.</span><span class="nx">tiny</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nx">x</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">tiny</span> <span class="o">+</span> <span class="nx">off</span><span class="p">)</span>
+				<span class="nx">c</span><span class="p">.</span><span class="nx">tinyoffset</span> <span class="p">=</span> <span class="nx">off</span> <span class="o">+</span> <span class="nx">size</span>
+				<span class="nx">c</span><span class="p">.</span><span class="nx">local_tinyallocs</span><span class="o">++</span>
+				<span class="nf">releasem</span><span class="p">(</span><span class="nx">mp</span><span class="p">)</span>
+				<span class="k">return</span> <span class="nx">x</span>
+			<span class="p">}</span>
+			<span class="o">...</span>
+		<span class="p">}</span>
+		<span class="o">...</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When the memory block does not contain free memory, this code below will first find the memory management unit runtime.mspan corresponding to the span class from the thread cache and call runtime.nextFreeFast to get the free memory; when there is no free memory, we will call runtime.mcache.nextFree to get the free memory from the central cache or the page heap to get an allocatable block of memory:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">maxSmallSize</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">noscan</span> <span class="o">&amp;&amp;</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="nx">maxTinySize</span> <span class="p">{</span>
+			<span class="o">...</span>
+			<span class="nx">span</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">tinySpanClass</span><span class="p">]</span>
+			<span class="nx">v</span> <span class="o">:=</span> <span class="nf">nextFreeFast</span><span class="p">(</span><span class="nx">span</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">v</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nx">v</span><span class="p">,</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">nextFree</span><span class="p">(</span><span class="nx">tinySpanClass</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="nx">x</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span>
+			<span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="kt">uint64</span><span class="p">)(</span><span class="nx">x</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="kt">uint64</span><span class="p">)(</span><span class="nx">x</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="k">if</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="nx">c</span><span class="p">.</span><span class="nx">tinyoffset</span> <span class="o">||</span> <span class="nx">c</span><span class="p">.</span><span class="nx">tiny</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nx">c</span><span class="p">.</span><span class="nx">tiny</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">x</span><span class="p">)</span>
+				<span class="nx">c</span><span class="p">.</span><span class="nx">tinyoffset</span> <span class="p">=</span> <span class="nx">size</span>
+			<span class="p">}</span>
+			<span class="nx">size</span> <span class="p">=</span> <span class="nx">maxTinySize</span>
+		<span class="p">}</span>
+		<span class="o">...</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+	<span class="k">return</span> <span class="nx">x</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>After acquiring the new free memory block, the above code clears the data in the free memory, updates the tiny and tinyoffset fields that make up the micro-object allocator, and returns the new free memory.</p>
+<h3 id="small-objects">Small objects</h3>
+<p>Small objects are objects of size 16 bytes to 32,768 bytes and all objects of pointer type less than 16 bytes, the allocation of small objects can be divided into the following three steps.</p>
+<ol>
+<li>determine the size of the allocated object and the span class runtime.spanClass.</li>
+<li>fetching memory management units from the thread cache, central cache, or heap and finding free memory space from the memory management units.</li>
+<li>calling runtime.memclrNoHeapPointers to clear all data in free memory.</li>
+</ol>
+<p>Determining the size of the object to be allocated and the span class requires the use of the pre-calculated size_to_class8, size_to_class128 and class_to_size dictionaries, which help us to quickly obtain the corresponding values and construct runtime.spanClass.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">maxSmallSize</span> <span class="p">{</span>
+		<span class="o">...</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="kd">var</span> <span class="nx">sizeclass</span> <span class="kt">uint8</span>
+			<span class="k">if</span> <span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">smallSizeMax</span><span class="o">-</span><span class="mi">8</span> <span class="p">{</span>
+				<span class="nx">sizeclass</span> <span class="p">=</span> <span class="nx">size_to_class8</span><span class="p">[(</span><span class="nx">size</span><span class="o">+</span><span class="nx">smallSizeDiv</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="nx">smallSizeDiv</span><span class="p">]</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="nx">sizeclass</span> <span class="p">=</span> <span class="nx">size_to_class128</span><span class="p">[(</span><span class="nx">size</span><span class="o">-</span><span class="nx">smallSizeMax</span><span class="o">+</span><span class="nx">largeSizeDiv</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="nx">largeSizeDiv</span><span class="p">]</span>
+			<span class="p">}</span>
+			<span class="nx">size</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">class_to_size</span><span class="p">[</span><span class="nx">sizeclass</span><span class="p">])</span>
+			<span class="nx">spc</span> <span class="o">:=</span> <span class="nf">makeSpanClass</span><span class="p">(</span><span class="nx">sizeclass</span><span class="p">,</span> <span class="nx">noscan</span><span class="p">)</span>
+			<span class="nx">span</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">spc</span><span class="p">]</span>
+			<span class="nx">v</span> <span class="o">:=</span> <span class="nf">nextFreeFast</span><span class="p">(</span><span class="nx">span</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">v</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nx">v</span><span class="p">,</span> <span class="nx">span</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">nextFree</span><span class="p">(</span><span class="nx">spc</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="nx">x</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">needzero</span> <span class="o">&amp;&amp;</span> <span class="nx">span</span><span class="p">.</span><span class="nx">needzero</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nf">memclrNoHeapPointers</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">v</span><span class="p">),</span> <span class="nx">size</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="o">...</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+	<span class="k">return</span> <span class="nx">x</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the above code snippet, we will focus on the implementation of two methods, runtime.nextFreeFast and runtime.mcache.nextFree, which help us to get free memory space. runtime.nextFreeFast uses the memory management unit&rsquo;s allocCache field in the memory management unit to quickly find the number of bits in that field that are 1. We described above that 1 means that the memory space corresponding to that bit is free.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">nextFreeFast</span><span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span><span class="p">)</span> <span class="nx">gclinkptr</span> <span class="p">{</span>
+	<span class="nx">theBit</span> <span class="o">:=</span> <span class="nx">sys</span><span class="p">.</span><span class="nf">Ctz64</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">allocCache</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">theBit</span> <span class="p">&lt;</span> <span class="mi">64</span> <span class="p">{</span>
+		<span class="nx">result</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="o">+</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">theBit</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">result</span> <span class="p">&lt;</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
+			<span class="nx">freeidx</span> <span class="o">:=</span> <span class="nx">result</span> <span class="o">+</span> <span class="mi">1</span>
+			<span class="k">if</span> <span class="nx">freeidx</span><span class="o">%</span><span class="mi">64</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">freeidx</span> <span class="o">!=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
+				<span class="k">return</span> <span class="mi">0</span>
+			<span class="p">}</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">allocCache</span> <span class="o">&gt;&gt;=</span> <span class="nb">uint</span><span class="p">(</span><span class="nx">theBit</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="p">=</span> <span class="nx">freeidx</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="o">++</span>
+			<span class="k">return</span> <span class="nf">gclinkptr</span><span class="p">(</span><span class="nx">result</span><span class="o">*</span><span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span> <span class="o">+</span> <span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">())</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="mi">0</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Once we find a free object, we can update the allocCache, freeindex, etc. fields of the memory management unit and return that piece of memory; if we don&rsquo;t find a free memory, the runtime will find a new memory management unit via runtime.mcache.nextFree.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcache</span><span class="p">)</span> <span class="nf">nextFree</span><span class="p">(</span><span class="nx">spc</span> <span class="nx">spanClass</span><span class="p">)</span> <span class="p">(</span><span class="nx">v</span> <span class="nx">gclinkptr</span><span class="p">,</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span><span class="p">,</span> <span class="nx">shouldhelpgc</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">spc</span><span class="p">]</span>
+	<span class="nx">freeIndex</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">nextFreeIndex</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">freeIndex</span> <span class="o">==</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
+		<span class="nx">c</span><span class="p">.</span><span class="nf">refill</span><span class="p">(</span><span class="nx">spc</span><span class="p">)</span>
+		<span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">spc</span><span class="p">]</span>
+		<span class="nx">freeIndex</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">nextFreeIndex</span><span class="p">()</span>
+	<span class="p">}</span>
+
+	<span class="nx">v</span> <span class="p">=</span> <span class="nf">gclinkptr</span><span class="p">(</span><span class="nx">freeIndex</span><span class="o">*</span><span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span> <span class="o">+</span> <span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">())</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="o">++</span>
+	<span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the above method, if we do not find an available memory management unit in the thread cache, we replace the structure that no longer has an available object with a memory management unit from the central cache via runtime.mcache.refill as described earlier, which calls runtime.mspan.nextFreeIndex of the new structure to get free memory and returns it.</p>
+<h3 id="large-objects">Large objects</h3>
+<p>Large objects larger than 32KB are handled separately by the runtime. Instead of fetching memory management units from the thread cache or central cache, we call runtime.mcache.allocLarge to allocate large chunks of memory directly.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">maxSmallSize</span> <span class="p">{</span>
+		<span class="o">...</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="kd">var</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span>
+		<span class="nx">span</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">allocLarge</span><span class="p">(</span><span class="nx">size</span><span class="p">,</span> <span class="nx">needzero</span><span class="p">,</span> <span class="nx">noscan</span><span class="p">)</span>
+		<span class="nx">span</span><span class="p">.</span><span class="nx">freeindex</span> <span class="p">=</span> <span class="mi">1</span>
+		<span class="nx">span</span><span class="p">.</span><span class="nx">allocCount</span> <span class="p">=</span> <span class="mi">1</span>
+		<span class="nx">x</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">span</span><span class="p">.</span><span class="nf">base</span><span class="p">())</span>
+		<span class="nx">size</span> <span class="p">=</span> <span class="nx">span</span><span class="p">.</span><span class="nx">elemsize</span>
+	<span class="p">}</span>
+
+	<span class="nf">publicationBarrier</span><span class="p">()</span>
+	<span class="nx">mp</span><span class="p">.</span><span class="nx">mallocing</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="nf">releasem</span><span class="p">(</span><span class="nx">mp</span><span class="p">)</span>
+
+	<span class="k">return</span> <span class="nx">x</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.mcache.allocLarge calculates the number of pages needed to allocate the object, and it requests memory on the heap in multiples of 8KB.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcache</span><span class="p">)</span> <span class="nf">allocLarge</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">noscan</span> <span class="kt">bool</span><span class="p">)</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+	<span class="nx">npages</span> <span class="o">:=</span> <span class="nx">size</span> <span class="o">&gt;&gt;</span> <span class="nx">_PageShift</span>
+	<span class="k">if</span> <span class="nx">size</span><span class="o">&amp;</span><span class="nx">_PageMask</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">npages</span><span class="o">++</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">,</span> <span class="nx">spc</span><span class="p">,</span> <span class="nx">needzero</span><span class="p">)</span>
+	<span class="nx">mheap_</span><span class="p">.</span><span class="nx">central</span><span class="p">[</span><span class="nx">spc</span><span class="p">].</span><span class="nx">mcentral</span><span class="p">.</span><span class="nf">fullSwept</span><span class="p">(</span><span class="nx">mheap_</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">).</span><span class="nf">push</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">limit</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()</span> <span class="o">+</span> <span class="nx">size</span>
+	<span class="nf">heapBitsForAddr</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()).</span><span class="nf">initSpan</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The memory request creates a runtime.spanClass with a span class of 0 and calls runtime.mheap.alloc to allocate a management unit to manage the corresponding memory.</p>
+<h2 id="summary">Summary</h2>
+<p>Memory allocation is the core logic of Go language runtime memory management. The runtime memory allocator uses a TCMalloc-like allocation strategy to classify objects according to their size and designs multi-level components to improve the performance of the memory allocator. This section not only introduces the design and implementation principles of memory allocators in Go language, but also introduces common designs of memory allocators to help us understand the different choices made by different programming languages when designing memory allocators.</p>
+<p>Although the memory allocator is very important, it only solves the problem of how to allocate memory. We have omitted a lot of code related to garbage collection in this section and have not analyzed the implementation principles of runtime garbage collection, in the next section we will analyze the design and implementation principles of Go language garbage collection in detail.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2021-12/whys-the-design-https-latency/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Why HTTPS requires 7 handshakes and 9x latency</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2021-12/whys-the-design-tcp-message-frame/">
+            <span class="next-text nav-default">Why TCP protocol has sticky packet problem</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

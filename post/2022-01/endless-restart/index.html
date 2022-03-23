@@ -1,0 +1,1172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How does endless achieve a non-stop restart of Go programs? - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="For a non-stop restart of a Go program we need to address two issues. the process restart does not need to close the listening port. pre-existing requests should be fully processed or timeout. We&amp;rsquo;ll see how endless does both of these things later. Basic concepts The following is a brief introduction to two knowledge points for the content that follows. Signal handling Go signal notification works by sending the os.Signal" /><meta name="keywords" content="golang, Endless, Restart" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/endless-restart/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="How does endless achieve a non-stop restart of Go programs?" />
+<meta property="og:description" content="For a non-stop restart of a Go program we need to address two issues. the process restart does not need to close the listening port. pre-existing requests should be fully processed or timeout. We&rsquo;ll see how endless does both of these things later. Basic concepts The following is a brief introduction to two knowledge points for the content that follows. Signal handling Go signal notification works by sending the os.Signal" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/endless-restart/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-21T14:35:42+08:00" />
+<meta property="article:modified_time" content="2022-01-21T14:35:42+08:00" />
+
+<meta itemprop="name" content="How does endless achieve a non-stop restart of Go programs?">
+<meta itemprop="description" content="For a non-stop restart of a Go program we need to address two issues. the process restart does not need to close the listening port. pre-existing requests should be fully processed or timeout. We&rsquo;ll see how endless does both of these things later. Basic concepts The following is a brief introduction to two knowledge points for the content that follows. Signal handling Go signal notification works by sending the os.Signal"><meta itemprop="datePublished" content="2022-01-21T14:35:42+08:00" />
+<meta itemprop="dateModified" content="2022-01-21T14:35:42+08:00" />
+<meta itemprop="wordCount" content="3396">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How does endless achieve a non-stop restart of Go programs?"/>
+<meta name="twitter:description" content="For a non-stop restart of a Go program we need to address two issues. the process restart does not need to close the listening port. pre-existing requests should be fully processed or timeout. We&rsquo;ll see how endless does both of these things later. Basic concepts The following is a brief introduction to two knowledge points for the content that follows. Signal handling Go signal notification works by sending the os.Signal"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How does endless achieve a non-stop restart of Go programs?</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-21 14:35:42 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 3396 words </span>
+          <span class="more-meta"> 7 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#basic-concepts">Basic concepts</a>
+          <ul>
+            <li><a href="#signal-handling">Signal handling</a></li>
+            <li><a href="#fork-subprocesses">Fork subprocesses</a></li>
+          </ul>
+        </li>
+        <li><a href="#endless-restart-example">endless restart example</a></li>
+        <li><a href="#implementation-principles">Implementation Principles</a></li>
+        <li><a href="#code-implementation">Code Implementation</a>
+          <ul>
+            <li><a href="#initialising-the-server">Initialising the Server</a></li>
+            <li><a href="#listenandserve">ListenAndServe</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>For a non-stop restart of a Go program we need to address two issues.</p>
+<ol>
+<li>the process restart does not need to close the listening port.</li>
+<li>pre-existing requests should be fully processed or timeout.</li>
+</ol>
+<p>We&rsquo;ll see how endless does both of these things later.</p>
+<h2 id="basic-concepts">Basic concepts</h2>
+<p>The following is a brief introduction to two knowledge points for the content that follows.</p>
+<h3 id="signal-handling">Signal handling</h3>
+<p>Go signal notification works by sending the os.Signal value on the Channel. If we use <code>Ctrl+C</code>, for example, then a SIGINT signal will be triggered and the OS will interrupt the normal flow of the process and go to the appropriate signal handling function to execute the operation and then return to the interrupted place to continue execution when it is finished.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">sigs</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="nx">done</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">bool</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="c1">// 监听信号
+</span><span class="c1"></span>    <span class="nx">signal</span><span class="p">.</span><span class="nf">Notify</span><span class="p">(</span><span class="nx">sigs</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGINT</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGTERM</span><span class="p">)</span> 
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="c1">// 接收到信号返回
+</span><span class="c1"></span>        <span class="nx">sig</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">sigs</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">()</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">sig</span><span class="p">)</span>
+        <span class="nx">done</span> <span class="o">&lt;-</span> <span class="kc">true</span>
+    <span class="p">}()</span> 
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;awaiting signal&#34;</span><span class="p">)</span>
+    <span class="c1">// 等待信号的接收
+</span><span class="c1"></span>    <span class="o">&lt;-</span><span class="nx">done</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;exiting&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>With a few lines of code, we can listen for SIGINT and SIGTERM signals. When Go receives a signal from the OS, it puts the signal value into the sigs pipeline for processing.</p>
+<h3 id="fork-subprocesses">Fork subprocesses</h3>
+<p>The exec package in Go wraps the Fork call nicely for us, and it allows us to use <code>ExtraFiles</code> to inherit open files from the parent process nicely.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">file</span> <span class="o">:=</span> <span class="nx">netListener</span><span class="p">.</span><span class="nf">File</span><span class="p">()</span> <span class="c1">// this returns a Dup()
+</span><span class="c1"></span><span class="nx">path</span> <span class="o">:=</span> <span class="s">&#34;/path/to/executable&#34;</span>
+<span class="nx">args</span> <span class="o">:=</span> <span class="p">[]</span><span class="kt">string</span><span class="p">{</span>
+    <span class="s">&#34;-graceful&#34;</span><span class="p">}</span>
+<span class="c1">// 产生 Cmd 实例
+</span><span class="c1"></span><span class="nx">cmd</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="nx">path</span><span class="p">,</span> <span class="nx">args</span><span class="o">...</span><span class="p">)</span>
+<span class="c1">// 标准输出
+</span><span class="c1"></span><span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span>
+<span class="c1">// 标准错误输出
+</span><span class="c1"></span><span class="nx">cmd</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span>
+<span class="nx">cmd</span><span class="p">.</span><span class="nx">ExtraFiles</span> <span class="p">=</span> <span class="p">[]</span><span class="o">*</span><span class="nx">os</span><span class="p">.</span><span class="nx">File</span><span class="p">{</span><span class="nx">file</span><span class="p">}</span>
+<span class="c1">// 启动命令
+</span><span class="c1"></span><span class="nx">err</span> <span class="o">:=</span> <span class="nx">cmd</span><span class="p">.</span><span class="nf">Start</span><span class="p">()</span>
+<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;gracefulRestart: Failed to launch, error: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The Cmd instance is returned by calling the Command command of the exec package, passing path (the path of the command to be executed), args (the arguments to the command), specifying additional open files to be inherited by the new process via the ExtraFiles field, and finally calling the Start method to create the child process.</p>
+<p>Here <code>netListener.File</code> makes a copy of the file descriptor with the system call dup.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Dup</span><span class="p">(</span><span class="nx">oldfd</span> <span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="nx">fd</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">r0</span><span class="p">,</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">e1</span> <span class="o">:=</span> <span class="nf">Syscall</span><span class="p">(</span><span class="nx">SYS_DUP</span><span class="p">,</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">oldfd</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="nx">fd</span> <span class="p">=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">r0</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">e1</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nx">err</span> <span class="p">=</span> <span class="nf">errnoErr</span><span class="p">(</span><span class="nx">e1</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We can see the introduction to the dup command</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">dup</span> <span class="nx">and</span> <span class="nx">dup2</span> <span class="nx">create</span> <span class="nx">a</span> <span class="nx">copy</span> <span class="nx">of</span> <span class="nx">the</span> <span class="nx">file</span> <span class="nx">descriptor</span> <span class="nx">oldfd</span><span class="p">.</span>
+<span class="nx">After</span> <span class="nx">successful</span> <span class="k">return</span> <span class="nx">of</span> <span class="nx">dup</span> <span class="nx">or</span> <span class="nx">dup2</span><span class="p">,</span> <span class="nx">the</span> <span class="nx">old</span> <span class="nx">and</span> <span class="nx">new</span> <span class="nx">descriptors</span> <span class="nx">may</span>
+<span class="nx">be</span> <span class="nx">used</span> <span class="nx">interchangeably</span><span class="p">.</span> <span class="nx">They</span> <span class="nx">share</span> <span class="nx">locks</span><span class="p">,</span> <span class="nx">file</span> <span class="nx">position</span> <span class="nx">pointers</span> <span class="nx">and</span>
+<span class="nx">flags</span><span class="p">;</span> <span class="k">for</span> <span class="nx">example</span><span class="p">,</span> <span class="k">if</span> <span class="nx">the</span> <span class="nx">file</span> <span class="nx">position</span> <span class="nx">is</span> <span class="nx">modified</span> <span class="nx">by</span> <span class="nx">using</span> <span class="nx">lseek</span> <span class="nx">on</span>
+<span class="nx">one</span> <span class="nx">of</span> <span class="nx">the</span> <span class="nx">descriptors</span><span class="p">,</span> <span class="nx">the</span> <span class="nx">position</span> <span class="nx">is</span> <span class="nx">also</span> <span class="nx">changed</span> <span class="k">for</span> <span class="nx">the</span> <span class="nx">other</span><span class="p">.</span>
+
+<span class="nx">The</span> <span class="nx">two</span> <span class="nx">descriptors</span> <span class="nx">do</span> <span class="nx">not</span> <span class="nx">share</span> <span class="nx">the</span> <span class="nx">close</span><span class="o">-</span><span class="nx">on</span><span class="o">-</span><span class="nx">exec</span> <span class="nx">flag</span><span class="p">,</span> <span class="nx">however</span><span class="p">.</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As you can see from the above description, the new file descriptor returned refers to the same file as oldfd, sharing all the claims, read and write pointers, permissions or flags, etc. But it does not share the close flag bit, i.e. it does not affect the writing of new data to oldfd even if it is already closed. However, the close flag bit is not shared, which means that oldfd is already closed and does not affect the writing of new data to newfd.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/21/3ab6bd39aae641bf9a27694e75723140.png" alt="sobyte"></p>
+<p>The above diagram shows forking a child process which copies the file descriptor table of the parent process.</p>
+<h2 id="endless-restart-example">endless restart example</h2>
+<p>I&rsquo;ll write a little bit about endless for those who haven&rsquo;t used endless before, but you can skip it if you are familiar with it.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;log&#34;</span>
+    <span class="s">&#34;net/http&#34;</span>
+    <span class="s">&#34;os&#34;</span>
+    <span class="s">&#34;sync&#34;</span>
+    <span class="s">&#34;time&#34;</span>
+
+    <span class="s">&#34;github.com/fvbock/endless&#34;</span>
+    <span class="s">&#34;github.com/gorilla/mux&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">handler</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">duration</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">ParseDuration</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nf">FormValue</span><span class="p">(</span><span class="s">&#34;duration&#34;</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">http</span><span class="p">.</span><span class="nf">Error</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">(),</span> <span class="mi">400</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">duration</span><span class="p">)</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Write</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;Hello World&#34;</span><span class="p">))</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">mux1</span> <span class="o">:=</span> <span class="nx">mux</span><span class="p">.</span><span class="nf">NewRouter</span><span class="p">()</span>
+    <span class="nx">mux1</span><span class="p">.</span><span class="nf">HandleFunc</span><span class="p">(</span><span class="s">&#34;/sleep&#34;</span><span class="p">,</span> <span class="nx">handler</span><span class="p">)</span>
+
+    <span class="nx">w</span> <span class="o">:=</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">{}</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">err</span> <span class="o">:=</span> <span class="nx">endless</span><span class="p">.</span><span class="nf">ListenAndServe</span><span class="p">(</span><span class="s">&#34;127.0.0.1:5003&#34;</span><span class="p">,</span> <span class="nx">mux1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;Server on 5003 stopped&#34;</span><span class="p">)</span>
+        <span class="nx">w</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+    <span class="p">}()</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;All servers stopped. Exiting.&#34;</span><span class="p">)</span>
+
+    <span class="nx">os</span><span class="p">.</span><span class="nf">Exit</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Verify the non-stop service created by endless below</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="err">#</span> <span class="nx">第一次构建项目</span>
+<span class="k">go</span> <span class="nx">build</span> <span class="nx">main</span><span class="p">.</span><span class="k">go</span>
+<span class="err">#</span> <span class="nx">运行项目</span><span class="err">，</span><span class="nx">这时就可以做内容修改了</span>
+<span class="p">.</span><span class="o">/</span><span class="nx">endless</span> <span class="o">&amp;</span>
+<span class="err">#</span> <span class="nx">请求项目</span><span class="err">，</span><span class="mi">60</span><span class="nx">s后返回</span>
+<span class="nx">curl</span> <span class="s">&#34;http://127.0.0.1:5003/sleep?duration=60s&#34;</span> <span class="o">&amp;</span>
+<span class="err">#</span> <span class="nx">再次构建项目</span><span class="err">，</span><span class="nx">这里是新内容</span>
+<span class="k">go</span> <span class="nx">build</span> <span class="nx">main</span><span class="p">.</span><span class="k">go</span>
+<span class="err">#</span> <span class="nx">重启</span><span class="err">，</span><span class="mi">17171</span><span class="nx">为pid</span>
+<span class="nx">kill</span> <span class="o">-</span><span class="mi">1</span> <span class="mi">17171</span>
+<span class="err">#</span> <span class="nx">新API请求</span>
+<span class="nx">curl</span> <span class="s">&#34;http://127.0.0.1:5003/sleep?duration=1s&#34;</span> 
+</code></pre></td></tr></table>
+</div>
+</div><p>After running the above command we can see that for the first request the return value is: <code>Hello world</code> and before sending the second request I change the return value in the handler to: <code>Hello world2222</code> and then do a build restart.</p>
+<p>Since I set the first request to return in 60s and the second request to return in 1s, the value of the second request is returned first and then the value of the first request is returned.</p>
+<p>The whole timeline is shown below.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/21/4c6a49505f214b84ae581d328e1f0440.png" alt="sobyte"></p>
+<p>And while waiting for the first request to be returned, you can see that two processes are running at the same time.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ ps -ef <span class="p">|</span>grep main
+root      <span class="m">84636</span>  <span class="m">80539</span>  <span class="m">0</span> 22:25 pts/2    00:00:00 ./main
+root      <span class="m">85423</span>  <span class="m">84636</span>  <span class="m">0</span> 22:26 pts/2    00:00:00 ./main
+</code></pre></td></tr></table>
+</div>
+</div><p>After the first response to the request, we can look at the process and see that the parent process has been shut down, allowing a seamless switch between parent and child processes.</p>
+<h2 id="implementation-principles">Implementation Principles</h2>
+<p>For the implementation, I am using the <a href="https://github.com/fvbock/endless">endless</a> implementation here, so the following principles and code are explained through its code.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/21/76208b6ec4234a7bae69371c81aa95c5.png" alt="sobyte"></p>
+<p>The principle of the non-stop reboot we want to do is shown in the figure above.</p>
+<ol>
+<li>listen for the SIGHUP signal.</li>
+<li>fork the child process when it receives the signal (using the same start command) and pass the socket file descriptor that the service is listening to to the child process.</li>
+<li>the child process listens to the socket of the parent process, at which point both the parent and child processes can receive requests.</li>
+<li>the child process sends a SIGTERM signal to the parent process after a successful start, which stops receiving new connections and waits for the old connection to be processed (or times out).</li>
+<li>the parent process exits and the upgrade is complete.</li>
+</ol>
+<h2 id="code-implementation">Code Implementation</h2>
+<p>As we can see from the example above, the entry point for endless is the ListenAndServe function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"> <span class="kd">func</span> <span class="nf">ListenAndServe</span><span class="p">(</span><span class="nx">addr</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">handler</span> <span class="nx">http</span><span class="p">.</span><span class="nx">Handler</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="c1">// 初始化 server
+</span><span class="c1"></span>    <span class="nx">server</span> <span class="o">:=</span> <span class="nf">NewServer</span><span class="p">(</span><span class="nx">addr</span><span class="p">,</span> <span class="nx">handler</span><span class="p">)</span>
+    <span class="c1">// 监听以及处理请求
+</span><span class="c1"></span>    <span class="k">return</span> <span class="nx">server</span><span class="p">.</span><span class="nf">ListenAndServe</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This method is divided into two parts, first initialising the server, then listening and processing the request.</p>
+<h3 id="initialising-the-server">Initialising the Server</h3>
+<p>Let&rsquo;s first look at what an endless service&rsquo;s Server structure looks like.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">endlessServer</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="c1">// 用于继承 http.Server 结构
+</span><span class="c1"></span>    <span class="nx">http</span><span class="p">.</span><span class="nx">Server</span>
+    <span class="c1">// 监听客户端请求的 Listener
+</span><span class="c1"></span>    <span class="nx">EndlessListener</span>  <span class="nx">net</span><span class="p">.</span><span class="nx">Listener</span>  
+    <span class="c1">// 用于记录还有多少客户端请求没有完成
+</span><span class="c1"></span>    <span class="nx">wg</span>               <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+    <span class="c1">// 用于接收信号的管道
+</span><span class="c1"></span>    <span class="nx">sigChan</span>          <span class="kd">chan</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span>
+    <span class="c1">// 用于重启时标志本进程是否是为一个新进程
+</span><span class="c1"></span>    <span class="nx">isChild</span>          <span class="kt">bool</span>
+    <span class="c1">// 当前进程的状态
+</span><span class="c1"></span>    <span class="nx">state</span>            <span class="kt">uint8</span> 
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In addition to inheriting all the fields of http.Server, this endlessServer adds several status fields because it needs to listen for signals and determine if it is a new process.</p>
+<ul>
+<li>wg: marks how many client requests are still outstanding.</li>
+<li>sigChan: the pipeline used to receive the signal.</li>
+<li>isChild: used to flag if this process is a new process when restarting.</li>
+<li>state: the state of the current process.</li>
+</ul>
+<p>Let&rsquo;s see how to initialize endlessServer.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">NewServer</span><span class="p">(</span><span class="nx">addr</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">handler</span> <span class="nx">http</span><span class="p">.</span><span class="nx">Handler</span><span class="p">)</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">endlessServer</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">runningServerReg</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">runningServerReg</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+    <span class="nx">socketOrder</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Getenv</span><span class="p">(</span><span class="s">&#34;ENDLESS_SOCKET_ORDER&#34;</span><span class="p">)</span>
+    <span class="c1">// 根据环境变量判断是不是子进程
+</span><span class="c1"></span>    <span class="nx">isChild</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Getenv</span><span class="p">(</span><span class="s">&#34;ENDLESS_CONTINUE&#34;</span><span class="p">)</span> <span class="o">!=</span> <span class="s">&#34;&#34;</span> 
+    <span class="c1">// 由于支持多 server，所以这里需要设置一下 server 的顺序
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">socketOrder</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">addr</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">strings</span><span class="p">.</span><span class="nf">Split</span><span class="p">(</span><span class="nx">socketOrder</span><span class="p">,</span> <span class="s">&#34;,&#34;</span><span class="p">)</span> <span class="p">{</span>
+            <span class="nx">socketPtrOffsetMap</span><span class="p">[</span><span class="nx">addr</span><span class="p">]</span> <span class="p">=</span> <span class="nb">uint</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="nx">socketPtrOffsetMap</span><span class="p">[</span><span class="nx">addr</span><span class="p">]</span> <span class="p">=</span> <span class="nb">uint</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">runningServersOrder</span><span class="p">))</span>
+    <span class="p">}</span>
+
+    <span class="nx">srv</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">endlessServer</span><span class="p">{</span>
+        <span class="nx">wg</span><span class="p">:</span>      <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">{},</span>
+        <span class="nx">sigChan</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span><span class="p">),</span>
+        <span class="nx">isChild</span><span class="p">:</span> <span class="nx">isChild</span><span class="p">,</span>
+        <span class="o">...</span>
+        <span class="nx">state</span><span class="p">:</span> <span class="nx">STATE_INIT</span><span class="p">,</span>
+        <span class="nx">lock</span><span class="p">:</span>  <span class="o">&amp;</span><span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span><span class="p">{},</span>
+    <span class="p">}</span>
+
+    <span class="nx">srv</span><span class="p">.</span><span class="nx">Server</span><span class="p">.</span><span class="nx">Addr</span> <span class="p">=</span> <span class="nx">addr</span>
+    <span class="nx">srv</span><span class="p">.</span><span class="nx">Server</span><span class="p">.</span><span class="nx">ReadTimeout</span> <span class="p">=</span> <span class="nx">DefaultReadTimeOut</span>
+    <span class="nx">srv</span><span class="p">.</span><span class="nx">Server</span><span class="p">.</span><span class="nx">WriteTimeout</span> <span class="p">=</span> <span class="nx">DefaultWriteTimeOut</span>
+    <span class="nx">srv</span><span class="p">.</span><span class="nx">Server</span><span class="p">.</span><span class="nx">MaxHeaderBytes</span> <span class="p">=</span> <span class="nx">DefaultMaxHeaderBytes</span>
+    <span class="nx">srv</span><span class="p">.</span><span class="nx">Server</span><span class="p">.</span><span class="nx">Handler</span> <span class="p">=</span> <span class="nx">handler</span>
+
+    <span class="nx">runningServers</span><span class="p">[</span><span class="nx">addr</span><span class="p">]</span> <span class="p">=</span> <span class="nx">srv</span>
+    <span class="o">...</span>
+    <span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The initialisation here is all the usual parameters we see in <code>net/http</code>, including the ReadTimeout read timeout, WriteTimeout write timeout, Handler request handler, etc.</p>
+<p>Note that the <code>ENDLESS_CONTINUE</code> environment variable is used to determine whether a process is a child, and is written to when the fork child is run. Since endless supports multiple servers, the <code>ENDLESS_SOCKET_ORDER</code> variable is used to determine the order of the servers.</p>
+<h3 id="listenandserve">ListenAndServe</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">endlessServer</span><span class="p">)</span> <span class="nf">ListenAndServe</span><span class="p">()</span> <span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">addr</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">Addr</span>
+    <span class="k">if</span> <span class="nx">addr</span> <span class="o">==</span> <span class="s">&#34;&#34;</span> <span class="p">{</span>
+        <span class="nx">addr</span> <span class="p">=</span> <span class="s">&#34;:http&#34;</span>
+    <span class="p">}</span>
+    <span class="c1">// 异步处理信号量
+</span><span class="c1"></span>    <span class="k">go</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">handleSignals</span><span class="p">()</span>
+    <span class="c1">// 获取端口监听
+</span><span class="c1"></span>    <span class="nx">l</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">getListener</span><span class="p">(</span><span class="nx">addr</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="c1">// 将监听转为 endlessListener
+</span><span class="c1"></span>    <span class="nx">srv</span><span class="p">.</span><span class="nx">EndlessListener</span> <span class="p">=</span> <span class="nf">newEndlessListener</span><span class="p">(</span><span class="nx">l</span><span class="p">,</span> <span class="nx">srv</span><span class="p">)</span>
+
+    <span class="c1">// 如果是子进程，那么发送 SIGTERM 信号给父进程
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">isChild</span> <span class="p">{</span>
+        <span class="nx">syscall</span><span class="p">.</span><span class="nf">Kill</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Getppid</span><span class="p">(),</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGTERM</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">srv</span><span class="p">.</span><span class="nf">BeforeBegin</span><span class="p">(</span><span class="nx">srv</span><span class="p">.</span><span class="nx">Addr</span><span class="p">)</span>
+    <span class="c1">// 响应Listener监听，执行对应请求逻辑
+</span><span class="c1"></span>    <span class="k">return</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">Serve</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This method is actually quite similar to the <code>net/http</code> library in that it first gets the port to listen on and then calls Serve to process the data that is sent to it.</p>
+<p>However, there are a few differences: endless needs to use signal listening in order to achieve a smooth restart, and it is different when it comes to getListener, as the child process needs to inherit the listen fd from the parent process in order to not close the listening port.</p>
+<h4 id="handlesignals-signal-handling">handleSignals Signal Handling</h4>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/21/fed9f97c606144208879cc6405a60c97.png" alt="sobyte"></p>
+<p>Signal processing is mainly a listening for signals, which are then cycled according to the different signals.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">endlessServer</span><span class="p">)</span> <span class="nf">handleSignals</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">sig</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span>
+    <span class="c1">// 注册信号监听
+</span><span class="c1"></span>    <span class="nx">signal</span><span class="p">.</span><span class="nf">Notify</span><span class="p">(</span>
+        <span class="nx">srv</span><span class="p">.</span><span class="nx">sigChan</span><span class="p">,</span>
+        <span class="nx">hookableSignals</span><span class="o">...</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="c1">// 获取pid
+</span><span class="c1"></span>    <span class="nx">pid</span> <span class="o">:=</span> <span class="nx">syscall</span><span class="p">.</span><span class="nf">Getpid</span><span class="p">()</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="nx">sig</span> <span class="p">=</span> <span class="o">&lt;-</span><span class="nx">srv</span><span class="p">.</span><span class="nx">sigChan</span>
+        <span class="c1">// 在处理信号之前触发hook
+</span><span class="c1"></span>        <span class="nx">srv</span><span class="p">.</span><span class="nf">signalHooks</span><span class="p">(</span><span class="nx">PRE_SIGNAL</span><span class="p">,</span> <span class="nx">sig</span><span class="p">)</span>
+        <span class="k">switch</span> <span class="nx">sig</span> <span class="p">{</span>
+        <span class="c1">// 接收到平滑重启信号
+</span><span class="c1"></span>        <span class="k">case</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGHUP</span><span class="p">:</span>
+            <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">pid</span><span class="p">,</span> <span class="s">&#34;Received SIGHUP. forking.&#34;</span><span class="p">)</span>
+            <span class="nx">err</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">fork</span><span class="p">()</span>
+            <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;Fork err:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="p">}</span> 
+        <span class="c1">// 停机信号
+</span><span class="c1"></span>        <span class="k">case</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGINT</span><span class="p">:</span>
+            <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">pid</span><span class="p">,</span> <span class="s">&#34;Received SIGINT.&#34;</span><span class="p">)</span>
+            <span class="nx">srv</span><span class="p">.</span><span class="nf">shutdown</span><span class="p">()</span>
+        <span class="c1">// 停机信号
+</span><span class="c1"></span>        <span class="k">case</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">SIGTERM</span><span class="p">:</span>
+            <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">pid</span><span class="p">,</span> <span class="s">&#34;Received SIGTERM.&#34;</span><span class="p">)</span>
+            <span class="nx">srv</span><span class="p">.</span><span class="nf">shutdown</span><span class="p">()</span>
+        <span class="o">...</span>
+        <span class="c1">// 在处理信号之后触发hook
+</span><span class="c1"></span>        <span class="nx">srv</span><span class="p">.</span><span class="nf">signalHooks</span><span class="p">(</span><span class="nx">POST_SIGNAL</span><span class="p">,</span> <span class="nx">sig</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The code in this section is very simple, when we use <code>kill -1 $pid</code> here <code>srv.sigChan</code> receives the appropriate signal and goes into the <code>case syscall.SIGHUP</code> piece of logic.</p>
+<p>Note that the <code>syscall.SIGTERM</code> signal sent by the child process to the parent process in the ListenAndServe method above is also handled here, and the shutdown logic is executed.</p>
+<p>After getting to the <code>case syscall.SIGHUP</code> piece of logic, the fork function is called, and we will look at the fork logic again.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">endlessServer</span><span class="p">)</span> <span class="nf">fork</span><span class="p">()</span> <span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">runningServerReg</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">runningServerReg</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+    <span class="c1">// 校验是否已经fork过
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">runningServersForked</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;Another process already forked. Ignoring this one.&#34;</span><span class="p">)</span>
+    <span class="p">}</span> 
+    <span class="nx">runningServersForked</span> <span class="p">=</span> <span class="kc">true</span>
+
+    <span class="kd">var</span> <span class="nx">files</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="o">*</span><span class="nx">os</span><span class="p">.</span><span class="nx">File</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">runningServers</span><span class="p">))</span>
+    <span class="kd">var</span> <span class="nx">orderArgs</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">string</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">runningServers</span><span class="p">))</span>
+    <span class="c1">// 因为有多 server 的情况，所以获取所有 listen fd
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">srvPtr</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">runningServers</span> <span class="p">{</span> 
+        <span class="k">switch</span> <span class="nx">srvPtr</span><span class="p">.</span><span class="nx">EndlessListener</span><span class="p">.(</span><span class="kd">type</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">case</span> <span class="o">*</span><span class="nx">endlessListener</span><span class="p">:</span> 
+            <span class="nx">files</span><span class="p">[</span><span class="nx">socketPtrOffsetMap</span><span class="p">[</span><span class="nx">srvPtr</span><span class="p">.</span><span class="nx">Server</span><span class="p">.</span><span class="nx">Addr</span><span class="p">]]</span> <span class="p">=</span> <span class="nx">srvPtr</span><span class="p">.</span><span class="nx">EndlessListener</span><span class="p">.(</span><span class="o">*</span><span class="nx">endlessListener</span><span class="p">).</span><span class="nf">File</span><span class="p">()</span>
+        <span class="k">default</span><span class="p">:</span> 
+            <span class="nx">files</span><span class="p">[</span><span class="nx">socketPtrOffsetMap</span><span class="p">[</span><span class="nx">srvPtr</span><span class="p">.</span><span class="nx">Server</span><span class="p">.</span><span class="nx">Addr</span><span class="p">]]</span> <span class="p">=</span> <span class="nx">srvPtr</span><span class="p">.</span><span class="nx">tlsInnerListener</span><span class="p">.</span><span class="nf">File</span><span class="p">()</span>
+        <span class="p">}</span>
+        <span class="nx">orderArgs</span><span class="p">[</span><span class="nx">socketPtrOffsetMap</span><span class="p">[</span><span class="nx">srvPtr</span><span class="p">.</span><span class="nx">Server</span><span class="p">.</span><span class="nx">Addr</span><span class="p">]]</span> <span class="p">=</span> <span class="nx">srvPtr</span><span class="p">.</span><span class="nx">Server</span><span class="p">.</span><span class="nx">Addr</span>
+    <span class="p">}</span>
+    <span class="c1">// 环境变量
+</span><span class="c1"></span>    <span class="nx">env</span> <span class="o">:=</span> <span class="nb">append</span><span class="p">(</span>
+        <span class="nx">os</span><span class="p">.</span><span class="nf">Environ</span><span class="p">(),</span>
+    <span class="c1">// 启动endless 的时候，会根据这个参数来判断是否是子进程
+</span><span class="c1"></span>        <span class="s">&#34;ENDLESS_CONTINUE=1&#34;</span><span class="p">,</span>
+    <span class="p">)</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">runningServers</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">1</span> <span class="p">{</span>
+        <span class="nx">env</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">env</span><span class="p">,</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">`ENDLESS_SOCKET_ORDER=%s`</span><span class="p">,</span> <span class="nx">strings</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">orderArgs</span><span class="p">,</span> <span class="s">&#34;,&#34;</span><span class="p">)))</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 程序运行路径
+</span><span class="c1"></span>    <span class="nx">path</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="kd">var</span> <span class="nx">args</span> <span class="p">[]</span><span class="kt">string</span>
+    <span class="c1">// 参数
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">1</span> <span class="p">{</span>
+        <span class="nx">args</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+    <span class="p">}</span>
+
+    <span class="nx">cmd</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="nx">path</span><span class="p">,</span> <span class="nx">args</span><span class="o">...</span><span class="p">)</span>
+    <span class="c1">// 标准输出
+</span><span class="c1"></span>    <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span>
+    <span class="c1">// 错误
+</span><span class="c1"></span>    <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span>
+    <span class="nx">cmd</span><span class="p">.</span><span class="nx">ExtraFiles</span> <span class="p">=</span> <span class="nx">files</span>
+    <span class="nx">cmd</span><span class="p">.</span><span class="nx">Env</span> <span class="p">=</span> <span class="nx">env</span>  
+    <span class="nx">err</span> <span class="p">=</span> <span class="nx">cmd</span><span class="p">.</span><span class="nf">Start</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;Restart: Failed to launch, error: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span> 
+    <span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The fork code first fetches the different listen fd&rsquo;s according to the server and wraps them in a list of files, then passes the file descriptors into the ExtraFiles parameter when calling cmd, so that the process can be seamlessly hosted on the port the parent is listening on.</p>
+<p>Note that there is an ENDLESS_CONTINUE parameter in the env argument list which is checked when endless is started.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">NewServer</span><span class="p">(</span><span class="nx">addr</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">handler</span> <span class="nx">http</span><span class="p">.</span><span class="nx">Handler</span><span class="p">)</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">endlessServer</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">runningServerReg</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">runningServerReg</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+    <span class="nx">socketOrder</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Getenv</span><span class="p">(</span><span class="s">&#34;ENDLESS_SOCKET_ORDER&#34;</span><span class="p">)</span>
+    <span class="nx">isChild</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Getenv</span><span class="p">(</span><span class="s">&#34;ENDLESS_CONTINUE&#34;</span><span class="p">)</span> <span class="o">!=</span> <span class="s">&#34;&#34;</span>
+  <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s see what shutdown does when it receives a SIGTERM signal.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">endlessServer</span><span class="p">)</span> <span class="nf">shutdown</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">getState</span><span class="p">()</span> <span class="o">!=</span> <span class="nx">STATE_RUNNING</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+
+    <span class="nx">srv</span><span class="p">.</span><span class="nf">setState</span><span class="p">(</span><span class="nx">STATE_SHUTTING_DOWN</span><span class="p">)</span>
+    <span class="c1">// 默认 DefaultHammerTime 为 60秒
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">DefaultHammerTime</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="k">go</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">hammerTime</span><span class="p">(</span><span class="nx">DefaultHammerTime</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// 关闭存活的连接
+</span><span class="c1"></span>    <span class="nx">srv</span><span class="p">.</span><span class="nf">SetKeepAlivesEnabled</span><span class="p">(</span><span class="kc">false</span><span class="p">)</span>
+    <span class="nx">err</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">EndlessListener</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Getpid</span><span class="p">(),</span> <span class="s">&#34;Listener.Close() error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Getpid</span><span class="p">(),</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">EndlessListener</span><span class="p">.</span><span class="nf">Addr</span><span class="p">(),</span> <span class="s">&#34;Listener closed.&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>shutdown Here the connection is shut down first, as the child process is already started, so it is no longer processing requests and needs to shut down the port listening. The srv.hammerTime method is also called asynchronously to wait 60 seconds for the parent process to finish processing the request before shutting it down.</p>
+<h4 id="getlistener-get-port-listener">getListener Get Port Listener</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">endlessServer</span><span class="p">)</span> <span class="nf">getListener</span><span class="p">(</span><span class="nx">laddr</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">l</span> <span class="nx">net</span><span class="p">.</span><span class="nx">Listener</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 如果是子进程
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">isChild</span> <span class="p">{</span>
+        <span class="kd">var</span> <span class="nx">ptrOffset</span> <span class="kt">uint</span> <span class="p">=</span> <span class="mi">0</span>
+        <span class="nx">runningServerReg</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+        <span class="k">defer</span> <span class="nx">runningServerReg</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+        <span class="c1">// 这里还是处理多个 server 的情况
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">socketPtrOffsetMap</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+            <span class="c1">// 根据server 的顺序来获取 listen fd 的序号
+</span><span class="c1"></span>            <span class="nx">ptrOffset</span> <span class="p">=</span> <span class="nx">socketPtrOffsetMap</span><span class="p">[</span><span class="nx">laddr</span><span class="p">]</span> 
+        <span class="p">}</span>
+        <span class="c1">// fd 0，1，2是预留给 标准输入、输出和错误的，所以从3开始
+</span><span class="c1"></span>        <span class="nx">f</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">NewFile</span><span class="p">(</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">3</span><span class="o">+</span><span class="nx">ptrOffset</span><span class="p">),</span> <span class="s">&#34;&#34;</span><span class="p">)</span>
+        <span class="nx">l</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">net</span><span class="p">.</span><span class="nf">FileListener</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">err</span> <span class="p">=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;net.FileListener error: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="c1">// 父进程 直接返回 listener
+</span><span class="c1"></span>        <span class="nx">l</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">net</span><span class="p">.</span><span class="nf">Listen</span><span class="p">(</span><span class="s">&#34;tcp&#34;</span><span class="p">,</span> <span class="nx">laddr</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">err</span> <span class="p">=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;net.Listen error: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>There&rsquo;s nothing to say here if it&rsquo;s the parent process, just create a port to listen on and return.</p>
+<p>But for the child process there are a few detours, starting with why the <code>os.NewFile</code> argument starts with 3. Because when the child process inherits the fd from the parent process, 0, 1 and 2 are reserved for standard input, output and errors, so the first fd given by the parent process is ordered from 3 in the child process.</p>
+<p>As shown below, the first three fd&rsquo;s are reserved for standard input, output and errors, and fd 3 is incremented according to the array of ExtraFiles passed in.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/21/0f018e0d9e614415a63676ea176dfbbe.png" alt="sobyte"></p>
+<p>In fact, here we can also experiment with the opening example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="c1"># 第一次构建项目</span>
+go build main.go
+<span class="c1"># 运行项目，这时就可以做内容修改了</span>
+./endless <span class="p">&amp;</span>
+<span class="c1"># 这个时候我们看看父进程打开的文件</span>
+lsof  -P -p <span class="m">17116</span>
+COMMAND   PID USER   FD      TYPE  DEVICE SIZE/OFF     NODE NAME
+...
+main    <span class="m">18942</span> root    0u      CHR   136,2      0t0        <span class="m">5</span> /dev/pts/2
+main    <span class="m">18942</span> root    1u      CHR   136,2      0t0        <span class="m">5</span> /dev/pts/2
+main    <span class="m">18942</span> root    2u      CHR   136,2      0t0        <span class="m">5</span> /dev/pts/2
+main    <span class="m">18942</span> root    3u     IPv4 <span class="m">2223979</span>      0t0      TCP localhost:5003 <span class="o">(</span>LISTEN<span class="o">)</span>
+<span class="c1"># 请求项目，60s后返回</span>
+curl <span class="s2">&#34;http://127.0.0.1:5003/sleep?duration=60s&#34;</span> <span class="p">&amp;</span> 
+<span class="c1"># 重启，17116为父进程pid</span>
+<span class="nb">kill</span> -1 <span class="m">17116</span>
+<span class="c1"># 然后我们看一下 main 程序的进程应该有两个</span>
+ps -ef <span class="p">|</span>grep ./main
+root      <span class="m">17116</span>  <span class="m">80539</span>  <span class="m">0</span> 04:19 pts/2    00:00:00 ./main
+root      <span class="m">18110</span>  <span class="m">17116</span>  <span class="m">0</span> 04:21 pts/2    00:00:00 ./main
+<span class="c1"># 可以看到子进程pid 为18110,我们看看该进程打开的文件</span>
+lsof  -P -p <span class="m">18110</span>
+COMMAND   PID USER   FD      TYPE  DEVICE SIZE/OFF     NODE NAME
+...
+main    <span class="m">19073</span> root    0r      CHR     1,3      0t0     <span class="m">1028</span> /dev/null
+main    <span class="m">19073</span> root    1u      CHR   136,2      0t0        <span class="m">5</span> /dev/pts/2
+main    <span class="m">19073</span> root    2u      CHR   136,2      0t0        <span class="m">5</span> /dev/pts/2
+main    <span class="m">19073</span> root    3u     IPv4 <span class="m">2223979</span>      0t0      TCP localhost:5003 <span class="o">(</span>LISTEN<span class="o">)</span>
+main    <span class="m">19073</span> root    4u     IPv4 <span class="m">2223979</span>      0t0      TCP localhost:5003 <span class="o">(</span>LISTEN<span class="o">)</span>
+<span class="c1"># 新API请求</span>
+curl <span class="s2">&#34;http://127.0.0.1:5003/sleep?duration=1s&#34;</span> 
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="summary">Summary</h2>
+<p>We have learned through endless how to restart a service without stopping the service. I believe this feature will be used in many scenarios and students who have not used it can try it on their own systems.</p>
+<p>Hot restart in general allows the service to be restarted without interrupting the connections already established, the old service process will not accept new connection requests and new connection requests will be accepted in the new service process. For connections already established in the original service process, it is also possible to set them to read off and wait until the requests on the connection have been smoothly processed and the connection is free before exiting.</p>
+<p>In this way, it is ensured that the established connection is not interrupted and that the new service process can accept connection requests normally.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/fasthttp-server/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Fasthttp: a Go framework ten times faster than net/http (server part)</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/go-failpoint/">
+            <span class="next-text nav-default">Using Failpoint to inject faults in Go</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

@@ -1,0 +1,1309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>In-depth implementation of the Go language defer principle - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article explains the rules for executing defer and introduces the defer type. It explains how defer function calls are done, mainly through heap allocation. Introduction defer execution rules The order of execution of multiple defers is &amp;ldquo;Last In First Out LIFO &amp;quot; 1 2 3 4 5 6 7 8 9 10 11 12 13 14 package main import ( &amp;#34;fmt&amp;#34; ) func main() { name := &amp;#34;Naveen&amp;#34; fmt.Printf(&amp;#34;Original" /><meta name="keywords" content="golang, Defer, Principle" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/go-defer-principle/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="In-depth implementation of the Go language defer principle" />
+<meta property="og:description" content="This article explains the rules for executing defer and introduces the defer type. It explains how defer function calls are done, mainly through heap allocation. Introduction defer execution rules The order of execution of multiple defers is &ldquo;Last In First Out LIFO &quot; 1 2 3 4 5 6 7 8 9 10 11 12 13 14 package main import ( &#34;fmt&#34; ) func main() { name := &#34;Naveen&#34; fmt.Printf(&#34;Original" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/go-defer-principle/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-22T13:15:43+08:00" />
+<meta property="article:modified_time" content="2022-01-22T13:15:43+08:00" />
+
+<meta itemprop="name" content="In-depth implementation of the Go language defer principle">
+<meta itemprop="description" content="This article explains the rules for executing defer and introduces the defer type. It explains how defer function calls are done, mainly through heap allocation. Introduction defer execution rules The order of execution of multiple defers is &ldquo;Last In First Out LIFO &quot; 1 2 3 4 5 6 7 8 9 10 11 12 13 14 package main import ( &#34;fmt&#34; ) func main() { name := &#34;Naveen&#34; fmt.Printf(&#34;Original"><meta itemprop="datePublished" content="2022-01-22T13:15:43+08:00" />
+<meta itemprop="dateModified" content="2022-01-22T13:15:43+08:00" />
+<meta itemprop="wordCount" content="4884">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="In-depth implementation of the Go language defer principle"/>
+<meta name="twitter:description" content="This article explains the rules for executing defer and introduces the defer type. It explains how defer function calls are done, mainly through heap allocation. Introduction defer execution rules The order of execution of multiple defers is &ldquo;Last In First Out LIFO &quot; 1 2 3 4 5 6 7 8 9 10 11 12 13 14 package main import ( &#34;fmt&#34; ) func main() { name := &#34;Naveen&#34; fmt.Printf(&#34;Original"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">In-depth implementation of the Go language defer principle</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-22 13:15:43 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 4884 words </span>
+          <span class="more-meta"> 10 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#introduction">Introduction</a>
+          <ul>
+            <li><a href="#defer-execution-rules">defer execution rules</a></li>
+            <li><a href="#types-of-defer">Types of defer</a></li>
+            <li><a href="#defer-structure">defer structure</a></li>
+          </ul>
+        </li>
+        <li><a href="#analysis">Analysis</a>
+          <ul>
+            <li><a href="#allocation-on-the-heap-1">Allocation on the heap</a></li>
+            <li><a href="#stack-allocation">Stack allocation</a></li>
+            <li><a href="#open-coding-1">Open coding</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary-1">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>This article explains the rules for executing <code>defer</code> and introduces the <code>defer</code> type. It explains how <code>defer</code> function calls are done, mainly through heap allocation.</p>
+<h2 id="introduction">Introduction</h2>
+<h3 id="defer-execution-rules">defer execution rules</h3>
+<h4 id="the-order-of-execution-of-multiple-defers-is-last-in-first-out-lifo-">The order of execution of multiple defers is &ldquo;Last In First Out LIFO &quot;</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>  
+    <span class="s">&#34;fmt&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>  
+    <span class="nx">name</span> <span class="o">:=</span> <span class="s">&#34;Naveen&#34;</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;Original String: %s\n&#34;</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nx">name</span><span class="p">))</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;Reversed String: &#34;</span><span class="p">)</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="p">[]</span><span class="nb">rune</span><span class="p">(</span><span class="nx">name</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">defer</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;%c&#34;</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span> 
+</code></pre></td></tr></table>
+</div>
+</div><p>In the above example, the string <code>Naveen</code> is traversed using a for loop and then <code>defer</code> is called. These <code>defer</code> calls act as if they were stacked, and the last <code>defer</code> call pushed onto the stack is pulled out and executed first.</p>
+<p>The output is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="err">$</span> <span class="k">go</span> <span class="nx">run</span> <span class="nx">main</span><span class="p">.</span><span class="k">go</span> 
+<span class="nx">Original</span> <span class="nx">String</span><span class="p">:</span> <span class="nx">Naveen</span>
+<span class="nx">Reversed</span> <span class="nx">String</span><span class="p">:</span> <span class="nx">neevaN</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="the-defer-declaration-will-first-calculate-the-value-of-the-parameter">The defer declaration will first calculate the value of the parameter</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">a</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span>
+    <span class="k">defer</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span> <span class="c1">// 0
+</span><span class="c1"></span>    <span class="nx">i</span><span class="o">++</span>
+    <span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In this example, the variable i is determined when <code>defer</code> is called, not when <code>defer</code> is executed, so the output of the above statement is 0.</p>
+<h4 id="defer-can-modify-the-return-value-of-a-named-return-value-function">defer can modify the return value of a named return value function</h4>
+<p>As officially stated.</p>
+<blockquote>
+<p>For instance, if the deferred function is a function literal and the surrounding function has named result parameters that are in scope within the literal, the deferred function may access and modify the result parameters before they are returned.</p>
+</blockquote>
+<p>An example is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// f returns 42
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">f</span><span class="p">()</span> <span class="p">(</span><span class="nx">result</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">result</span> <span class="o">*=</span> <span class="mi">7</span>
+    <span class="p">}()</span>
+    <span class="k">return</span> <span class="mi">6</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>However, it should be noted that only the named return value (named result parameters) function can be modified, and the anonymous return value function cannot be modified, as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// f returns 100
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">f</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+    <span class="nx">i</span> <span class="o">:=</span> <span class="mi">100</span>
+    <span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">i</span><span class="o">++</span>
+    <span class="p">}()</span>
+    <span class="k">return</span> <span class="nx">i</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Because anonymous return-valued functions are declared when <code>return</code> is executed, only named return-valued functions can be accessed in the <code>defer</code> statement, not anonymous return-valued functions directly.</p>
+<h3 id="types-of-defer">Types of defer</h3>
+<p>Go made two optimizations to <code>defer</code> in versions 1.13 and 1.14, which significantly reduced the performance overhead of <code>defer</code> in most scenarios.</p>
+<h4 id="allocation-on-the-heap">Allocation on the heap</h4>
+<p>Prior to Go 1.13 all <code>defer</code>s were allocated on the heap, a mechanism that at compile time.</p>
+<ol>
+<li>inserting <code>runtime.deferproc</code> at the location of the <code>defer</code> statement, which, when executed, saves the <code>defer</code> call as a <code>runtime._defer</code> structure to the top of the <code>_defer</code> chain of Goroutine.</li>
+<li><code>runtime.deferreturn</code> is inserted at the position before the function returns, and when executed, the top <code>runtime._defer</code> is retrieved from Goroutine&rsquo;s <code>_defer</code> chain and executed sequentially.</li>
+</ol>
+<h4 id="allocation-on-the-stack">Allocation on the stack</h4>
+<p>New in Go 1.13, <code>deferprocStack</code> implements on-stack allocation of <code>defer</code>. Compared to heap allocation, on-stack allocation frees <code>_defer</code> after the function returns, eliminating the performance overhead of memory allocation and requiring only proper maintenance of the chain of <code>_defer</code>. According to the official documentation, this improves performance by about 30%.</p>
+<p>Except for the difference in allocation location, there is no fundamental difference between allocating on the stack and allocating on the heap.</p>
+<p>It is worth noting that not all <code>defer</code>s can be allocated on the stack in version 1.13. A <code>defer</code> in a loop, whether it is a display <code>for</code> loop or an implicit loop formed by <code>goto</code>, can only use heap allocation, even if it loops once.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">A1</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">1</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="k">defer</span> <span class="nb">println</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="err">$</span> <span class="nx">GOOS</span><span class="p">=</span><span class="nx">linux</span> <span class="nx">GOARCH</span><span class="p">=</span><span class="nx">amd64</span> <span class="k">go</span> <span class="nx">tool</span> <span class="nx">compile</span> <span class="o">-</span><span class="nx">S</span> <span class="nx">main</span><span class="p">.</span><span class="k">go</span>
+        <span class="o">...</span>
+        <span class="mh">0x004e</span> <span class="mo">0007</span><span class="mi">8</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">5</span><span class="p">)</span>        <span class="nx">CALL</span>    <span class="nx">runtime</span><span class="p">.</span><span class="nf">deferproc</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>
+        <span class="o">...</span>
+        <span class="mh">0x005a</span> <span class="mo">000</span><span class="mi">90</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">5</span><span class="p">)</span>        <span class="nx">CALL</span>    <span class="nx">runtime</span><span class="p">.</span><span class="nf">deferreturn</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>
+        <span class="mh">0x005f</span> <span class="mo">000</span><span class="mi">95</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">5</span><span class="p">)</span>        <span class="nx">MOVQ</span>    <span class="mi">32</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">BP</span>
+        <span class="mh">0x0064</span> <span class="mo">00100</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">5</span><span class="p">)</span>        <span class="nx">ADDQ</span>    <span class="err">$</span><span class="mi">40</span><span class="p">,</span> <span class="nx">SP</span>
+        <span class="mh">0x0068</span> <span class="mo">00104</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">5</span><span class="p">)</span>        <span class="nx">RET</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="open-coding">Open coding</h4>
+<p>Go 1.14 added open coding, a mechanism that inserts <code>defer</code> calls directly into functions before they return, eliminating the need for <code>deferproc</code> or <code>deferprocStack</code> operations at runtime. This optimization reduces the overhead of <code>defer</code> calls from ~35ns in version 1.13 to ~6ns or so.</p>
+<p>However, certain conditions need to be met in order to trigger.</p>
+<ol>
+<li>the compiler optimization is not disabled, i.e. <code>-gcflags &quot;-N&quot;</code> is not set.</li>
+<li>the number of <code>defer</code>s in the function does not exceed 8 and the product of the <code>return</code> statements and the number of <code>defer</code> statements does not exceed 15.</li>
+<li>the <code>defer</code> keyword of the function cannot be executed in a loop.</li>
+</ol>
+<h3 id="defer-structure">defer structure</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">_defer</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">siz</span>     <span class="kt">int32</span>       <span class="c1">//参数和结果的内存大小
+</span><span class="c1"></span>    <span class="nx">started</span> <span class="kt">bool</span>
+    <span class="nx">heap</span>    <span class="kt">bool</span>        <span class="c1">//是否是堆上分配
+</span><span class="c1"></span>    <span class="nx">openDefer</span> <span class="kt">bool</span>      <span class="c1">// 是否经过开放编码的优化
+</span><span class="c1"></span>    <span class="nx">sp</span>        <span class="kt">uintptr</span>   <span class="c1">//栈指针
+</span><span class="c1"></span>    <span class="nx">pc</span>        <span class="kt">uintptr</span>   <span class="c1">// 调用方的程序计数器
+</span><span class="c1"></span>    <span class="nx">fn</span>        <span class="o">*</span><span class="nx">funcval</span>  <span class="c1">// 传入的函数
+</span><span class="c1"></span>    <span class="nx">_panic</span>    <span class="o">*</span><span class="nx">_panic</span>   
+    <span class="nx">link</span>      <span class="o">*</span><span class="nx">_defer</span>   <span class="c1">//defer链表
+</span><span class="c1"></span>    <span class="nx">fd</span>   <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>  
+    <span class="nx">varp</span> <span class="kt">uintptr</span>        
+    <span class="nx">framepc</span> <span class="kt">uintptr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The parameters to note above are <code>siz</code>, <code>heap</code>, <code>fn</code>, <code>link</code>, <code>openDefer</code> which will be covered in the following analysis.</p>
+<h2 id="analysis">Analysis</h2>
+<p>In this article, we will start with the heap allocation, we will talk about why the execution rules of defer are as described at the beginning, and then we will talk about the stack allocation of defer and the development coding related content.</p>
+<p>The analysis starts with a function call as the entry point.</p>
+<h3 id="allocation-on-the-heap-1">Allocation on the heap</h3>
+<h4 id="named-function-return-value-calls">Named function return value calls</h4>
+<p>Let&rsquo;s start with the example mentioned above and look at heap allocation from function calls. Note that running the following example on <code>1.15</code> does not allocate directly to the heap, but requires you to recompile the Go source code to force the defer to allocate to the heap.</p>
+<p>File location: src/cmd/compile/internal/gc/ssa.go</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">state</span><span class="p">)</span> <span class="nf">stmt</span><span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">Node</span><span class="p">)</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="k">case</span> <span class="nx">ODEFER</span><span class="p">:</span> 
+        <span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">hasOpenDefers</span> <span class="p">{</span>
+            <span class="nx">s</span><span class="p">.</span><span class="nf">openDeferRecord</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">Left</span><span class="p">)</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="nx">d</span> <span class="o">:=</span> <span class="nx">callDefer</span>
+            <span class="c1">// 这里需要注释掉
+</span><span class="c1"></span>            <span class="c1">// if n.Esc == EscNever {
+</span><span class="c1"></span>            <span class="c1">//  d = callDeferStack
+</span><span class="c1"></span>            <span class="c1">// }
+</span><span class="c1"></span>            <span class="nx">s</span><span class="p">.</span><span class="nf">call</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">Left</span><span class="p">,</span> <span class="nx">d</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nf">f</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">f</span><span class="p">()</span> <span class="p">(</span><span class="nx">result</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">result</span> <span class="o">*=</span> <span class="mi">7</span>
+    <span class="p">}()</span> 
+    <span class="k">return</span> <span class="mi">6</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Print the assembly using the command.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ <span class="nv">GOOS</span><span class="o">=</span>linux <span class="nv">GOARCH</span><span class="o">=</span>amd64 go tool compile -S -N -l main.go
+</code></pre></td></tr></table>
+</div>
+</div><p>First of all, let&rsquo;s look at the main function, there is nothing to say, it is a very simple call to the f function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">main</span> <span class="nx">STEXT</span> <span class="nx">size</span><span class="p">=</span><span class="mi">54</span> <span class="nx">args</span><span class="p">=</span><span class="mh">0x0</span> <span class="nx">locals</span><span class="p">=</span><span class="mh">0x10</span>
+        <span class="mh">0x0000</span> <span class="mo">00000</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">3</span><span class="p">)</span>        <span class="nx">TEXT</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nf">main</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span> <span class="nx">ABIInternal</span><span class="p">,</span> <span class="err">$</span><span class="mi">16</span><span class="o">-</span><span class="mi">0</span>
+        <span class="o">...</span>
+        <span class="mh">0x0020</span> <span class="mo">00032</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">4</span><span class="p">)</span>        <span class="nx">CALL</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nf">f</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>
+        <span class="o">...</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The following subparagraph looks at the calls to the f function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">f</span> <span class="nx">STEXT</span> <span class="nx">size</span><span class="p">=</span><span class="mi">126</span> <span class="nx">args</span><span class="p">=</span><span class="mh">0x8</span> <span class="nx">locals</span><span class="p">=</span><span class="mh">0x20</span>
+        <span class="mh">0x0000</span> <span class="mo">00000</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">7</span><span class="p">)</span>        <span class="nx">TEXT</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nf">f</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span> <span class="nx">ABIInternal</span><span class="p">,</span> <span class="err">$</span><span class="mi">32</span><span class="o">-</span><span class="mi">8</span> 
+        <span class="o">...</span>
+        <span class="mh">0x001d</span> <span class="mo">0002</span><span class="mi">9</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">7</span><span class="p">)</span>        <span class="nx">MOVQ</span>    <span class="err">$</span><span class="mi">0</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">result</span><span class="o">+</span><span class="mi">40</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>        <span class="p">;;</span> <span class="nx">将常量0</span> <span class="nx">写入40</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>  
+        <span class="mh">0x0026</span> <span class="mo">0003</span><span class="mi">8</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span><span class="p">)</span>        <span class="nx">MOVL</span>    <span class="err">$</span><span class="mi">8</span><span class="p">,</span> <span class="p">(</span><span class="nx">SP</span><span class="p">)</span>                    <span class="p">;;</span> <span class="nx">将常量8</span> <span class="nx">放入栈顶</span>
+        <span class="mh">0x002d</span> <span class="mo">00045</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span><span class="p">)</span>        <span class="nx">LEAQ</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">f</span><span class="p">.</span><span class="nx">func1</span><span class="err">·</span><span class="nf">f</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span> <span class="nx">AX</span>        <span class="p">;;</span> <span class="nx">将函数f</span><span class="p">.</span><span class="nx">func1</span><span class="err">·</span><span class="nx">f地址写入AX</span>
+        <span class="mh">0x0034</span> <span class="mo">00052</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span><span class="p">)</span>        <span class="nx">MOVQ</span>    <span class="nx">AX</span><span class="p">,</span> <span class="mi">8</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>                   <span class="p">;;</span> <span class="nx">将函数f</span><span class="p">.</span><span class="nx">func1</span><span class="err">·</span><span class="nf">f地址写入8</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x0039</span> <span class="mo">00057</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span><span class="p">)</span>        <span class="nx">LEAQ</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">result</span><span class="o">+</span><span class="mi">40</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">AX</span>        <span class="p">;;</span> <span class="nx">将40</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span><span class="nx">地址值写入AX</span>
+        <span class="mh">0x003e</span> <span class="mo">00062</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span><span class="p">)</span>        <span class="nx">MOVQ</span>    <span class="nx">AX</span><span class="p">,</span> <span class="mi">16</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>                  <span class="p">;;</span> <span class="nx">将AX</span> <span class="nx">保存的地址写入16</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x0043</span> <span class="mo">00067</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span><span class="p">)</span>        <span class="nx">PCDATA</span>  <span class="err">$</span><span class="mi">1</span><span class="p">,</span> <span class="err">$</span><span class="mi">0</span>
+        <span class="mh">0x0043</span> <span class="mo">00067</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span><span class="p">)</span>        <span class="nx">CALL</span>    <span class="nx">runtime</span><span class="p">.</span><span class="nf">deferproc</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>       <span class="p">;;</span> <span class="nx">调用</span> <span class="nx">runtime</span><span class="p">.</span><span class="nx">deferproc</span> <span class="nx">函数</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Since allocation on the <code>defer</code> heap calls the <code>runtime.deferproc</code> function, what is shown in this assembly is an assembly before the <code>runtime.deferproc</code> function is called, which is still very simple to understand.</p>
+<p>Because the argument to the <code>runtime.deferproc</code> function is two arguments, as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">func deferproc<span class="o">(</span>siz int32, fn *funcval<span class="o">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the function call process, the parameters are passed <strong>from the right to the left of the parameter list stack</strong>, so the top of the stack is pressed into the constant 8, in the 8(SP) position is pressed into the second parameter <code>f.func1-f</code> function address.</p>
+<p>See here may have a question, in the pressure into the constant 8 when the size is int32 occupies 4 bytes size, why the second parameter does not start from 4 (SP), but to start from 8 (SP), this is because the need to do memory alignment caused.</p>
+<p>In addition to the parameters, it should also be noted that the 16(SP) position is pressed into the 40(SP) address value. So the entire pre-call stack structure should look like the following.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/efe5a4b4e683494b9f8c0d65181dbd74.png" alt="sobyte"></p>
+<p>Let&rsquo;s look at <code>runtime.deferproc</code> :</p>
+<p>File location: src/runtime/panic.go</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">deferproc</span><span class="p">(</span><span class="nx">siz</span> <span class="kt">int32</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">*</span><span class="nx">funcval</span><span class="p">)</span> <span class="p">{</span>  
+    <span class="k">if</span> <span class="nf">getg</span><span class="p">().</span><span class="nx">m</span><span class="p">.</span><span class="nx">curg</span> <span class="o">!=</span> <span class="nf">getg</span><span class="p">()</span> <span class="p">{</span> 
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;defer on system stack&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// 获取sp指针
+</span><span class="c1"></span>    <span class="nx">sp</span> <span class="o">:=</span> <span class="nf">getcallersp</span><span class="p">()</span>
+    <span class="c1">// 获取fn函数后指针作为参数
+</span><span class="c1"></span>    <span class="nx">argp</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">fn</span><span class="p">))</span> <span class="o">+</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">fn</span><span class="p">)</span>
+    <span class="nx">callerpc</span> <span class="o">:=</span> <span class="nf">getcallerpc</span><span class="p">()</span>
+    <span class="c1">// 获取一个新的defer
+</span><span class="c1"></span>    <span class="nx">d</span> <span class="o">:=</span> <span class="nf">newdefer</span><span class="p">(</span><span class="nx">siz</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">d</span><span class="p">.</span><span class="nx">_panic</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;deferproc: d.panic != nil after newdefer&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// 将 defer 加入到链表中
+</span><span class="c1"></span>    <span class="nx">d</span><span class="p">.</span><span class="nx">link</span> <span class="p">=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_defer</span>
+    <span class="nx">gp</span><span class="p">.</span><span class="nx">_defer</span> <span class="p">=</span> <span class="nx">d</span>
+    <span class="nx">d</span><span class="p">.</span><span class="nx">fn</span> <span class="p">=</span> <span class="nx">fn</span>
+    <span class="nx">d</span><span class="p">.</span><span class="nx">pc</span> <span class="p">=</span> <span class="nx">callerpc</span>
+    <span class="nx">d</span><span class="p">.</span><span class="nx">sp</span> <span class="p">=</span> <span class="nx">sp</span>
+    <span class="c1">// 进行参数拷贝
+</span><span class="c1"></span>    <span class="k">switch</span> <span class="nx">siz</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="mi">0</span><span class="p">:</span> 
+        <span class="c1">//如果defered函数的参数只有指针大小则直接通过赋值来拷贝参数
+</span><span class="c1"></span>    <span class="k">case</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span><span class="p">:</span>
+        <span class="c1">// 将 argp 所对应的值 写入到 deferArgs 返回的地址中
+</span><span class="c1"></span>        <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nf">deferArgs</span><span class="p">(</span><span class="nx">d</span><span class="p">))</span> <span class="p">=</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">argp</span><span class="p">))</span>
+    <span class="k">default</span><span class="p">:</span>
+        <span class="c1">// 如果参数大小不是指针大小，那么进行数据拷贝
+</span><span class="c1"></span>        <span class="nf">memmove</span><span class="p">(</span><span class="nf">deferArgs</span><span class="p">(</span><span class="nx">d</span><span class="p">),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">argp</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">siz</span><span class="p">))</span>
+    <span class="p">}</span>
+
+    <span class="nf">return0</span><span class="p">()</span> 
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When calling the <code>deferproc</code> function, we know that the argument <code>siz</code> is passed in as the value at the top of the stack representing the argument size of 8 and the address corresponding to the <code>8(SP)</code> passed in as the argument fn.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">argp</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">fn</span><span class="p">))</span> <span class="o">+</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">fn</span><span class="p">)</span>
+<span class="o">...</span>
+<span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nf">deferArgs</span><span class="p">(</span><span class="nx">d</span><span class="p">))</span> <span class="p">=</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">argp</span><span class="p">))</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>So the two sentences above are actually a combination of the address value we saved in 16(SP) above into the next 8bytes block of memory immediately below <code>defer</code> as the argument to <code>defer</code>. A simple diagram would look like the following, where the <code>argp</code> immediately below <code>defer</code> actually stores the address value saved in 16(SP).</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/f98b57bff44c4a34aa4b0fe2c976c2d7.png" alt="sobyte"></p>
+<p>Note that here the argp value is copied by a copy operation, <strong>so the argument is already determined when <code>defer</code> is called</strong>, not when it is executed, but here the value of an address is copied.</p>
+<p>And we know that when allocated on the heap, <code>defer</code> is stored in the current Goroutine as a chain, so if there are 3 <code>defer</code>s called separately, the last one called will be at the top of the chain.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/552a8f30c73d47ce987f98571b4fc579.png" alt="sobyte"></p>
+<p>For the <code>newdefer</code> function, the general idea is to fetch from P&rsquo;s local cache pool, and if not, fetch half of <code>defer</code> from sched&rsquo;s global cache pool to fill P&rsquo;s local resource pool, and if there is still no available cache, allocate new <code>defer</code> and <code>args</code> directly from the heap. The memory allocation here is roughly the same as the memory allocator allocation, so we won&rsquo;t analyze it again, but you can see for yourself if you are interested.</p>
+<p>Let&rsquo;s go back to the assembly of the f function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">f</span> <span class="nx">STEXT</span> <span class="nx">size</span><span class="p">=</span><span class="mi">126</span> <span class="nx">args</span><span class="p">=</span><span class="mh">0x8</span> <span class="nx">locals</span><span class="p">=</span><span class="mh">0x20</span> 
+        <span class="o">...</span>
+        <span class="mh">0x004e</span> <span class="mo">0007</span><span class="mi">8</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span><span class="p">)</span>       <span class="nx">MOVQ</span>    <span class="err">$</span><span class="mi">6</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">result</span><span class="o">+</span><span class="mi">40</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>        <span class="p">;;</span> <span class="nx">将常量6写入40</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span><span class="err">，</span><span class="nx">作为返回值</span>
+        <span class="mh">0x0057</span> <span class="mo">000</span><span class="mi">87</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span><span class="p">)</span>       <span class="nx">XCHGL</span>   <span class="nx">AX</span><span class="p">,</span> <span class="nx">AX</span>
+        <span class="mh">0x0058</span> <span class="mo">000</span><span class="mi">88</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span><span class="p">)</span>       <span class="nx">CALL</span>    <span class="nx">runtime</span><span class="p">.</span><span class="nf">deferreturn</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>     <span class="p">;;</span> <span class="nx">调用</span> <span class="nx">runtime</span><span class="p">.</span><span class="nx">deferreturn</span> <span class="nx">函数</span>
+        <span class="mh">0x005d</span> <span class="mo">000</span><span class="mi">93</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span><span class="p">)</span>       <span class="nx">MOVQ</span>    <span class="mi">24</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">BP</span>
+        <span class="mh">0x0062</span> <span class="mo">000</span><span class="mi">98</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span><span class="p">)</span>       <span class="nx">ADDQ</span>    <span class="err">$</span><span class="mi">32</span><span class="p">,</span> <span class="nx">SP</span>
+        <span class="mh">0x0066</span> <span class="mo">00102</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span><span class="p">)</span>       <span class="nx">RET</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Here it is very simple, write constant 6 directly to 40(SP) as the return value and then call <code>runtime.deferreturn</code> to execute <code>defer</code>.</p>
+<p>Let&rsquo;s look at <code>runtime.deferreturn</code> :</p>
+<p>File location: src/runtime/panic.go</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">deferreturn</span><span class="p">(</span><span class="nx">arg0</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+    <span class="nx">d</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_defer</span>
+    <span class="k">if</span> <span class="nx">d</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="c1">// 确定 defer 的调用方是不是当前 deferreturn 的调用方
+</span><span class="c1"></span>    <span class="nx">sp</span> <span class="o">:=</span> <span class="nf">getcallersp</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">d</span><span class="p">.</span><span class="nx">sp</span> <span class="o">!=</span> <span class="nx">sp</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+
+    <span class="k">switch</span> <span class="nx">d</span><span class="p">.</span><span class="nx">siz</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="c1">// Do nothing.
+</span><span class="c1"></span>    <span class="k">case</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span><span class="p">:</span>
+        <span class="c1">// 将 defer 保存的参数复制出来
+</span><span class="c1"></span>        <span class="c1">// arg0 实际上是 caller SP 栈顶地址值，所以这里实际上是将参数复制到 caller SP 栈顶地址值
+</span><span class="c1"></span>        <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">arg0</span><span class="p">))</span> <span class="p">=</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nf">deferArgs</span><span class="p">(</span><span class="nx">d</span><span class="p">))</span>
+    <span class="k">default</span><span class="p">:</span>
+        <span class="c1">// 如果参数大小不是 sys.PtrSize，那么进行数据拷贝
+</span><span class="c1"></span>        <span class="nf">memmove</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">arg0</span><span class="p">),</span> <span class="nf">deferArgs</span><span class="p">(</span><span class="nx">d</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">siz</span><span class="p">))</span>
+    <span class="p">}</span>
+    <span class="nx">fn</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nx">fn</span>
+    <span class="nx">d</span><span class="p">.</span><span class="nx">fn</span> <span class="p">=</span> <span class="kc">nil</span>
+    <span class="nx">gp</span><span class="p">.</span><span class="nx">_defer</span> <span class="p">=</span> <span class="nx">d</span><span class="p">.</span><span class="nx">link</span>
+    <span class="c1">//将 defer 对象放入到 defer 池中，后面可以复用
+</span><span class="c1"></span>    <span class="nf">freedefer</span><span class="p">(</span><span class="nx">d</span><span class="p">)</span>
+
+    <span class="nx">_</span> <span class="p">=</span> <span class="nx">fn</span><span class="p">.</span><span class="nx">fn</span>
+    <span class="c1">// 传入需要执行的函数和参数
+</span><span class="c1"></span>    <span class="nf">jmpdefer</span><span class="p">(</span><span class="nx">fn</span><span class="p">,</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">arg0</span><span class="p">)))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>First, note that the argument <code>arg0</code> passed in here is actually the value at the top of the caller&rsquo;s stack, so the following assignment actually copies the defer argument to the top of the caller&rsquo;s stack.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">*<span class="o">(</span>*uintptr<span class="o">)(</span>unsafe.Pointer<span class="o">(</span><span class="p">&amp;</span>arg0<span class="o">))</span> <span class="o">=</span> *<span class="o">(</span>*uintptr<span class="o">)(</span>deferArgs<span class="o">(</span>d<span class="o">))</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>*(*uintptr)(deferArgs(d))</code> What is stored here is actually the address value saved by the caller 16(SP). Then the caller&rsquo;s stack frame is shown below.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/95d6115d71b442cbb896610a3de0f61e.png" alt="sobyte"></p>
+<p>Go to <code>runtime.jmpdefer</code> to see how this is done.</p>
+<p>Location: src/runtime/asm_amd64.s</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">TEXT</span> <span class="nx">runtime</span><span class="err">·</span><span class="nf">jmpdefer</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span> <span class="nx">NOSPLIT</span><span class="p">,</span> <span class="err">$</span><span class="mi">0</span><span class="o">-</span><span class="mi">16</span>
+    <span class="nx">MOVQ</span>    <span class="nx">fv</span><span class="o">+</span><span class="mi">0</span><span class="p">(</span><span class="nx">FP</span><span class="p">),</span> <span class="nx">DX</span>    <span class="c1">// fn 函数地址
+</span><span class="c1"></span>    <span class="nx">MOVQ</span>    <span class="nx">argp</span><span class="o">+</span><span class="mi">8</span><span class="p">(</span><span class="nx">FP</span><span class="p">),</span> <span class="nx">BX</span>  <span class="c1">// caller sp 调用方 SP
+</span><span class="c1"></span>    <span class="nx">LEAQ</span>    <span class="o">-</span><span class="mi">8</span><span class="p">(</span><span class="nx">BX</span><span class="p">),</span> <span class="nx">SP</span>  <span class="c1">//  caller 后的调用方 SP
+</span><span class="c1"></span>    <span class="nx">MOVQ</span>    <span class="o">-</span><span class="mi">8</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">BP</span>  <span class="c1">//  caller 后的调用方 BP
+</span><span class="c1"></span>    <span class="nx">SUBQ</span>    <span class="err">$</span><span class="mi">5</span><span class="p">,</span> <span class="p">(</span><span class="nx">SP</span><span class="p">)</span>    <span class="c1">//  获取 runtime.deferreturn 地址值写入栈顶
+</span><span class="c1"></span>    <span class="nx">MOVQ</span>    <span class="mi">0</span><span class="p">(</span><span class="nx">DX</span><span class="p">),</span> <span class="nx">BX</span>   <span class="c1">// BX = DX
+</span><span class="c1"></span>    <span class="nx">JMP</span> <span class="nx">BX</span>  <span class="c1">// 执行被 defer 的函数
+</span></code></pre></td></tr></table>
+</div>
+</div><p>This assembly is very interesting, the <code>jmpdefer</code> function, since it was called by <code>runtime.deferreturn</code>, now has the following call stack frame</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/bc843d97871e46939f63762444a751e3.png" alt="sobyte"></p>
+<p>The arguments passed to the <code>jmpdefer</code> function are 0(FP) for the fn function address, and 8(FP) for the SP of the call stack of the f function.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/4b1c3ca149fa451c8d2cf95f0b271e64.png" alt="sobyte"></p>
+<p>So the following sentence represents the <code>return address</code> of the <code>runtime.deferreturn</code> call stack written to SP.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">LEAQ    -8<span class="o">(</span>BX<span class="o">)</span>, SP
+</code></pre></td></tr></table>
+</div>
+</div><p>Then <code>-8(SP)</code> represents the <code>Base Pointer</code> of the <code>runtime.deferreturn</code> call stack.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">MOVQ    -8<span class="o">(</span>SP<span class="o">)</span>, BP
+</code></pre></td></tr></table>
+</div>
+</div><p>We will focus on explaining why the value of the SP pointer minus 5 is used to obtain the address value of <code>runtime.deferreturn</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">SUBQ    <span class="nv">$5</span>, <span class="o">(</span>SP<span class="o">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We return to the assembly of the f function call.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="o">(</span>dlv<span class="o">)</span> disass
+TEXT main.f<span class="o">(</span>SB<span class="o">)</span> /data/gotest/main.go
+        ...
+        main.go:11      0x45def8        e8a3e2fcff              call <span class="nv">$runtime</span>.deferreturn
+        main.go:11      0x45defd        488b6c2418              mov rbp, qword ptr <span class="o">[</span>rsp+0x18<span class="o">]</span>
+        ...
+</code></pre></td></tr></table>
+</div>
+</div><p>Since the <code>runtime.deferreturn</code> function needs to return to the 0x45defd address after the call, the <code>return address</code> in the stack frame corresponding to the <code>runtime.deferreturn</code> function is actually 0x45defd.</p>
+<p>In the <code>jmpdefer</code> function, the value corresponding to <code>(SP)</code> is the <code>return address</code> of the <code>runtime.deferreturn</code> call stack, so subtracting 5 from 0x45defd will give you 0x45def8, which is the value of the <code>runtime.deferreturn</code> function. address.</p>
+<p>Then when we finally jump to the <code>f.func1</code> function, the call stack is as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/cf14a2a2f39b46018bc643f2ba020f00.png" alt="sobyte"></p>
+<p>The location of the call stack <code>(SP)</code> actually holds a pointer to the <code>deferreturn</code> function, so after the <code>f.func1</code> function is called, it returns to the <code>deferreturn</code> function until there is no data in the <code>_defer</code> chain.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">func deferreturn<span class="o">(</span>arg0 uintptr<span class="o">)</span> <span class="o">{</span>
+    gp :<span class="o">=</span> getg<span class="o">()</span>
+    d :<span class="o">=</span> gp._defer
+    <span class="k">if</span> <span class="nv">d</span> <span class="o">==</span> nil <span class="o">{</span>
+        <span class="k">return</span>
+    <span class="o">}</span>
+    ...
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Here&rsquo;s another short look at the <code>f.func1</code> function call.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="s2">&#34;&#34;</span>.f.func1 STEXT nosplit <span class="nv">size</span><span class="o">=</span><span class="m">25</span> <span class="nv">args</span><span class="o">=</span>0x8 <span class="nv">locals</span><span class="o">=</span>0x0
+        0x0000 <span class="m">00000</span> <span class="o">(</span>main.go:8<span class="o">)</span>        TEXT    <span class="s2">&#34;&#34;</span>.f.func1<span class="o">(</span>SB<span class="o">)</span>, NOSPLIT<span class="p">|</span>ABIInternal, <span class="nv">$0</span>-8
+        0x0000 <span class="m">00000</span> <span class="o">(</span>main.go:8<span class="o">)</span>        FUNCDATA        <span class="nv">$0</span>, gclocals·1a65e721a2ccc325b382662e7ffee780<span class="o">(</span>SB<span class="o">)</span>
+        0x0000 <span class="m">00000</span> <span class="o">(</span>main.go:8<span class="o">)</span>        FUNCDATA        <span class="nv">$1</span>, gclocals·69c1753bd5f81501d95132d08af04464<span class="o">(</span>SB<span class="o">)</span>
+        0x0000 <span class="m">00000</span> <span class="o">(</span>main.go:9<span class="o">)</span>        MOVQ    <span class="s2">&#34;&#34;</span>.<span class="p">&amp;</span>result+8<span class="o">(</span>SP<span class="o">)</span>, AX        <span class="p">;;</span> 将指向6的地址值写入 AX
+        0x0005 <span class="m">00005</span> <span class="o">(</span>main.go:9<span class="o">)</span>        MOVQ    <span class="o">(</span>AX<span class="o">)</span>, AX                    <span class="p">;;</span> 将 <span class="m">6</span> 写入到 AX
+        0x0008 <span class="m">00008</span> <span class="o">(</span>main.go:9<span class="o">)</span>        LEAQ    <span class="o">(</span>AX<span class="o">)(</span>AX*2<span class="o">)</span>, CX              <span class="p">;;</span> <span class="nv">CX</span> <span class="o">=</span> 6*2 +6 <span class="o">=</span><span class="m">18</span>
+        0x000c <span class="m">00012</span> <span class="o">(</span>main.go:9<span class="o">)</span>        LEAQ    <span class="o">(</span>AX<span class="o">)(</span>CX*2<span class="o">)</span>, AX              <span class="p">;;</span> <span class="nv">AX</span> <span class="o">=</span> 18*2 + <span class="nv">6</span> <span class="o">=</span><span class="m">42</span>
+        0x0010 <span class="m">00016</span> <span class="o">(</span>main.go:9<span class="o">)</span>        MOVQ    <span class="s2">&#34;&#34;</span>.<span class="p">&amp;</span>result+8<span class="o">(</span>SP<span class="o">)</span>, CX        <span class="p">;;</span> 将指向6的地址值写入 CX
+        0x0015 <span class="m">00021</span> <span class="o">(</span>main.go:9<span class="o">)</span>        MOVQ    AX, <span class="o">(</span>CX<span class="o">)</span>                    <span class="p">;;</span> 将CX地址值指向的值改为42
+        0x0018 <span class="m">00024</span> <span class="o">(</span>main.go:10<span class="o">)</span>       RET
+</code></pre></td></tr></table>
+</div>
+</div><p>The call here is very simple: get the data pointed to by the 8(SP) address value and do the arithmetic, then write the result to the stack and return.</p>
+<p>Here we have basically shown you the whole process of calling <code>defer</code> functions through heap allocation. The answer is that the <code>defer</code> argument passed during the <code>defer</code> call is a pointer to the return value, so the return value is modified when <code>defer</code> is finally executed.</p>
+<h4 id="anonymous-function-return-value-calls">Anonymous function return value calls</h4>
+<p>So what if anonymous return value functions are passed? For example, something like the following.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// f returns 100
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">f</span><span class="p">()</span> <span class="kt">int</span> <span class="p">{</span>
+    <span class="nx">i</span> <span class="o">:=</span> <span class="mi">100</span>
+    <span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">i</span><span class="o">++</span>
+    <span class="p">}()</span>
+    <span class="k">return</span> <span class="nx">i</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Print the compilation below.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">f</span> <span class="nx">STEXT</span> <span class="nx">size</span><span class="p">=</span><span class="mi">139</span> <span class="nx">args</span><span class="p">=</span><span class="mh">0x8</span> <span class="nx">locals</span><span class="p">=</span><span class="mh">0x28</span>
+        <span class="mh">0x0000</span> <span class="mo">00000</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">7</span><span class="p">)</span>        <span class="nx">TEXT</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nf">f</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span> <span class="nx">ABIInternal</span><span class="p">,</span> <span class="err">$</span><span class="mi">40</span><span class="o">-</span><span class="mi">8</span>
+        <span class="o">...</span>
+        <span class="mh">0x001d</span> <span class="mo">0002</span><span class="mi">9</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">7</span><span class="p">)</span>        <span class="nx">MOVQ</span>    <span class="err">$</span><span class="mi">0</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">.</span><span class="err">~</span><span class="nx">r0</span><span class="o">+</span><span class="mi">48</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>       <span class="p">;;</span><span class="nx">初始化返回值</span>
+        <span class="mh">0x0026</span> <span class="mo">0003</span><span class="mi">8</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span><span class="p">)</span>        <span class="nx">MOVQ</span>    <span class="err">$</span><span class="mi">100</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">i</span><span class="o">+</span><span class="mi">24</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>       <span class="p">;;</span><span class="nx">初始化参数i</span>
+        <span class="mh">0x002f</span> <span class="mo">00047</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">MOVL</span>    <span class="err">$</span><span class="mi">8</span><span class="p">,</span> <span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x0036</span> <span class="mo">00054</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">LEAQ</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">f</span><span class="p">.</span><span class="nx">func1</span><span class="err">·</span><span class="nf">f</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span> <span class="nx">AX</span>
+        <span class="mh">0x003d</span> <span class="mo">00061</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">MOVQ</span>    <span class="nx">AX</span><span class="p">,</span> <span class="mi">8</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>               <span class="p">;;</span> <span class="nx">将f</span><span class="p">.</span><span class="nx">func1</span><span class="err">·</span><span class="nf">f地址值写入8</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x0042</span> <span class="mo">00066</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">LEAQ</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">i</span><span class="o">+</span><span class="mi">24</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">AX</span>
+        <span class="mh">0x0047</span> <span class="mo">00071</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">MOVQ</span>    <span class="nx">AX</span><span class="p">,</span> <span class="mi">16</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>              <span class="p">;;</span> <span class="nx">将</span> <span class="mi">24</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span> <span class="nx">地址值写入到</span> <span class="mi">16</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span> 
+        <span class="mh">0x004c</span> <span class="mo">00076</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">PCDATA</span>  <span class="err">$</span><span class="mi">1</span><span class="p">,</span> <span class="err">$</span><span class="mi">0</span>
+        <span class="mh">0x004c</span> <span class="mo">00076</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">CALL</span>    <span class="nx">runtime</span><span class="p">.</span><span class="nf">deferproc</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>
+        <span class="mh">0x0051</span> <span class="mo">000</span><span class="mi">81</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">TESTL</span>   <span class="nx">AX</span><span class="p">,</span> <span class="nx">AX</span>
+        <span class="mh">0x0053</span> <span class="mo">000</span><span class="mi">83</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">JNE</span>     <span class="mi">113</span>
+        <span class="mh">0x0055</span> <span class="mo">000</span><span class="mi">85</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">JMP</span>     <span class="mi">87</span>
+        <span class="mh">0x0057</span> <span class="mo">000</span><span class="mi">87</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">MOVQ</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">i</span><span class="o">+</span><span class="mi">24</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">AX</span>         <span class="p">;;</span> <span class="nx">将24</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span><span class="nx">的值100写入到AX</span>
+        <span class="mh">0x005c</span> <span class="mo">000</span><span class="mi">92</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">MOVQ</span>    <span class="nx">AX</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">.</span><span class="err">~</span><span class="nx">r0</span><span class="o">+</span><span class="mi">48</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>       <span class="p">;;</span> <span class="nx">将值100写入到48</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x0061</span> <span class="mo">000</span><span class="mi">97</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">XCHGL</span>   <span class="nx">AX</span><span class="p">,</span> <span class="nx">AX</span>
+        <span class="mh">0x0062</span> <span class="mo">000</span><span class="mi">98</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">CALL</span>    <span class="nx">runtime</span><span class="p">.</span><span class="nf">deferreturn</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>
+        <span class="mh">0x0067</span> <span class="mo">00103</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">MOVQ</span>    <span class="mi">32</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">BP</span>
+        <span class="mh">0x006c</span> <span class="mo">0010</span><span class="mi">8</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">ADDQ</span>    <span class="err">$</span><span class="mi">40</span><span class="p">,</span> <span class="nx">SP</span>
+        <span class="mh">0x0070</span> <span class="mo">00112</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">RET</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the output above, we can see that the anonymous return value function call first writes the constant 100 to 24(SP), then writes the address value of 24(SP) to 16(SP), and then writes the return value to 48(SP) with the <code>MOVQ</code> instruction, which means that the value is copied, not the pointer, and so the return value is not modified.</p>
+<h4 id="summary">Summary</h4>
+<p>Here is a diagram comparing the two after calling <code>runtime.deferreturn</code> stack frames.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/b80e7b63455c4ba595580acaa1a06966.png" alt="sobyte"></p>
+<p>It is clear that the famous return value function stores the address of the return value at 16(SP), while the anonymous return value function stores the address of 24(SP) at 16(SP).</p>
+<p>The above sequence of analysis also answers a few questions in passing.</p>
+<ol>
+<li>
+<p>how does defer pass arguments? We found in the above analysis that when executing the <code>deferproc</code> function, the argument value is first copied to the location immediately adjacent to the <code>defer</code> memory address value as the argument, if it is a pointer pass it will directly copy the pointer, and a value pass will directly copy the value to the location of the <code>defer</code> argument.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/ce9d533f9bc8493cb0ac17aad7fda523.png" alt="sobyte"></p>
+<p>Then when the <code>deferreturn</code> function is executed, it copies the parameter values to the stack and then calls <code>jmpdefer</code> for execution.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">deferreturn</span><span class="p">(</span><span class="nx">arg0</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="k">switch</span> <span class="nx">d</span><span class="p">.</span><span class="nx">siz</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="mi">0</span><span class="p">:</span>
+        <span class="c1">// Do nothing.
+</span><span class="c1"></span>    <span class="k">case</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span><span class="p">:</span>
+        <span class="c1">// 将 defer 保存的参数复制出来
+</span><span class="c1"></span>        <span class="c1">// arg0 实际上是 caller SP 栈顶地址值，所以这里实际上是将参数复制到 caller SP 栈顶地址值
+</span><span class="c1"></span>        <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">arg0</span><span class="p">))</span> <span class="p">=</span> <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nf">deferArgs</span><span class="p">(</span><span class="nx">d</span><span class="p">))</span>
+    <span class="k">default</span><span class="p">:</span>
+        <span class="c1">// 如果参数大小不是 sys.PtrSize，那么进行数据拷贝
+</span><span class="c1"></span>        <span class="nf">memmove</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">arg0</span><span class="p">),</span> <span class="nf">deferArgs</span><span class="p">(</span><span class="nx">d</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">siz</span><span class="p">))</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div></li>
+<li>
+<p>How are multiple defer statements executed?</p>
+<p>When the <code>deferproc</code> function is called to register a <code>defer</code>, the new element is inserted at the head of the table, and execution is done by getting the head of the chain in order.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/1603aef60ad44cefb0c1512679248375.png" alt="sobyte"></p>
+</li>
+<li>
+<p>What is the order of execution of defer, return, and return value?</p>
+<p>To answer this question, let&rsquo;s take the assembly of the output in the above example and examine it.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">f</span> <span class="nx">STEXT</span> <span class="nx">size</span><span class="p">=</span><span class="mi">126</span> <span class="nx">args</span><span class="p">=</span><span class="mh">0x8</span> <span class="nx">locals</span><span class="p">=</span><span class="mh">0x20</span> 
+   <span class="o">...</span>
+   <span class="mh">0x004e</span> <span class="mo">0007</span><span class="mi">8</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span><span class="p">)</span>       <span class="nx">MOVQ</span>    <span class="err">$</span><span class="mi">6</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">result</span><span class="o">+</span><span class="mi">40</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>        <span class="p">;;</span> <span class="nx">将常量6写入40</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span><span class="err">，</span><span class="nx">作为返回值</span>
+   <span class="mh">0x0057</span> <span class="mo">000</span><span class="mi">87</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span><span class="p">)</span>       <span class="nx">XCHGL</span>   <span class="nx">AX</span><span class="p">,</span> <span class="nx">AX</span>
+   <span class="mh">0x0058</span> <span class="mo">000</span><span class="mi">88</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span><span class="p">)</span>       <span class="nx">CALL</span>    <span class="nx">runtime</span><span class="p">.</span><span class="nf">deferreturn</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>     <span class="p">;;</span> <span class="nx">调用</span> <span class="nx">runtime</span><span class="p">.</span><span class="nx">deferreturn</span> <span class="nx">函数</span>
+   <span class="mh">0x005d</span> <span class="mo">000</span><span class="mi">93</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span><span class="p">)</span>       <span class="nx">MOVQ</span>    <span class="mi">24</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">BP</span>
+   <span class="mh">0x0062</span> <span class="mo">000</span><span class="mi">98</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span><span class="p">)</span>       <span class="nx">ADDQ</span>    <span class="err">$</span><span class="mi">32</span><span class="p">,</span> <span class="nx">SP</span>
+   <span class="mh">0x0066</span> <span class="mo">00102</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span><span class="p">)</span>       <span class="nx">RET</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>From this assembly, we know that for</p>
+<ol>
+<li>it is the first to set the return value to the constant 6.</li>
+<li>then <code>runtime.deferreturn</code> will be called to execute the <code>defer</code> chain.</li>
+<li>executing the RET instruction to jump to the caller function.</li>
+</ol>
+</li>
+</ol>
+<h3 id="stack-allocation">Stack allocation</h3>
+<p>As mentioned at the beginning, <code>defer</code> on-stack allocation was added after Go version 1.13, so one difference from heap allocation is that <code>defer</code> is created on the stack via <code>deferprocStack</code>.</p>
+<p>Go goes through the SSA stage at compile time, and if it&rsquo;s a stack allocation, then it needs to use the compiler to initialize the <code>_defer</code> record directly on the function call frame and pass it as an argument to <code>deferprocStack</code>. The rest of the execution process is no different from heap allocation.</p>
+<p>For the <code>deferprocStack</code> function let&rsquo;s look briefly at.</p>
+<p>File location: src/cmd/compile/internal/gc/ssa.go</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">deferprocStack</span><span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">_defer</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">curg</span> <span class="o">!=</span> <span class="nx">gp</span> <span class="p">{</span> 
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;defer on system stack&#34;</span><span class="p">)</span>
+    <span class="p">}</span> 
+    <span class="nx">d</span><span class="p">.</span><span class="nx">started</span> <span class="p">=</span> <span class="kc">false</span>
+    <span class="nx">d</span><span class="p">.</span><span class="nx">heap</span> <span class="p">=</span> <span class="kc">false</span>  <span class="c1">// 栈上分配的 _defer
+</span><span class="c1"></span>    <span class="nx">d</span><span class="p">.</span><span class="nx">openDefer</span> <span class="p">=</span> <span class="kc">false</span>
+    <span class="nx">d</span><span class="p">.</span><span class="nx">sp</span> <span class="p">=</span> <span class="nf">getcallersp</span><span class="p">()</span>
+    <span class="nx">d</span><span class="p">.</span><span class="nx">pc</span> <span class="p">=</span> <span class="nf">getcallerpc</span><span class="p">()</span>
+    <span class="nx">d</span><span class="p">.</span><span class="nx">framepc</span> <span class="p">=</span> <span class="mi">0</span>
+    <span class="nx">d</span><span class="p">.</span><span class="nx">varp</span> <span class="p">=</span> <span class="mi">0</span> 
+    <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">_panic</span><span class="p">))</span> <span class="p">=</span> <span class="mi">0</span>
+    <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">fd</span><span class="p">))</span> <span class="p">=</span> <span class="mi">0</span>
+    <span class="c1">// 将多个 _defer 记录通过链表进行串联
+</span><span class="c1"></span>    <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">d</span><span class="p">.</span><span class="nx">link</span><span class="p">))</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">_defer</span><span class="p">))</span>
+    <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gp</span><span class="p">.</span><span class="nx">_defer</span><span class="p">))</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">d</span><span class="p">))</span>
+
+    <span class="nf">return0</span><span class="p">()</span> 
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The main function is to assign a value to the <code>_defer</code> structure and return it.</p>
+<h3 id="open-coding-1">Open coding</h3>
+<p>The Go language was optimized in 1.14 by inlining code so that calls to the <code>defer</code> function are made directly at the end of the function, with little additional overhead. In the build phase of SSA <code>buildssa</code> will insert open coding based on a check to see if the condition is met. Since the code in the build phase of SSA is not well understood, only the basics are given below and no code analysis is involved.</p>
+<p>We can compile a printout of the example for the allocation on the heap.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="err">$</span> <span class="nx">GOOS</span><span class="p">=</span><span class="nx">linux</span> <span class="nx">GOARCH</span><span class="p">=</span><span class="nx">amd64</span> <span class="k">go</span> <span class="nx">tool</span> <span class="nx">compile</span> <span class="o">-</span><span class="nx">S</span>  <span class="nx">main</span><span class="p">.</span><span class="k">go</span>
+<span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">f</span> <span class="nx">STEXT</span> <span class="nx">size</span><span class="p">=</span><span class="mi">155</span> <span class="nx">args</span><span class="p">=</span><span class="mh">0x8</span> <span class="nx">locals</span><span class="p">=</span><span class="mh">0x30</span>
+        <span class="mh">0x0000</span> <span class="mo">00000</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">7</span><span class="p">)</span>        <span class="nx">TEXT</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nf">f</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span> <span class="nx">ABIInternal</span><span class="p">,</span> <span class="err">$</span><span class="mi">48</span><span class="o">-</span><span class="mi">8</span>
+        <span class="o">...</span>
+        <span class="mh">0x002e</span> <span class="mo">00046</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">7</span><span class="p">)</span>        <span class="nx">MOVQ</span>    <span class="err">$</span><span class="mi">0</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">.</span><span class="err">~</span><span class="nx">r0</span><span class="o">+</span><span class="mi">56</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x0037</span> <span class="mo">00055</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span><span class="p">)</span>        <span class="nx">MOVQ</span>    <span class="err">$</span><span class="mi">100</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">i</span><span class="o">+</span><span class="mi">16</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x0040</span> <span class="mo">00064</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">LEAQ</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">f</span><span class="p">.</span><span class="nx">func1</span><span class="err">·</span><span class="nf">f</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span> <span class="nx">AX</span>
+        <span class="mh">0x0047</span> <span class="mo">00071</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">MOVQ</span>    <span class="nx">AX</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">..</span><span class="nx">autotmp_4</span><span class="o">+</span><span class="mi">32</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x004c</span> <span class="mo">00076</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">LEAQ</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">i</span><span class="o">+</span><span class="mi">16</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">AX</span>
+        <span class="mh">0x0051</span> <span class="mo">000</span><span class="mi">81</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">MOVQ</span>    <span class="nx">AX</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">..</span><span class="nx">autotmp_5</span><span class="o">+</span><span class="mi">24</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x0056</span> <span class="mo">000</span><span class="mi">86</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span><span class="p">)</span>        <span class="nx">MOVB</span>    <span class="err">$</span><span class="mi">1</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">..</span><span class="nx">autotmp_3</span><span class="o">+</span><span class="mi">15</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x005b</span> <span class="mo">000</span><span class="mi">91</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">MOVQ</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">i</span><span class="o">+</span><span class="mi">16</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">AX</span>
+        <span class="mh">0x0060</span> <span class="mo">000</span><span class="mi">96</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">MOVQ</span>    <span class="nx">AX</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">.</span><span class="err">~</span><span class="nx">r0</span><span class="o">+</span><span class="mi">56</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x0065</span> <span class="mo">00101</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">MOVB</span>    <span class="err">$</span><span class="mi">0</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">..</span><span class="nx">autotmp_3</span><span class="o">+</span><span class="mi">15</span><span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x006a</span> <span class="mo">00106</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">MOVQ</span>    <span class="s">&#34;&#34;</span><span class="p">..</span><span class="nx">autotmp_5</span><span class="o">+</span><span class="mi">24</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">AX</span>
+        <span class="mh">0x006f</span> <span class="mo">00111</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">MOVQ</span>    <span class="nx">AX</span><span class="p">,</span> <span class="p">(</span><span class="nx">SP</span><span class="p">)</span>
+        <span class="mh">0x0073</span> <span class="mo">00115</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">PCDATA</span>  <span class="err">$</span><span class="mi">1</span><span class="p">,</span> <span class="err">$</span><span class="mi">1</span>
+        <span class="mh">0x0073</span> <span class="mo">00115</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">CALL</span>    <span class="s">&#34;&#34;</span><span class="p">.</span><span class="nx">f</span><span class="p">.</span><span class="nf">func1</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>    <span class="p">;;</span> <span class="nx">直接调用</span> <span class="k">defer</span> <span class="nx">函数</span>
+        <span class="mh">0x0078</span> <span class="mo">00120</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">MOVQ</span>    <span class="mi">40</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">BP</span>
+        <span class="mh">0x007d</span> <span class="mo">00125</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">ADDQ</span>    <span class="err">$</span><span class="mi">48</span><span class="p">,</span> <span class="nx">SP</span>
+        <span class="mh">0x0081</span> <span class="mo">0012</span><span class="mi">9</span> <span class="p">(</span><span class="nx">main</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">12</span><span class="p">)</span>       <span class="nx">RET</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We can see in the assembly output above that the defer function is inserted directly into the end of the function to be called.</p>
+<p>This example above is easy to optimize, but what if a <code>defer</code> is in a conditional statement that must not be determined until runtime?</p>
+<p>The <code>defer bit</code> delay bit is also used in open coding to determine whether a conditional branch should be executed or not. This delay bit is an 8-bit binary code, so only a maximum of 8 <code>defer</code>s can be used in this optimization, including the <code>defer</code> in the conditionals. Each bit is set to 1 to determine if the delay statement is set at runtime, and if so, the call occurs. Otherwise, it is not called.</p>
+<p>For example, an example is explained in the following article.</p>
+<p><a href="https://go.googlesource.com/proposal/+/refs/heads/master/design/34481-opencoded-defers.md">https://go.googlesource.com/proposal/+/refs/heads/master/design/34481-opencoded-defers.md</a></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="k">defer</span> <span class="nf">f1</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span>
+<span class="k">if</span> <span class="nx">cond</span> <span class="p">{</span>
+ <span class="k">defer</span> <span class="nf">f2</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="nx">body</span><span class="o">...</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>At the stage of creating a deferred call, it is first recorded which defer with conditions are triggered by a specific location of the deferred bits.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">deferBits</span> <span class="o">:=</span> <span class="mi">0</span>           <span class="c1">// 初始值 00000000
+</span><span class="c1"></span><span class="nx">deferBits</span> <span class="o">|=</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">0</span>     <span class="c1">// 遇到第一个 defer，设置为 00000001
+</span><span class="c1"></span><span class="nx">_f1</span> <span class="p">=</span> <span class="nx">f1</span>
+<span class="nx">_a1</span> <span class="p">=</span> <span class="nx">a1</span>
+<span class="k">if</span> <span class="nx">cond</span> <span class="p">{</span>
+    <span class="c1">// 如果第二个 defer 被设置，则设置为 00000011，否则依然为 00000001
+</span><span class="c1"></span>    <span class="nx">deferBits</span> <span class="o">|=</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">1</span>
+    <span class="nx">_f2</span> <span class="p">=</span> <span class="nx">f2</span>
+    <span class="nx">_a2</span> <span class="p">=</span> <span class="nx">a2</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Before the function returns and exits, the <code>exit</code> function creates a check code for the delayed bits in reverse order:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">exit</span><span class="p">:</span>
+<span class="c1">// 判断 deferBits &amp; 00000010 == 00000010是否成立
+</span><span class="c1"></span><span class="k">if</span> <span class="nx">deferBits</span> <span class="o">&amp;</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">1</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+ <span class="nx">deferBits</span> <span class="o">&amp;^=</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">1</span>
+ <span class="nf">tmpF2</span><span class="p">(</span><span class="nx">tmpB</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="c1">// 判断 deferBits &amp; 00000001  == 00000001 是否成立
+</span><span class="c1"></span><span class="k">if</span> <span class="nx">deferBits</span> <span class="o">&amp;</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">0</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+ <span class="nx">deferBits</span> <span class="o">&amp;^=</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">0</span>
+ <span class="nf">tmpF1</span><span class="p">(</span><span class="nx">tmpA</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Before the function exits, it determines whether the position is 1 by taking the delayed bits with the corresponding position, and if it is 1, then the <code>defer</code> function can be executed.</p>
+<h2 id="summary-1">Summary</h2>
+<p>This article explains the execution rules of <code>defer</code> and introduces the <code>defer</code> type. The main purpose of this article is to explain how <code>defer</code> function calls are made through heap allocation, such as: function calls to understand &ldquo;<code>defer</code> argument passing&rdquo;, &ldquo;how multiple defer statements are executed&rdquo;, &ldquo;and what is the order of execution of defer, return, and return value&rdquo;, and other issues. Through this analysis, we hope you can have a deeper understanding of defer.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/go-func-call/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Understanding Go function calls from the stack</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/go-snowflakeid/">
+            <span class="next-text nav-default">Go language implementation of Snowflake algorithm</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

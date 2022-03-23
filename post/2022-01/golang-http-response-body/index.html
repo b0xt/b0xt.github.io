@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>A little research on the connection reuse problem caused by unread http.Response.Body - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="In the source code of Golang&amp;rsquo;s HTTP library, the description of http.Response.Body is as follows. 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 // Body represents the response body. // // The response body is streamed on demand as the Body field // is read. If the network connection fails or the server // terminates the response, Body.Read" /><meta name="keywords" content="golang" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/golang-http-response-body/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="A little research on the connection reuse problem caused by unread http.Response.Body" />
+<meta property="og:description" content="In the source code of Golang&rsquo;s HTTP library, the description of http.Response.Body is as follows. 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 // Body represents the response body. // // The response body is streamed on demand as the Body field // is read. If the network connection fails or the server // terminates the response, Body.Read" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/golang-http-response-body/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-15T11:40:51+08:00" />
+<meta property="article:modified_time" content="2022-01-15T11:40:51+08:00" />
+
+<meta itemprop="name" content="A little research on the connection reuse problem caused by unread http.Response.Body">
+<meta itemprop="description" content="In the source code of Golang&rsquo;s HTTP library, the description of http.Response.Body is as follows. 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 // Body represents the response body. // // The response body is streamed on demand as the Body field // is read. If the network connection fails or the server // terminates the response, Body.Read"><meta itemprop="datePublished" content="2022-01-15T11:40:51+08:00" />
+<meta itemprop="dateModified" content="2022-01-15T11:40:51+08:00" />
+<meta itemprop="wordCount" content="948">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="A little research on the connection reuse problem caused by unread http.Response.Body"/>
+<meta name="twitter:description" content="In the source code of Golang&rsquo;s HTTP library, the description of http.Response.Body is as follows. 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 // Body represents the response body. // // The response body is streamed on demand as the Body field // is read. If the network connection fails or the server // terminates the response, Body.Read"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">A little research on the connection reuse problem caused by unread http.Response.Body</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-15 11:40:51 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 948 words </span>
+          <span class="more-meta"> 2 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#the-way-we-write-code-every-day">The way we write code every day</a></li>
+        <li><a href="#writing-styles-that-should-be-considered">Writing styles that should be considered</a></li>
+        <li><a href="#an-example-for-verifying-connection-reuse">An example for verifying connection reuse</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>In the source code of Golang&rsquo;s HTTP library, the description of <code>http.Response.Body</code> is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Body represents the response body.
+</span><span class="c1">//
+</span><span class="c1">// The response body is streamed on demand as the Body field
+</span><span class="c1">// is read. If the network connection fails or the server
+</span><span class="c1">// terminates the response, Body.Read calls return an error.
+</span><span class="c1">//
+</span><span class="c1">// The http Client and Transport guarantee that Body is always
+</span><span class="c1">// non-nil, even on responses without a body or responses with
+</span><span class="c1">// a zero-length body. It is the caller&#39;s responsibility to
+</span><span class="c1">// close Body. The default HTTP client&#39;s Transport may not
+</span><span class="c1">// reuse HTTP/1.x &#34;keep-alive&#34; TCP connections if the Body is
+</span><span class="c1">// not read to completion and closed.
+</span><span class="c1">//
+</span><span class="c1">// The Body is automatically dechunked if the server replied
+</span><span class="c1">// with a &#34;chunked&#34; Transfer-Encoding.
+</span><span class="c1">//
+</span><span class="c1">// As of Go 1.12, the Body will also implement io.Writer
+</span><span class="c1">// on a successful &#34;101 Switching Protocols&#34; response,
+</span><span class="c1">// as used by WebSockets and HTTP/2&#39;s &#34;h2c&#34; mode.
+</span><span class="c1"></span><span class="nx">Body</span> <span class="nx">io</span><span class="p">.</span><span class="nx">ReadCloser</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Notice the sentence: <em>The default HTTP client&rsquo;s Transport may not reuse HTTP/1.x &ldquo;keep-alive&rdquo; TCP connections if the Body is not read to completion and closed.</em> It says, <em>The default HTTP client&rsquo;s Transport may not reuse HTTP/1.x &ldquo;keep-Alive&rdquo; connections if the Body is not read to completion and closed.</em> (In the days of HTTP/1.0, &ldquo;Keep-Alive&rdquo; was not the default behavior; if the browser and server support it, you can add &ldquo;Connection: Keep-Alive&rdquo; to the request and response headers. if the browser and server support it. However, in HTTP/1.1, &ldquo;Keep-Alive&rdquo; is the default behavior unless it is specifically disallowed (e.g. <code>Connection: close</code>) <a href="https://zh.wikipedia.org/wiki/HTTP%E6%8C%81%E4%B9%85%E8%BF%9E%E6%8E%A5">^</a>.</p>
+<p>Why do we need connection multiplexing? Based on performance considerations, of course!</p>
+<h2 id="the-way-we-write-code-every-day">The way we write code every day</h2>
+<p>And looking at the code we normally write, few people seem to notice this (the case of just sending HTTP requests, no data required).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 注意是 HTTP(80) 端口的连接，大量用于内网
+</span><span class="c1"></span><span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">http</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="s">`http://www.example.com`</span><span class="p">)</span>
+<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+	<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="k">defer</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Body</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If you just forget <code>Body.Close()</code>, chances are that linter will not pass. But no one reminds you that Body should not be read away. According to the documentation, if Body is not read, the connection will not be reused. Why? I think it&rsquo;s very simple: because the HTTP client has no way of knowing whether you&rsquo;ll use the Body again. It wouldn&rsquo;t dare read it away for you (to complete a Request/Response) to actively reuse the connection, after all, in case the network suddenly gets stuck and reading the Body takes up a lot of time. It would have been quick to close the connection, but it would have resulted in a bunch of unusable and unclosed connections because of the reuse. This is not desirable in the design of the standard library.</p>
+<p>Request/Response: After the server reads the headers of the request or the client reads the headers of the response, the request or response is read, and the body is wrapped in a ReadCloser interface as a stream to be read (and closed) by the program itself later. This is very nice, as it does not take up a lot of memory because the request or response contains a very large Body.</p>
+<h2 id="writing-styles-that-should-be-considered">Writing styles that should be considered</h2>
+<p>In summary, the documentation&rsquo;s claim about the phenomenon of connection reuse is a given. So shouldn&rsquo;t we always execute a <code>io.Copy(ioutil.Discard, resp.Body)</code> where Body is not needed in order to read through Body?</p>
+<p>Just like <strong>defer resp.Body.Close()</strong> needs to always remember to close.</p>
+<p>I&rsquo;m not sure of the answer: if you can be sure that the interface is very fast and responds with little or no data, then it&rsquo;s conceivable that there&rsquo;s no performance loss if you execute it. But in case the network gets stuck, then it will take a long time to read the Body. So, on-demand. If you can write your code with this in mind (or add a comment to it), it&rsquo;s also a sign of greater rigor.</p>
+<h2 id="an-example-for-verifying-connection-reuse">An example for verifying connection reuse</h2>
+<p>I wrote a test code to verify this behavior.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;flag&#34;</span>
+	<span class="s">&#34;io&#34;</span>
+	<span class="s">&#34;io/ioutil&#34;</span>
+	<span class="s">&#34;net/http&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">issue</span><span class="p">(</span><span class="nx">discard</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">http</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="s">`http://www.example.com`</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">defer</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Body</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">discard</span> <span class="p">{</span>
+		<span class="nx">io</span><span class="p">.</span><span class="nf">Copy</span><span class="p">(</span><span class="nx">ioutil</span><span class="p">.</span><span class="nx">Discard</span><span class="p">,</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Body</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">discard</span> <span class="kt">bool</span>
+	<span class="nx">flag</span><span class="p">.</span><span class="nf">BoolVar</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">discard</span><span class="p">,</span> <span class="s">`d`</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="s">`discard body`</span><span class="p">)</span>
+	<span class="nx">flag</span><span class="p">.</span><span class="nf">Parse</span><span class="p">()</span>
+
+	<span class="nf">issue</span><span class="p">(</span><span class="nx">discard</span><span class="p">)</span>
+	<span class="nf">issue</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span> <span class="c1">// whatever
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Like the following, when the Body call is not executed.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ sudo strace -qqfe connect ./discard -d<span class="o">=</span><span class="nb">false</span> 2&gt;<span class="p">&amp;</span><span class="m">1</span> <span class="p">|</span> grep <span class="s1">&#39;(80)&#39;</span>
+<span class="o">[</span>pid 23647<span class="o">]</span> connect<span class="o">(</span>6, <span class="o">{</span><span class="nv">sa_family</span><span class="o">=</span>AF_INET, <span class="nv">sin_port</span><span class="o">=</span>htons<span class="o">(</span>80<span class="o">)</span>, <span class="nv">sin_addr</span><span class="o">=</span>inet_addr<span class="o">(</span><span class="s2">&#34;93.184.216.34&#34;</span><span class="o">)}</span>, 16<span class="o">)</span> <span class="o">=</span> -1 EINPROGRESS <span class="o">(</span>Operation now in progress<span class="o">)</span>
+<span class="o">[</span>pid 23649<span class="o">]</span> connect<span class="o">(</span>6, <span class="o">{</span><span class="nv">sa_family</span><span class="o">=</span>AF_INET, <span class="nv">sin_port</span><span class="o">=</span>htons<span class="o">(</span>80<span class="o">)</span>, <span class="nv">sin_addr</span><span class="o">=</span>inet_addr<span class="o">(</span><span class="s2">&#34;93.184.216.34&#34;</span><span class="o">)}</span>, 16<span class="o">)</span> <span class="o">=</span> -1 EINPROGRESS <span class="o">(</span>Operation now in progress<span class="o">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Multiple executions show the same result: 2 connects are initiated to establish a connection. Does this mean that the connection is not being reused? I think so. Although the file descriptor is 6 both times, that&rsquo;s because the connection was closed each time and, as is characteristic of Unix, the file descriptor always starts with the least used.</p>
+<p>And when called with Body.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="err">$</span> <span class="nx">sudo</span> <span class="nx">strace</span> <span class="o">-</span><span class="nx">qqfe</span> <span class="nx">connect</span> <span class="p">.</span><span class="o">/</span><span class="nx">discard</span> <span class="o">-</span><span class="nx">d</span><span class="p">=</span><span class="kc">true</span> <span class="mi">2</span><span class="p">&gt;</span><span class="o">&amp;</span><span class="mi">1</span> <span class="p">|</span> <span class="nx">grep</span> <span class="err">&#39;</span><span class="p">(</span><span class="mi">80</span><span class="p">)</span><span class="err">&#39;</span>
+<span class="p">[</span><span class="nx">pid</span> <span class="mi">23743</span><span class="p">]</span> <span class="nf">connect</span><span class="p">(</span><span class="mi">6</span><span class="p">,</span> <span class="p">{</span><span class="nx">sa_family</span><span class="p">=</span><span class="nx">AF_INET</span><span class="p">,</span> <span class="nx">sin_port</span><span class="p">=</span><span class="nf">htons</span><span class="p">(</span><span class="mi">80</span><span class="p">),</span> <span class="nx">sin_addr</span><span class="p">=</span><span class="nf">inet_addr</span><span class="p">(</span><span class="s">&#34;93.184.216.34&#34;</span><span class="p">)},</span> <span class="mi">16</span><span class="p">)</span> <span class="p">=</span> <span class="o">-</span><span class="mi">1</span> <span class="nf">EINPROGRESS</span> <span class="p">(</span><span class="nx">Operation</span> <span class="nx">now</span> <span class="nx">in</span> <span class="nx">progress</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We only see 1 connect call. Does this already mean that the connection is actually being reused? I think so.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/container-sshd/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Run the sshd service inside the container</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/golang-defer-file-close/">
+            <span class="next-text nav-default">Simply defer file.Close() is probably a misuse</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

@@ -1,0 +1,1381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>A deep dive into each of the high-performance JSON parsing libraries in Go - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="In fact, I had no intention of looking at the performance of JSON libraries, but I recently did a pprof on my project and found from the flame chart below that more than half of the performance consumption in business logic processing is in the JSON parsing process, so this article came about. This article dives into the source code to analyze how the standard library in Go parses JSON," /><meta name="keywords" content="golang, json, fastjson, gjson, jsonparser" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/go-json/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="A deep dive into each of the high-performance JSON parsing libraries in Go" />
+<meta property="og:description" content="In fact, I had no intention of looking at the performance of JSON libraries, but I recently did a pprof on my project and found from the flame chart below that more than half of the performance consumption in business logic processing is in the JSON parsing process, so this article came about. This article dives into the source code to analyze how the standard library in Go parses JSON," />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/go-json/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-22T11:41:20+08:00" />
+<meta property="article:modified_time" content="2022-01-22T11:41:20+08:00" />
+
+<meta itemprop="name" content="A deep dive into each of the high-performance JSON parsing libraries in Go">
+<meta itemprop="description" content="In fact, I had no intention of looking at the performance of JSON libraries, but I recently did a pprof on my project and found from the flame chart below that more than half of the performance consumption in business logic processing is in the JSON parsing process, so this article came about. This article dives into the source code to analyze how the standard library in Go parses JSON,"><meta itemprop="datePublished" content="2022-01-22T11:41:20+08:00" />
+<meta itemprop="dateModified" content="2022-01-22T11:41:20+08:00" />
+<meta itemprop="wordCount" content="3873">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="A deep dive into each of the high-performance JSON parsing libraries in Go"/>
+<meta name="twitter:description" content="In fact, I had no intention of looking at the performance of JSON libraries, but I recently did a pprof on my project and found from the flame chart below that more than half of the performance consumption in business logic processing is in the JSON parsing process, so this article came about. This article dives into the source code to analyze how the standard library in Go parses JSON,"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">A deep dive into each of the high-performance JSON parsing libraries in Go</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-22 11:41:20 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 3873 words </span>
+          <span class="more-meta"> 8 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#standard-library-json-unmarshal">Standard Library JSON Unmarshal</a>
+          <ul>
+            <li><a href="#analysis">Analysis</a></li>
+            <li><a href="#summary">Summary</a></li>
+          </ul>
+        </li>
+        <li><a href="#fastjson">fastjson</a>
+          <ul>
+            <li><a href="#analysis-1">Analysis</a></li>
+            <li><a href="#code">Code</a></li>
+            <li><a href="#summary-1">Summary</a></li>
+          </ul>
+        </li>
+        <li><a href="#gjson">GJSON</a>
+          <ul>
+            <li><a href="#analysis-2">Analysis</a></li>
+            <li><a href="#code-1">Code</a></li>
+            <li><a href="#summary-2">Summary</a></li>
+          </ul>
+        </li>
+        <li><a href="#jsonparser">jsonparser</a>
+          <ul>
+            <li><a href="#analysis-3">Analysis</a></li>
+            <li><a href="#summary-3">Summary</a></li>
+          </ul>
+        </li>
+        <li><a href="#performance-comparison">Performance Comparison</a></li>
+        <li><a href="#summary-4">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>In fact, I had no intention of looking at the performance of JSON libraries, but I recently did a pprof on my project and found from the flame chart below that more than half of the performance consumption in business logic processing is in the JSON parsing process, so this article came about.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/49769bccfed449e0b8fb599b7b2acadb.png" alt="sobyte"></p>
+<p>This article dives into the source code to analyze how the standard library in Go parses JSON, and then looks at what are some of the more popular Json parsing libraries, and what features these libraries have that can help us develop better in what scenarios.</p>
+<p>The following libraries are introduced for analysis.</p>
+<table>
+<thead>
+<tr>
+<th>Library Name</th>
+<th>Star</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Standard Library JSON Unmarshal</td>
+<td></td>
+</tr>
+<tr>
+<td>valyala/fastjson</td>
+<td>1.2 k</td>
+</tr>
+<tr>
+<td>tidwall/gjson</td>
+<td>8.3 k</td>
+</tr>
+<tr>
+<td>buger/jsonparser</td>
+<td>4 k</td>
+</tr>
+</tbody>
+</table>
+<p>The <code>json-iterator</code> library is also a very famous library, but I measured the performance difference between it and the standard library is very small, so it is worth using the standard library.</p>
+<p><code>Jeffail/gabs</code> and <code>bitly/go-simplejson</code> use the standard library&rsquo;s Unmarshal for parsing directly, so the performance is the same as the standard library, and will not be mentioned in this article.</p>
+<p><code>easyjson</code> is a library that needs to generate serialization code for each structure like protobuf, which is very invasive and I personally don&rsquo;t like it very much, so I didn&rsquo;t mention it.</p>
+<p>These libraries above are the more well-known and still iterating JSON parsing libraries that I can find with Star numbers greater than 1k, if there are any missing ones, you can contact me and I will add them.</p>
+<h2 id="standard-library-json-unmarshal">Standard Library JSON Unmarshal</h2>
+<h3 id="analysis">Analysis</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Unmarshal</span><span class="p">(</span><span class="nx">data</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The official JSON parsing library takes two parameters, one for the object to be serialized and the other for the type of the object.</p>
+<p>Before the actual JSON parsing is performed, <code>reflect.ValueOf</code> is called to get the reflected object of the parameter v. Then it gets the first non-null character of the incoming data object to define which way to parse it.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">decodeState</span><span class="p">)</span> <span class="nf">value</span><span class="p">(</span><span class="nx">v</span> <span class="nx">reflect</span><span class="p">.</span><span class="nx">Value</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="k">switch</span> <span class="nx">d</span><span class="p">.</span><span class="nx">opcode</span> <span class="p">{</span>
+    <span class="k">default</span><span class="p">:</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">phasePanicMsg</span><span class="p">)</span>
+    <span class="c1">// 数组 
+</span><span class="c1"></span>    <span class="k">case</span> <span class="nx">scanBeginArray</span><span class="p">:</span>
+        <span class="o">...</span>
+    <span class="c1">// 结构体或map
+</span><span class="c1"></span>    <span class="k">case</span> <span class="nx">scanBeginObject</span><span class="p">:</span>
+        <span class="o">...</span>
+    <span class="c1">// 字面量，包括 int、string、float 等
+</span><span class="c1"></span>    <span class="k">case</span> <span class="nx">scanBeginLiteral</span><span class="p">:</span>
+        <span class="o">...</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If the object being parsed starts with <code>[</code>, it means it is an array object and goes to the scanBeginArray branch; if it starts with <code>{</code>, it means the object being parsed is a structure or map, then it goes to the scanBeginObject branch, etc.</p>
+<p>Take the example of parsing an object.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">decodeState</span><span class="p">)</span> <span class="nf">object</span><span class="p">(</span><span class="nx">v</span> <span class="nx">reflect</span><span class="p">.</span><span class="nx">Value</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="o">...</span>  
+    <span class="kd">var</span> <span class="nx">fields</span> <span class="nx">structFields</span>
+    <span class="c1">// 检验这个对象的类型是 map 还是 结构体
+</span><span class="c1"></span>    <span class="k">switch</span> <span class="nx">v</span><span class="p">.</span><span class="nf">Kind</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="nx">reflect</span><span class="p">.</span><span class="nx">Map</span><span class="p">:</span> 
+        <span class="o">...</span>
+    <span class="k">case</span> <span class="nx">reflect</span><span class="p">.</span><span class="nx">Struct</span><span class="p">:</span>
+        <span class="c1">// 缓存结构体的字段到 fields 对象中
+</span><span class="c1"></span>        <span class="nx">fields</span> <span class="p">=</span> <span class="nf">cachedTypeFields</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
+        <span class="c1">// ok
+</span><span class="c1"></span>    <span class="k">default</span><span class="p">:</span>
+        <span class="nx">d</span><span class="p">.</span><span class="nf">saveError</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">UnmarshalTypeError</span><span class="p">{</span><span class="nx">Value</span><span class="p">:</span> <span class="s">&#34;object&#34;</span><span class="p">,</span> <span class="nx">Type</span><span class="p">:</span> <span class="nx">t</span><span class="p">,</span> <span class="nx">Offset</span><span class="p">:</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">off</span><span class="p">)})</span>
+        <span class="nx">d</span><span class="p">.</span><span class="nf">skip</span><span class="p">()</span>
+        <span class="k">return</span> <span class="kc">nil</span>
+    <span class="p">}</span>
+
+    <span class="kd">var</span> <span class="nx">mapElem</span> <span class="nx">reflect</span><span class="p">.</span><span class="nx">Value</span>
+    <span class="nx">origErrorContext</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nx">errorContext</span>
+    <span class="c1">// 循环一个个解析JSON字符串中的 key value 值
+</span><span class="c1"></span>    <span class="k">for</span> <span class="p">{</span>  
+        <span class="nx">start</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">readIndex</span><span class="p">()</span>
+        <span class="nx">d</span><span class="p">.</span><span class="nf">rescanLiteral</span><span class="p">()</span>
+        <span class="nx">item</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nx">data</span><span class="p">[</span><span class="nx">start</span><span class="p">:</span><span class="nx">d</span><span class="p">.</span><span class="nf">readIndex</span><span class="p">()]</span>
+        <span class="c1">// 获取 key 值
+</span><span class="c1"></span>        <span class="nx">key</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nf">unquoteBytes</span><span class="p">(</span><span class="nx">item</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+            <span class="nb">panic</span><span class="p">(</span><span class="nx">phasePanicMsg</span><span class="p">)</span>
+        <span class="p">}</span> 
+        <span class="kd">var</span> <span class="nx">subv</span> <span class="nx">reflect</span><span class="p">.</span><span class="nx">Value</span>
+        <span class="nx">destring</span> <span class="o">:=</span> <span class="kc">false</span>   
+        <span class="o">...</span> 
+        <span class="c1">// 根据 value 的类型反射设置 value 值 
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">destring</span> <span class="p">{</span>
+            <span class="c1">// value 值是字面量会进入到这里
+</span><span class="c1"></span>            <span class="k">switch</span> <span class="nx">qv</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">valueQuoted</span><span class="p">().(</span><span class="kd">type</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">case</span> <span class="kc">nil</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">literalStore</span><span class="p">(</span><span class="nx">nullLiteral</span><span class="p">,</span> <span class="nx">subv</span><span class="p">,</span> <span class="kc">false</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                    <span class="k">return</span> <span class="nx">err</span>
+                <span class="p">}</span>
+            <span class="k">case</span> <span class="kt">string</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">literalStore</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">qv</span><span class="p">),</span> <span class="nx">subv</span><span class="p">,</span> <span class="kc">true</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                    <span class="k">return</span> <span class="nx">err</span>
+                <span class="p">}</span>
+            <span class="k">default</span><span class="p">:</span>
+                <span class="nx">d</span><span class="p">.</span><span class="nf">saveError</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;json: invalid use of ,string struct tag, trying to unmarshal unquoted value into %v&#34;</span><span class="p">,</span> <span class="nx">subv</span><span class="p">.</span><span class="nf">Type</span><span class="p">()))</span>
+            <span class="p">}</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="c1">// 数组或对象会递归调用 value 方法
+</span><span class="c1"></span>            <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">value</span><span class="p">(</span><span class="nx">subv</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="nx">err</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+        <span class="o">...</span>
+        <span class="c1">// 直到遇到 } 最后退出循环
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">d</span><span class="p">.</span><span class="nx">opcode</span> <span class="o">==</span> <span class="nx">scanEndObject</span> <span class="p">{</span>
+            <span class="k">break</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="nx">d</span><span class="p">.</span><span class="nx">opcode</span> <span class="o">!=</span> <span class="nx">scanObjectValue</span> <span class="p">{</span>
+            <span class="nb">panic</span><span class="p">(</span><span class="nx">phasePanicMsg</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ol>
+<li>first caches the structure object.</li>
+<li>iterates through the structure object.</li>
+<li>finds the key value in the structure and then finds the type of the field of the same name in the structure.</li>
+<li>recursively call the value method to reflect the value of the structure.</li>
+<li>until the loop ends at the end of <code>}</code> in JSON.</li>
+</ol>
+<h3 id="summary">Summary</h3>
+<p>By looking at the Unmarshal source code you can see that it uses a lot of reflection to get the field value, if it is a multi-layer nested JSON words, then you also need to recursively reflect the value, so you can imagine that the performance is very poor.</p>
+<p>But if performance is not so important, it is actually a very good choice to use it directly, while the function is perfect and the official has been iterative optimization, maybe in future versions of the performance will also get a qualitative leap.</p>
+<h2 id="fastjson">fastjson</h2>
+<p>Github: <a href="https://github.com/valyala/fastjson">https://github.com/valyala/fastjson</a></p>
+<p>This library is as fast as its name implies, and its introduction page says this.</p>
+<blockquote>
+<p>Fast. As usual, up to 15x faster than the standard encoding/json.</p>
+</blockquote>
+<p>It is also very simple to use, as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">p</span> <span class="nx">fastjson</span><span class="p">.</span><span class="nx">Parser</span>
+    <span class="nx">v</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">Parse</span><span class="p">(</span><span class="s">`{
+</span><span class="s">                &#34;str&#34;: &#34;bar&#34;,
+</span><span class="s">                &#34;int&#34;: 123,
+</span><span class="s">                &#34;float&#34;: 1.23,
+</span><span class="s">                &#34;bool&#34;: true,
+</span><span class="s">                &#34;arr&#34;: [1, &#34;foo&#34;, {}]
+</span><span class="s">        }`</span><span class="p">)</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;foo=%s\n&#34;</span><span class="p">,</span> <span class="nx">v</span><span class="p">.</span><span class="nf">GetStringBytes</span><span class="p">(</span><span class="s">&#34;str&#34;</span><span class="p">))</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;int=%d\n&#34;</span><span class="p">,</span> <span class="nx">v</span><span class="p">.</span><span class="nf">GetInt</span><span class="p">(</span><span class="s">&#34;int&#34;</span><span class="p">))</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;float=%f\n&#34;</span><span class="p">,</span> <span class="nx">v</span><span class="p">.</span><span class="nf">GetFloat64</span><span class="p">(</span><span class="s">&#34;float&#34;</span><span class="p">))</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;bool=%v\n&#34;</span><span class="p">,</span> <span class="nx">v</span><span class="p">.</span><span class="nf">GetBool</span><span class="p">(</span><span class="s">&#34;bool&#34;</span><span class="p">))</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;arr.1=%s\n&#34;</span><span class="p">,</span> <span class="nx">v</span><span class="p">.</span><span class="nf">GetStringBytes</span><span class="p">(</span><span class="s">&#34;arr&#34;</span><span class="p">,</span> <span class="s">&#34;1&#34;</span><span class="p">))</span>
+<span class="p">}</span>
+<span class="c1">// Output:
+</span><span class="c1">// foo=bar
+</span><span class="c1">// int=123
+</span><span class="c1">// float=1.230000
+</span><span class="c1">// bool=true
+</span><span class="c1">// arr.1=foo
+</span></code></pre></td></tr></table>
+</div>
+</div><p>To use fastjson, you must first pass the parsed JSON string to the Parser parser for parsing, and then get it from the object returned by the Parse method. If it is a nested object, you can directly pass the corresponding parent and child key when passing the Get method.</p>
+<h3 id="analysis-1">Analysis</h3>
+<p>fastjson is designed to be different from the standard library Unmarshal in that it divides JSON parsing into two parts: Parse and Get.</p>
+<p>Parse is responsible for parsing the JSON string into a structure and returning it, and then fetching the data through the returned structure. The Parse parsing process is lock-free, so if you want to call Parse concurrently, you need to use ParserPool</p>
+<p>fastjson iterates through the JSON from top to bottom, and then stores the parsed data in a Value structure.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Value</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">o</span> <span class="nx">Object</span>
+    <span class="nx">a</span> <span class="p">[]</span><span class="o">*</span><span class="nx">Value</span>
+    <span class="nx">s</span> <span class="kt">string</span>
+    <span class="nx">t</span> <span class="nx">Type</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This structure is very simple into.</p>
+<ul>
+<li><code>o Object</code> : indicates that the structure being parsed is an object.</li>
+<li><code>a []*Value</code> : indicates that the structure being parsed is an array.</li>
+<li><code>s string</code> : if the structure being parsed is neither an object nor an array, then values of other types are stored in this field as strings.</li>
+<li><code>t Type</code> : indicates the type of this structure, which is TypeObject, TypeArray, TypeString, TypeNumber, etc.</li>
+</ul>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Object</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">kvs</span>           <span class="p">[]</span><span class="nx">kv</span>
+    <span class="nx">keysUnescaped</span> <span class="kt">bool</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">kv</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">k</span> <span class="kt">string</span>
+    <span class="nx">v</span> <span class="o">*</span><span class="nx">Value</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This structure holds the recursive structure of the object. If you parse the JSON string in the example above, it will look like this structure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/684c214e767d485cac2fac5be3571466.png" alt="sobyte"></p>
+<h3 id="code">Code</h3>
+<p>In terms of code implementation, the whole parsing process becomes very refreshing because there is no reflection part of the code. Let&rsquo;s look at the main part of the parsing directly.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">parseValue</span><span class="p">(</span><span class="nx">s</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">c</span> <span class="o">*</span><span class="nx">cache</span><span class="p">,</span> <span class="nx">depth</span> <span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">Value</span><span class="p">,</span> <span class="kt">string</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;cannot parse empty string&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">depth</span><span class="o">++</span>
+    <span class="c1">// 最大深度的json串不能超过MaxDepth
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">depth</span> <span class="p">&gt;</span> <span class="nx">MaxDepth</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;too big depth for the nested JSON; it exceeds %d&#34;</span><span class="p">,</span> <span class="nx">MaxDepth</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// 解析对象
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;{&#39;</span> <span class="p">{</span>
+        <span class="nx">v</span><span class="p">,</span> <span class="nx">tail</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">parseObject</span><span class="p">(</span><span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">:],</span> <span class="nx">c</span><span class="p">,</span> <span class="nx">depth</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">tail</span><span class="p">,</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;cannot parse object: %s&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">tail</span><span class="p">,</span> <span class="kc">nil</span>
+    <span class="p">}</span>
+    <span class="c1">// 解析数组
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;[&#39;</span> <span class="p">{</span>
+        <span class="o">...</span>
+    <span class="p">}</span>
+    <span class="c1">// 解析字符串
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;&#34;&#39;</span> <span class="p">{</span>
+        <span class="o">...</span>
+    <span class="p">}</span> 
+    <span class="o">...</span>
+    <span class="k">return</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">tail</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>parseValue determines the type to be parsed based on the first non-null character of the string. Here an object type is used to do the parsing.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">parseObject</span><span class="p">(</span><span class="nx">s</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">c</span> <span class="o">*</span><span class="nx">cache</span><span class="p">,</span> <span class="nx">depth</span> <span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">Value</span><span class="p">,</span> <span class="kt">string</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="nx">o</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">getValue</span><span class="p">()</span>
+    <span class="nx">o</span><span class="p">.</span><span class="nx">t</span> <span class="p">=</span> <span class="nx">TypeObject</span>
+    <span class="nx">o</span><span class="p">.</span><span class="nx">o</span><span class="p">.</span><span class="nf">reset</span><span class="p">()</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="kd">var</span> <span class="nx">err</span> <span class="kt">error</span>
+        <span class="c1">// 获取Ojbect结构体中的 kv 对象
+</span><span class="c1"></span>        <span class="nx">kv</span> <span class="o">:=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">o</span><span class="p">.</span><span class="nf">getKV</span><span class="p">()</span>
+        <span class="o">...</span> 
+        <span class="c1">// 解析 key 值
+</span><span class="c1"></span>
+        <span class="nx">kv</span><span class="p">.</span><span class="nx">k</span><span class="p">,</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">parseRawKey</span><span class="p">(</span><span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">:])</span>
+        <span class="o">...</span> 
+        <span class="c1">// 递归解析 value 值
+</span><span class="c1"></span>        <span class="nx">kv</span><span class="p">.</span><span class="nx">v</span><span class="p">,</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">parseValue</span><span class="p">(</span><span class="nx">s</span><span class="p">,</span> <span class="nx">c</span><span class="p">,</span> <span class="nx">depth</span><span class="p">)</span>
+        <span class="o">...</span>
+        <span class="c1">// 遇到 ，号继续往下解析
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;,&#39;</span> <span class="p">{</span>
+            <span class="nx">s</span> <span class="p">=</span> <span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+            <span class="k">continue</span>
+        <span class="p">}</span>
+        <span class="c1">// 解析完毕
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">s</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;}&#39;</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="nx">o</span><span class="p">,</span> <span class="nx">s</span><span class="p">[</span><span class="mi">1</span><span class="p">:],</span> <span class="kc">nil</span>
+        <span class="p">}</span>
+        <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;missing &#39;,&#39; after object value&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The parseObject function is also very simple, it will get the key value in the loop body, then call parseValue to recursively parse the value, parsing the JSON object from top to bottom until it finally encounters <code>}</code> and exits.</p>
+<h3 id="summary-1">Summary</h3>
+<p>The above analysis shows that fastjson is much simpler to implement than the standard library, and its performance is much higher. After parsing the JSON tree with Parse, it can be used repeatedly, avoiding the need for repeated parsing and thus improving performance.</p>
+<p>However, its functionality is very rudimentary, with no common operations such as JSON to Struct or JSON to map. If you just want to simply get the value in JSON, then it is very convenient to use this library, but if you want to convert the JSON value into a structure, you need to set the value one by one.</p>
+<h2 id="gjson">GJSON</h2>
+<p>Github: <a href="https://github.com/tidwall/gjson">https://github.com/tidwall/gjson</a></p>
+<p>GJSON in my test, although the performance is not fastjson so extreme, but the function is very perfect, the performance is also quite OK, the following is a brief introduction to the functions of GJSON.</p>
+<p>The use of GJSON is similar to fastjson, is also very simple, as long as the parameters passed in the json string and the need to obtain the value can be.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">json</span> <span class="o">:=</span> <span class="s">`{&#34;name&#34;:{&#34;first&#34;:&#34;li&#34;,&#34;last&#34;:&#34;dj&#34;},&#34;age&#34;:18}`</span>
+<span class="nx">lastName</span> <span class="o">:=</span> <span class="nx">gjson</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">json</span><span class="p">,</span> <span class="s">&#34;name.last&#34;</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In addition to this feature simple fuzzy matching is also possible, with support for wildcards * and ? in the key. , * matches any number of characters, and ? matches a single character, as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">json</span> <span class="o">:=</span> <span class="s">`{
+</span><span class="s">    &#34;name&#34;:{&#34;first&#34;:&#34;Tom&#34;, &#34;last&#34;: &#34;Anderson&#34;},
+</span><span class="s">    &#34;age&#34;: 37,
+</span><span class="s">    &#34;children&#34;: [&#34;Sara&#34;, &#34;Alex&#34;, &#34;Jack&#34;]
+</span><span class="s">}`</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;third child*:&#34;</span><span class="p">,</span> <span class="nx">gjson</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">json</span><span class="p">,</span> <span class="s">&#34;child*.2&#34;</span><span class="p">))</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;first c?ild:&#34;</span><span class="p">,</span> <span class="nx">gjson</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">json</span><span class="p">,</span> <span class="s">&#34;c?ildren.0&#34;</span><span class="p">))</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li><code>child*.2</code>: first <code>child*</code> matches to <code>children</code>, <code>.2</code> reads the 3rd element.</li>
+<li><code>c?ildren.0</code>: <code>c?ildren</code> matches to <code>children</code> and <code>.0</code> reads the first element.</li>
+</ul>
+<p>Modifier operations are also supported in addition to fuzzy matching.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">json</span> <span class="o">:=</span> <span class="s">`{
+</span><span class="s">    &#34;name&#34;:{&#34;first&#34;:&#34;Tom&#34;, &#34;last&#34;: &#34;Anderson&#34;},
+</span><span class="s">    &#34;age&#34;: 37,
+</span><span class="s">    &#34;children&#34;: [&#34;Sara&#34;, &#34;Alex&#34;, &#34;Jack&#34;]
+</span><span class="s">}`</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;third child*:&#34;</span><span class="p">,</span> <span class="nx">gjson</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">json</span><span class="p">,</span> <span class="s">&#34;children|@reverse&#34;</span><span class="p">))</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>children|@reverse</code> first reads the array <code>children</code>, then flips it with the modifier <code>@reverse</code> and returns it, outputting it.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">nestedJSON</span> <span class="o">:=</span> <span class="s">`{&#34;nested&#34;: [&#34;one&#34;, &#34;two&#34;, [&#34;three&#34;, &#34;four&#34;]]}`</span>
+<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">gjson</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">nestedJSON</span><span class="p">,</span> <span class="s">&#34;nested|@flatten&#34;</span><span class="p">))</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>@flatten</code> returns the inner array of the array <code>nested</code> after flattening it to the outer one.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-json" data-lang="json"><span class="p">[</span><span class="s2">&#34;one&#34;</span><span class="p">,</span><span class="s2">&#34;two&#34;</span><span class="p">,</span><span class="s2">&#34;three&#34;</span><span class="p">,</span> <span class="s2">&#34;four&#34;</span><span class="p">]</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>There are some other interesting features, you can check the official documentation.</p>
+<h3 id="analysis-2">Analysis</h3>
+<p>The Get method parameter of GJSON is composed of two parts, one is a JSON string, and the other is called Path, which indicates the matching path of the JSON value to be obtained.</p>
+<p>In GJSON, because there are many defined parsing scenarios to be met, parsing is divided into two parts, and the Path needs to be parsed first before traversing the parsed JSON string.</p>
+<p>In the parsing process, if you encounter a value that can be matched, then it will be returned directly without further traversal, and if it matches multiple values, then the entire JSON string will be traversed. If a Path does not match in the JSON string, the entire JSON string will be traversed.</p>
+<p>During the parsing process, the parsed content is not stored in a structure like fastjson, which can be used repeatedly. So when you call GetMany to return multiple values, you actually need to iterate through the JSON string several times, so it&rsquo;s less efficient.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/8776fc4499274947963b8d1b5a2f7f52.png" alt="sobyte"></p>
+<p>In addition, the JSON is not checked when it is parsed, even if the string is not a JSON, it will still be parsed, so the user needs to make sure it is a JSON.</p>
+<h3 id="code-1">Code</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">json</span><span class="p">,</span> <span class="nx">path</span> <span class="kt">string</span><span class="p">)</span> <span class="nx">Result</span> <span class="p">{</span>
+    <span class="c1">// 解析 path 
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">path</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">1</span> <span class="p">{</span>
+        <span class="o">...</span>
+    <span class="p">}</span>
+    <span class="kd">var</span> <span class="nx">i</span> <span class="kt">int</span>
+    <span class="kd">var</span> <span class="nx">c</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">parseContext</span><span class="p">{</span><span class="nx">json</span><span class="p">:</span> <span class="nx">json</span><span class="p">}</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">path</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">2</span> <span class="o">&amp;&amp;</span> <span class="nx">path</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;.&#39;</span> <span class="o">&amp;&amp;</span> <span class="nx">path</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;.&#39;</span> <span class="p">{</span>
+        <span class="nx">c</span><span class="p">.</span><span class="nx">lines</span> <span class="p">=</span> <span class="kc">true</span>
+        <span class="nf">parseArray</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">path</span><span class="p">[</span><span class="mi">2</span><span class="p">:])</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="c1">// 根据不同的对象进行解析,这里会一直循环，直到找到 &#39;{&#39; 或 &#39;[&#39;
+</span><span class="c1"></span>        <span class="k">for</span> <span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+            <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;{&#39;</span> <span class="p">{</span>
+                <span class="nx">i</span><span class="o">++</span>
+
+                <span class="nf">parseObject</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">path</span><span class="p">)</span>
+                <span class="k">break</span>
+            <span class="p">}</span>
+            <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;[&#39;</span> <span class="p">{</span>
+                <span class="nx">i</span><span class="o">++</span>
+                <span class="nf">parseArray</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">path</span><span class="p">)</span>
+                <span class="k">break</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">piped</span> <span class="p">{</span>
+        <span class="nx">res</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">value</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">pipe</span><span class="p">)</span>
+        <span class="nx">res</span><span class="p">.</span><span class="nx">Index</span> <span class="p">=</span> <span class="mi">0</span>
+        <span class="k">return</span> <span class="nx">res</span>
+    <span class="p">}</span>
+    <span class="nf">fillIndex</span><span class="p">(</span><span class="nx">json</span><span class="p">,</span> <span class="nx">c</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">c</span><span class="p">.</span><span class="nx">value</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Inside the Get method you can see a long string of code that is used to parse various Paths, and then a for loop that iterates through the JSON until it finds &lsquo;{&rsquo; or &lsquo;[&rsquo;, and then does the appropriate logic to process it.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span><span class="lnt">83
+</span><span class="lnt">84
+</span><span class="lnt">85
+</span><span class="lnt">86
+</span><span class="lnt">87
+</span><span class="lnt">88
+</span><span class="lnt">89
+</span><span class="lnt">90
+</span><span class="lnt">91
+</span><span class="lnt">92
+</span><span class="lnt">93
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">parseObject</span><span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">parseContext</span><span class="p">,</span> <span class="nx">i</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">path</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="kt">int</span><span class="p">,</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">pmatch</span><span class="p">,</span> <span class="nx">kesc</span><span class="p">,</span> <span class="nx">vesc</span><span class="p">,</span> <span class="nx">ok</span><span class="p">,</span> <span class="nx">hit</span> <span class="kt">bool</span>
+    <span class="kd">var</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">val</span> <span class="kt">string</span>
+    <span class="nx">rp</span> <span class="o">:=</span> <span class="nf">parseObjectPath</span><span class="p">(</span><span class="nx">path</span><span class="p">)</span>
+    <span class="k">if</span> <span class="p">!</span><span class="nx">rp</span><span class="p">.</span><span class="nx">more</span> <span class="o">&amp;&amp;</span> <span class="nx">rp</span><span class="p">.</span><span class="nx">piped</span> <span class="p">{</span>
+        <span class="nx">c</span><span class="p">.</span><span class="nx">pipe</span> <span class="p">=</span> <span class="nx">rp</span><span class="p">.</span><span class="nx">pipe</span>
+        <span class="nx">c</span><span class="p">.</span><span class="nx">piped</span> <span class="p">=</span> <span class="kc">true</span>
+    <span class="p">}</span>
+    <span class="c1">// 嵌套两个 for 循环 寻找 key 值
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+            <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;&#34;&#39;</span> <span class="p">{</span> 
+                <span class="nx">i</span><span class="o">++</span>
+                <span class="kd">var</span> <span class="nx">s</span> <span class="p">=</span> <span class="nx">i</span>
+                <span class="k">for</span> <span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+                    <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">&gt;</span> <span class="sc">&#39;\\&#39;</span> <span class="p">{</span>
+                        <span class="k">continue</span>
+                    <span class="p">}</span>
+                    <span class="c1">// 找到 key 值跳转到 parse_key_string_done
+</span><span class="c1"></span>                    <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;&#34;&#39;</span> <span class="p">{</span>
+                        <span class="nx">i</span><span class="p">,</span> <span class="nx">key</span><span class="p">,</span> <span class="nx">kesc</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nx">i</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">[</span><span class="nx">s</span><span class="p">:</span><span class="nx">i</span><span class="p">],</span> <span class="kc">false</span><span class="p">,</span> <span class="kc">true</span>
+                        <span class="k">goto</span> <span class="nx">parse_key_string_done</span>
+                    <span class="p">}</span>
+                    <span class="o">...</span>
+                <span class="p">}</span>
+                <span class="nx">key</span><span class="p">,</span> <span class="nx">kesc</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">[</span><span class="nx">s</span><span class="p">:],</span> <span class="kc">false</span><span class="p">,</span> <span class="kc">false</span>
+            <span class="c1">// 直接break
+</span><span class="c1"></span>            <span class="nx">parse_key_string_done</span><span class="p">:</span>
+                <span class="k">break</span>
+            <span class="p">}</span>
+            <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="o">==</span> <span class="sc">&#39;}&#39;</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="nx">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span> <span class="kc">false</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="nx">i</span><span class="p">,</span> <span class="kc">false</span>
+        <span class="p">}</span>
+        <span class="c1">// 校验是否是模糊匹配
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">rp</span><span class="p">.</span><span class="nx">wild</span> <span class="p">{</span>
+            <span class="k">if</span> <span class="nx">kesc</span> <span class="p">{</span>
+                <span class="nx">pmatch</span> <span class="p">=</span> <span class="nx">match</span><span class="p">.</span><span class="nf">Match</span><span class="p">(</span><span class="nf">unescape</span><span class="p">(</span><span class="nx">key</span><span class="p">),</span> <span class="nx">rp</span><span class="p">.</span><span class="nx">part</span><span class="p">)</span>
+            <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+                <span class="nx">pmatch</span> <span class="p">=</span> <span class="nx">match</span><span class="p">.</span><span class="nf">Match</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">rp</span><span class="p">.</span><span class="nx">part</span><span class="p">)</span>
+            <span class="p">}</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="k">if</span> <span class="nx">kesc</span> <span class="p">{</span>
+                <span class="nx">pmatch</span> <span class="p">=</span> <span class="nx">rp</span><span class="p">.</span><span class="nx">part</span> <span class="o">==</span> <span class="nf">unescape</span><span class="p">(</span><span class="nx">key</span><span class="p">)</span>
+            <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+                <span class="nx">pmatch</span> <span class="p">=</span> <span class="nx">rp</span><span class="p">.</span><span class="nx">part</span> <span class="o">==</span> <span class="nx">key</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+        <span class="c1">// 解析 value
+</span><span class="c1"></span>        <span class="nx">hit</span> <span class="p">=</span> <span class="nx">pmatch</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nx">rp</span><span class="p">.</span><span class="nx">more</span>
+        <span class="k">for</span> <span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+            <span class="k">switch</span> <span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">{</span>
+            <span class="k">default</span><span class="p">:</span>
+                <span class="k">continue</span>
+            <span class="k">case</span> <span class="sc">&#39;&#34;&#39;</span><span class="p">:</span>
+                <span class="nx">i</span><span class="o">++</span>
+                <span class="nx">i</span><span class="p">,</span> <span class="nx">val</span><span class="p">,</span> <span class="nx">vesc</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nf">parseString</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">,</span> <span class="nx">i</span><span class="p">)</span>
+                <span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+                    <span class="k">return</span> <span class="nx">i</span><span class="p">,</span> <span class="kc">false</span>
+                <span class="p">}</span>
+                <span class="k">if</span> <span class="nx">hit</span> <span class="p">{</span>
+                    <span class="k">if</span> <span class="nx">vesc</span> <span class="p">{</span>
+                        <span class="nx">c</span><span class="p">.</span><span class="nx">value</span><span class="p">.</span><span class="nx">Str</span> <span class="p">=</span> <span class="nf">unescape</span><span class="p">(</span><span class="nx">val</span><span class="p">[</span><span class="mi">1</span> <span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="nx">val</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">])</span>
+                    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+                        <span class="nx">c</span><span class="p">.</span><span class="nx">value</span><span class="p">.</span><span class="nx">Str</span> <span class="p">=</span> <span class="nx">val</span><span class="p">[</span><span class="mi">1</span> <span class="p">:</span> <span class="nb">len</span><span class="p">(</span><span class="nx">val</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span>
+                    <span class="p">}</span>
+                    <span class="nx">c</span><span class="p">.</span><span class="nx">value</span><span class="p">.</span><span class="nx">Raw</span> <span class="p">=</span> <span class="nx">val</span>
+                    <span class="nx">c</span><span class="p">.</span><span class="nx">value</span><span class="p">.</span><span class="nx">Type</span> <span class="p">=</span> <span class="nx">String</span>
+                    <span class="k">return</span> <span class="nx">i</span><span class="p">,</span> <span class="kc">true</span>
+                <span class="p">}</span>
+            <span class="k">case</span> <span class="sc">&#39;{&#39;</span><span class="p">:</span>
+                <span class="k">if</span> <span class="nx">pmatch</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nx">hit</span> <span class="p">{</span>
+                    <span class="nx">i</span><span class="p">,</span> <span class="nx">hit</span> <span class="p">=</span> <span class="nf">parseObject</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="nx">i</span><span class="o">+</span><span class="mi">1</span><span class="p">,</span> <span class="nx">rp</span><span class="p">.</span><span class="nx">path</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="nx">hit</span> <span class="p">{</span>
+                        <span class="k">return</span> <span class="nx">i</span><span class="p">,</span> <span class="kc">true</span>
+                    <span class="p">}</span>
+                <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+                    <span class="nx">i</span><span class="p">,</span> <span class="nx">val</span> <span class="p">=</span> <span class="nf">parseSquash</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">json</span><span class="p">,</span> <span class="nx">i</span><span class="p">)</span>
+                    <span class="k">if</span> <span class="nx">hit</span> <span class="p">{</span>
+                        <span class="nx">c</span><span class="p">.</span><span class="nx">value</span><span class="p">.</span><span class="nx">Raw</span> <span class="p">=</span> <span class="nx">val</span>
+                        <span class="nx">c</span><span class="p">.</span><span class="nx">value</span><span class="p">.</span><span class="nx">Type</span> <span class="p">=</span> <span class="nx">JSON</span>
+                        <span class="k">return</span> <span class="nx">i</span><span class="p">,</span> <span class="kc">true</span>
+                    <span class="p">}</span>
+                <span class="p">}</span>
+            <span class="o">...</span>
+            <span class="k">break</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nx">i</span><span class="p">,</span> <span class="kc">false</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the above look at parseObject this code is not actually want to let you learn how to parse JSON, and traverse the string, but want to let you see how a bad case. for loop layer after layer, if one after another to see my San value dropped wildly, this code does not look very familiar to you? Is it a bit like the code written by a colleague you met at work?</p>
+<h3 id="summary-2">Summary</h3>
+<p>Advantages:</p>
+<ol>
+<li>performance is not bad compared to the standard library.</li>
+<li>high playability, can be a variety of search, custom return values, which is very convenient.</li>
+</ol>
+<p>Disadvantages.</p>
+<ol>
+<li>does not verify the correctness of JSON.</li>
+<li>the code smell is very heavy.</li>
+</ol>
+<p>Note that if you need to parse the returned JSON value, GetMany function will iterate through the JSON string again and again according to the specified key value, parsing to map can reduce the number of iterations.</p>
+<h2 id="jsonparser">jsonparser</h2>
+<p>Github: <a href="https://github.com/buger/jsonparser">https://github.com/buger/jsonparser</a></p>
+<p>This is also one of the more popular and claimed high performance, capable of parsing ten times faster than standard libraries.</p>
+<h3 id="analysis-3">Analysis</h3>
+<p>jsonparser is also a byte slice of JSON that can be passed in to quickly locate the corresponding value and return it by passing in multiple key values.</p>
+<p>Like GJSON, there is no data structure to cache parsed JSON strings like fastjson, but you can use the EachKey function to parse multiple values when you need to parse multiple values, and you only need to traverse the JSON string once to get multiple values.</p>
+<p>If you encounter a value that can be matched, then it will be returned directly without further traversal, and if it matches multiple values, then the entire JSON string will be traversed. If a Path does not match in the JSON string, the entire JSON string will be traversed.</p>
+<p>And when traversing the JSON string by means of a loop to reduce the use of recursion, reducing the depth of the call stack, to a certain extent, can also improve performance.</p>
+<p>In terms of functionality, the ArrayEach, ObjectEach, and EachKey functions can be passed into a custom function to achieve personalized requirements through the function, making it much more practical.</p>
+<p>For jsonparser, the code is nothing to analyze, very clear, interested in their own to see.</p>
+<h3 id="summary-3">Summary</h3>
+<p>The reasons for the high performance of jsonparser compared to the standard library can be summarized as follows.</p>
+<ol>
+<li>the use of for loops to reduce the use of recursion.</li>
+<li>not using reflection compared to the standard library.</li>
+<li>the corresponding key value found in the lookup will exit directly, so you can continue without recursion.</li>
+<li>the JSON strings that are manipulated are already passed in, so there is no need to reapply for new space, which reduces memory allocation.</li>
+</ol>
+<p>In addition to the design of the api is also very practical, ArrayEach, ObjectEach, EachKey and other three functions can be passed into a custom function in the actual business development to solve a lot of problems.</p>
+<p>The disadvantage is also very obvious, you can not check the JSON, even if the input is not JSON.</p>
+<h2 id="performance-comparison">Performance Comparison</h2>
+<p><strong>Parsing small JSON strings</strong></p>
+<p>Parse a simple structured string of about 190 bytes in size</p>
+<table>
+<thead>
+<tr>
+<th>Library Name</th>
+<th>Operation</th>
+<th>Time Per Iteration</th>
+<th>Number of Memory Occupied</th>
+<th>Number of Memory Allocations</th>
+<th>Performance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>standard library</td>
+<td>resolves to map</td>
+<td>724 ns/op</td>
+<td>976 B/op</td>
+<td>51 allocs/op</td>
+<td>slow</td>
+</tr>
+<tr>
+<td></td>
+<td>resolves to struct</td>
+<td>297 ns/op</td>
+<td>256 B/op</td>
+<td>5 allocs/op</td>
+<td>general</td>
+</tr>
+<tr>
+<td>fastjson</td>
+<td>get</td>
+<td>68.2 ns/op</td>
+<td>0 B/op</td>
+<td>0 allocs/op</td>
+<td>fast</td>
+</tr>
+<tr>
+<td></td>
+<td>parse</td>
+<td>35.1 ns/op</td>
+<td>0 B/op</td>
+<td>0 allocs/op</td>
+<td>fast</td>
+</tr>
+<tr>
+<td>GJSON</td>
+<td>to-map</td>
+<td>255 ns/op</td>
+<td>1009 B/op</td>
+<td>11 allocs/op</td>
+<td>general</td>
+</tr>
+<tr>
+<td></td>
+<td>get</td>
+<td>232 ns/op</td>
+<td>448 B/op</td>
+<td>1 allocs/op</td>
+<td>general</td>
+</tr>
+<tr>
+<td>jsonparser</td>
+<td>get</td>
+<td>106 ns/op</td>
+<td>232 B/op</td>
+<td>3 allocs/op</td>
+<td>fast</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Parsing a medium-sized JSON string</strong></p>
+<p>Parsing a string with a certain complexity and a size of about 2.3KB</p>
+<table>
+<thead>
+<tr>
+<th>Library Name</th>
+<th>Operation</th>
+<th>Time Per Iteration</th>
+<th>Number of Memory Occupied</th>
+<th>Number of Memory Allocations</th>
+<th>Performance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>standard library</td>
+<td>resolves to map</td>
+<td>4263 ns/op</td>
+<td>10212 B/op</td>
+<td>208 allocs/op</td>
+<td>slow</td>
+</tr>
+<tr>
+<td></td>
+<td>parse as struct</td>
+<td>4789 ns/op</td>
+<td>9206 B/op</td>
+<td>259 allocs/op</td>
+<td>slow</td>
+</tr>
+<tr>
+<td>fastjson</td>
+<td>get</td>
+<td>285 ns/op</td>
+<td>0 B/op</td>
+<td>0 allocs/op</td>
+<td>fast</td>
+</tr>
+<tr>
+<td></td>
+<td>parse</td>
+<td>302 ns/op</td>
+<td>0 B/op</td>
+<td>0 allocs/op</td>
+<td>fast</td>
+</tr>
+<tr>
+<td>GJSON</td>
+<td>to-map</td>
+<td>2571 ns/op</td>
+<td>8539 B/op</td>
+<td>83 allocs/op</td>
+<td>general</td>
+</tr>
+<tr>
+<td></td>
+<td>get</td>
+<td>1489 ns/op</td>
+<td>448 B/op</td>
+<td>1 allocs/op</td>
+<td>general</td>
+</tr>
+<tr>
+<td>jsonparser</td>
+<td>get</td>
+<td>878 ns/op</td>
+<td>2728 B/op</td>
+<td>5 allocs/op</td>
+<td>fast</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Parsing large JSON strings</strong></p>
+<p>Parsing strings of higher complexity, about 2.2MB in size.</p>
+<table>
+<thead>
+<tr>
+<th>Library Name</th>
+<th>Operation</th>
+<th>Time Per Iteration</th>
+<th>Number of Memory Occupied</th>
+<th>Number of Memory Allocations</th>
+<th>Performance</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>standard library</td>
+<td>resolves to map</td>
+<td>2292959 ns/op</td>
+<td>5214009 B/op</td>
+<td>95402 allocs/op</td>
+<td>slow</td>
+</tr>
+<tr>
+<td></td>
+<td>resolves to struct</td>
+<td>1165490 ns/op</td>
+<td>2023 B/op</td>
+<td>76 allocs/op</td>
+<td>general</td>
+</tr>
+<tr>
+<td>fastjson</td>
+<td>get</td>
+<td>368056 ns/op</td>
+<td>0 B/op</td>
+<td>0 allocs/op</td>
+<td>fast</td>
+</tr>
+<tr>
+<td></td>
+<td>parse</td>
+<td>371397 ns/op</td>
+<td>0 B/op</td>
+<td>0 allocs/op</td>
+<td>fast</td>
+</tr>
+<tr>
+<td>GJSON</td>
+<td>to-map</td>
+<td>1901727 ns/op</td>
+<td>4788894 B/op</td>
+<td>54372 allocs/op</td>
+<td>general</td>
+</tr>
+<tr>
+<td></td>
+<td>get</td>
+<td>1322167 ns/op</td>
+<td>448 B/op</td>
+<td>1 allocs/op</td>
+<td>general</td>
+</tr>
+<tr>
+<td>jsonparser</td>
+<td>get</td>
+<td>233090 ns/op</td>
+<td>1788865 B/op</td>
+<td>376 allocs/op</td>
+<td>fastest</td>
+</tr>
+</tbody>
+</table>
+<h2 id="summary-4">Summary</h2>
+<p>In this sharing process, I found a lot of JSON parsing libraries for comparative analysis, and I found that these high-performance parsing libraries basically have some common features:</p>
+<ul>
+<li>Do Not using reflection.</li>
+<li>Parsing JSON strings one by one by iterating through the bytes of the string.</li>
+<li>try to use the incoming JSON string for parsing traversal to reduce memory allocation.</li>
+<li>sacrificing some compatibility.</li>
+</ul>
+<p>Nonetheless, functionally, each has certain features fastjson has the simplest api operation; GJSON offers fuzzy lookups and the highest degree of customization; jsonparser provides a degree of convenience in achieving high-performance parsing and also inserts callback functions for execution.</p>
+<p>To sum up, back to the beginning of the article, for my own business, the business is only a simple parsing of some of the fields of the JSON string returned by the http request, and the fields are determined, no search function, but sometimes need to do some custom operations, so for me jsonparser is the most appropriate.</p>
+<p>So if you have certain requirements for performance, you may want to pick a JSON parser with your business situation.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/high-performance-go-caching-library/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">How to build a high-performance Go caching library</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/go-log-zap/">
+            <span class="next-text nav-default">Design and implementation of zap, a high-performance Go logging library</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How is the Go timer scheduled? - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article breaks down the Go timer. Timers are an important part of both business and infrastructure development, which shows how important they are. Whether we initialise a timer with NewTimer, timer.After, or timer.AfterFun, the timer is eventually added to a global timer heap, which is managed by Go runtime. The global timer heap has also undergone three major upgrades. Before Go 1.9, all timers were maintained by a globally" /><meta name="keywords" content="golang, Timer" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/go-timer/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="How is the Go timer scheduled?" />
+<meta property="og:description" content="This article breaks down the Go timer. Timers are an important part of both business and infrastructure development, which shows how important they are. Whether we initialise a timer with NewTimer, timer.After, or timer.AfterFun, the timer is eventually added to a global timer heap, which is managed by Go runtime. The global timer heap has also undergone three major upgrades. Before Go 1.9, all timers were maintained by a globally" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/go-timer/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-13T15:21:48+08:00" />
+<meta property="article:modified_time" content="2022-01-13T15:21:48+08:00" />
+
+<meta itemprop="name" content="How is the Go timer scheduled?">
+<meta itemprop="description" content="This article breaks down the Go timer. Timers are an important part of both business and infrastructure development, which shows how important they are. Whether we initialise a timer with NewTimer, timer.After, or timer.AfterFun, the timer is eventually added to a global timer heap, which is managed by Go runtime. The global timer heap has also undergone three major upgrades. Before Go 1.9, all timers were maintained by a globally"><meta itemprop="datePublished" content="2022-01-13T15:21:48+08:00" />
+<meta itemprop="dateModified" content="2022-01-13T15:21:48+08:00" />
+<meta itemprop="wordCount" content="1426">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How is the Go timer scheduled?"/>
+<meta name="twitter:description" content="This article breaks down the Go timer. Timers are an important part of both business and infrastructure development, which shows how important they are. Whether we initialise a timer with NewTimer, timer.After, or timer.AfterFun, the timer is eventually added to a global timer heap, which is managed by Go runtime. The global timer heap has also undergone three major upgrades. Before Go 1.9, all timers were maintained by a globally"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How is the Go timer scheduled?</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-13 15:21:48 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1426 words </span>
+          <span class="more-meta"> 3 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#1-usage-scenarios">1. Usage Scenarios</a></li>
+        <li><a href="#2-illustrated-source-code">2. Illustrated source code</a>
+          <ul>
+            <li><a href="#21-the-quadruple-heap-principle">2.1 The quadruple heap principle</a></li>
+            <li><a href="#22-how-is-a-timer-dispatched">2.2 How is a timer dispatched?</a></li>
+            <li><a href="#23-how-is-a-timer-added-to-the-timer-heap">2.3 How is a timer added to the timer heap?</a></li>
+            <li><a href="#24-how-is-the-timer-manipulated-during-reset">2.4 How is the timer manipulated during Reset?</a></li>
+            <li><a href="#25-how-is-the-timer-manipulated-when-it-stops">2.5 How is the timer manipulated when it stops?</a></li>
+            <li><a href="#26-how-is-the-timer-actually-executed">2.6 How is the timer actually executed?</a></li>
+          </ul>
+        </li>
+        <li><a href="#3-the-wrong-use-of-the-timer">3. The wrong use of the timer</a>
+          <ul>
+            <li><a href="#31-incorrectly-creating-many-timers-resulting-in-wasted-resources">3.1 Incorrectly creating many timers, resulting in wasted resources</a></li>
+            <li><a href="#32-program-blocking-causing-memory-or-goroutine-leaks">3.2 Program blocking, causing memory or goroutine leaks</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>This article breaks down the Go timer. Timers are an important part of both business and infrastructure development, which shows how important they are.</p>
+<p>Whether we initialise a timer with NewTimer, timer.After, or timer.AfterFun, the timer is eventually added to a global timer heap, which is managed by Go runtime.</p>
+<p>The global timer heap has also undergone three major upgrades.</p>
+<ul>
+<li>Before Go 1.9, all timers were maintained by a globally unique quad fork heap, with fierce competition between goroutines.</li>
+<li>Go 1.10 - 1.13, all timers are maintained globally using 64 quad fork heaps, without essentially solving the pre-1.9 problem</li>
+<li>After Go 1.14, each P maintains a separate quad fork heap.</li>
+</ul>
+<p>Go 1.14 onwards saw a quantum leap in timer performance, but with it came the most complex and difficult to sort out data structure in Go. In this article, we won&rsquo;t go into every detail, but we&rsquo;ll take a general look at how the Go timer works.</p>
+<h2 id="1-usage-scenarios">1. Usage Scenarios</h2>
+<p>Go timers are frequently encountered in our code.</p>
+<p>Scenario 1: Time-out prevention for RPC calls (the following code excerpt from dubbogo)</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Client</span><span class="p">)</span> <span class="nf">Request</span><span class="p">(</span><span class="nx">request</span> <span class="o">*</span><span class="nx">remoting</span><span class="p">.</span><span class="nx">Request</span><span class="p">,</span> <span class="nx">timeout</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">,</span> <span class="nx">response</span> <span class="o">*</span><span class="nx">remoting</span><span class="p">.</span><span class="nx">PendingResponse</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="nx">_</span><span class="p">,</span> <span class="nx">session</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">selectSession</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">addr</span><span class="p">)</span>
+    <span class="c1">// .. 省略
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">totalLen</span><span class="p">,</span> <span class="nx">sendLen</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">transfer</span><span class="p">(</span><span class="nx">session</span><span class="p">,</span> <span class="nx">request</span><span class="p">,</span> <span class="nx">timeout</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">sendLen</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">totalLen</span> <span class="o">!=</span> <span class="nx">sendLen</span> <span class="p">{</span>
+          <span class="c1">// .. 省略
+</span><span class="c1"></span>        <span class="p">}</span>
+        <span class="k">return</span> <span class="nx">perrors</span><span class="p">.</span><span class="nf">WithStack</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="c1">// .. 省略
+</span><span class="c1"></span>    <span class="k">select</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">getty</span><span class="p">.</span><span class="nf">GetTimeWheel</span><span class="p">().</span><span class="nf">After</span><span class="p">(</span><span class="nx">timeout</span><span class="p">):</span>
+        <span class="k">return</span> <span class="nx">perrors</span><span class="p">.</span><span class="nf">WithStack</span><span class="p">(</span><span class="nx">errClientReadTimeout</span><span class="p">)</span>
+    <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">response</span><span class="p">.</span><span class="nx">Done</span><span class="p">:</span>
+        <span class="nx">err</span> <span class="p">=</span> <span class="nx">response</span><span class="p">.</span><span class="nx">Err</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nx">perrors</span><span class="p">.</span><span class="nf">WithStack</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Scenario 2: Timeout handling for Context</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">ctx</span><span class="p">,</span> <span class="nx">cancel</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithTimeout</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">Background</span><span class="p">(),</span> <span class="mi">1</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+    <span class="k">defer</span> <span class="nf">cancel</span><span class="p">()</span>
+    <span class="k">go</span> <span class="nf">doSomething</span><span class="p">()</span>
+    
+    <span class="k">select</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;main&#34;</span><span class="p">,</span> <span class="nx">ctx</span><span class="p">.</span><span class="nf">Err</span><span class="p">())</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="2-illustrated-source-code">2. Illustrated source code</h2>
+<h3 id="21-the-quadruple-heap-principle">2.1 The quadruple heap principle</h3>
+<p>The timer&rsquo;s global heap is a quadtree heap, especially since Go 1.14 every P maintains a quadtree heap, reducing concurrency problems between Goroutines and improving timer performance.</p>
+<p>A quadruple heap is really a quadtree, how does the Go timer maintain a quadruple heap?</p>
+<ul>
+<li>
+<p>When Go runtime schedules a timer, the timer with an earlier trigger time has to reduce the number of queries and be triggered as soon as possible. So the trigger time of the parent node of a quadtree is necessarily less than that of the child nodes.</p>
+</li>
+<li>
+<p>In order to take into account the speed of insertion, deletion and rearrangement of quadtrees, the four sibling nodes are not required to be ordered by their trigger time.</p>
+</li>
+</ul>
+<p>Here is a simple demonstration of the insertion and deletion of a timer using two moving pictures</p>
+<p><strong>insert timer into heap</strong></p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/adc2d85f40c1426f82edaf17175a7e9a.gif" alt="image"></p>
+<p><strong>Remove timer from the heap</strong></p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/9a8c9a6a9c8642e7a183a3830d691e30.gif" alt="image"></p>
+<h3 id="22-how-is-a-timer-dispatched">2.2 How is a timer dispatched?</h3>
+<ul>
+<li>Call NewTimer, timer.After, timer.AfterFunc to produce a timer, adding it to the heap of the corresponding P.</li>
+<li>Stop, timer.Reset is called to change the state of the corresponding timer.</li>
+<li>GMP will call checkTimers during the scheduling cycle to iterate through the elements on the timer heap of the P and perform the real operation according to the state of the corresponding timer.</li>
+</ul>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/7dccf0edd225400c885d4ea2063d5cd5.png" alt="image"></p>
+<h3 id="23-how-is-a-timer-added-to-the-timer-heap">2.3 How is a timer added to the timer heap?</h3>
+<p>There are several ways to add timers to the scheduler.</p>
+<ul>
+<li>After initializing a timer with NewTimer, time.After, timer.AfterFunc, the timer in question is placed on the timer heap of the corresponding p.</li>
+<li>the timer has been marked as timerRemoved, timer.Reset(d) is called, and the timer is added back to the timer heap of p</li>
+<li>timer.Reset(d) is called before the timer has reached the time it needs to be executed, the timer is detected by the GMP scheduler, removed from the timer heap, and then readded to the timer heap</li>
+<li>STW, the runtime releases the resources of the p that is no longer in use. p.destroy()-&gt;timer.moveTimers, removes the timers that are valid on the timers of the p that is no longer in use (states are: timerWaiting, timerModifiedEarlier, timerModifiedLater). timerModifiedLater) are rejoined to a new timer of p</li>
+</ul>
+<h3 id="24-how-is-the-timer-manipulated-during-reset">2.4 How is the timer manipulated during Reset?</h3>
+<p>The purpose of a Reset is to add the timer back to the timer heap and wait for it to be triggered again. However, there are two cases.</p>
+<ul>
+<li>timers marked as timerRemoved, which have been removed from the timer heap, but are added to the timer heap by resetting the trigger time</li>
+<li>a timer waiting to be triggered, where only its trigger time and status (timerModifiedEarlier or timerModifiedLater) are modified in the Reset function. The timer with this modified state is also re-added to the timer heap, but is triggered by GMP and executed by checkTimers calling adjusttimers or runtimer.</li>
+</ul>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/92737311801344d986ab44b2ff9b998d.png" alt="image"></p>
+<h3 id="25-how-is-the-timer-manipulated-when-it-stops">2.5 How is the timer manipulated when it stops?</h3>
+<p>Stop is used to stop the timer from being triggered, i.e. to remove it from the timer heap. However, timer.Stop does not actually delete the timer from p&rsquo;s timer heap, it just changes the timer&rsquo;s state to timerDeleted and waits for the GMP-triggered adjusttimers or runtimer to execute.</p>
+<p>The functions that actually delete the timer are two dodeltimer, dodeltimer0.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/43c594c5250a4a548b225d7c39eaf47e.png" alt="image"></p>
+<h3 id="26-how-is-the-timer-actually-executed">2.6 How is the timer actually executed?</h3>
+<p>The real executor of a timer is the GMP. GMP calls timer.runtimer() with runtime.checkTimers each dispatch cycle. timer.runtimer checks all timers on the timer heap for that p to see if they can be triggered.</p>
+<p>If the timer can be triggered, a callback function sendTime will send a current time to the timer&rsquo;s channel C, telling us that the timer has been triggered.</p>
+<p>If it&rsquo;s a ticker, when it&rsquo;s triggered, it will calculate the next time to be triggered and add the timer to the timer heap again.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/420a9513c52849158632bbf947e2ab5a.png" alt="image"></p>
+<h2 id="3-the-wrong-use-of-the-timer">3. The wrong use of the timer</h2>
+<p>It is true that timers are a common tool in our development, but they are also one of the most likely causes of memory leaks and CPU spikes.</p>
+<p>However, a closer look reveals that there are only two aspects that can cause problems.</p>
+<ul>
+<li>Creating a lot of timers by mistake, resulting in wasted resources.</li>
+<li>The program blocks because it doesn&rsquo;t actively shut down C when it stops.</li>
+</ul>
+<h3 id="31-incorrectly-creating-many-timers-resulting-in-wasted-resources">3.1 Incorrectly creating many timers, resulting in wasted resources</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="c1">// xxx 一些操作
+</span><span class="c1"></span>        <span class="nx">timeout</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">After</span><span class="p">(</span><span class="mi">30</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+        <span class="k">select</span> <span class="p">{</span>
+        <span class="k">case</span> <span class="o">&lt;-</span> <span class="nx">someDone</span><span class="p">:</span>
+            <span class="c1">// do something
+</span><span class="c1"></span>        <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">timeout</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The reason for the problem is simple: timer.After is a call to timer.</p>
+<p>For will create tens of thousands of timers and put them into the timer heap, causing the machine memory to skyrocket and causing CPU exceptions as the GMP cycles checkTimers and inserts new timers into the timer heap.</p>
+<p>Note that not only does time.After generate timers, but NewTimer and time.</p>
+<p><strong>Solution:</strong> Use time.Reset to reset the timer and reuse the timer.</p>
+<p>We already know that time.Reset resets the timer&rsquo;s trigger time and then adds the timer back to the timer heap, waiting to be called by the trigger.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">timer</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTimer</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span> <span class="o">*</span> <span class="mi">5</span><span class="p">)</span>    
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="nx">timer</span><span class="p">.</span><span class="nf">Reset</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span> <span class="o">*</span> <span class="mi">5</span><span class="p">)</span>
+
+        <span class="k">select</span> <span class="p">{</span>
+        <span class="k">case</span> <span class="o">&lt;-</span> <span class="nx">someDone</span><span class="p">:</span>
+            <span class="c1">// do something
+</span><span class="c1"></span>        <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">timer</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="32-program-blocking-causing-memory-or-goroutine-leaks">3.2 Program blocking, causing memory or goroutine leaks</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">timer1</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTimer</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+    <span class="o">&lt;-</span><span class="nx">timer1</span><span class="p">.</span><span class="nx">C</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;done&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As you can see from the code above, the program will only output when the timer times out &ldquo;done&rdquo;, the principle is simple: the program blocks on &lt;-timer1. When the timer is triggered, the callback function time.sendTime will send a current time to timer1. C so that the program can continue to execute.</p>
+<p>However, special care should be taken when using timer.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">timer1</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTimer</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">timer1</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+    <span class="p">}()</span>
+    <span class="o">&lt;-</span><span class="nx">timer1</span><span class="p">.</span><span class="nx">C</span>
+
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;done&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The program will remain deadlocked. Because timer1.Stop does not close channel C, the program stays blocked on timer1.</p>
+<p>This is an oversimplified example. Imagine if &lt;- timer1.C was blocking on a child goroutine and the stop method of timer was called, then the child goroutine could be blocked forever, causing a goroutine leak and a memory leak.</p>
+<p>The correct way to use Stop is.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">timer1</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTimer</span><span class="p">(</span><span class="mi">2</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">!</span><span class="nx">timer1</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span> <span class="p">{</span>
+            <span class="o">&lt;-</span><span class="nx">timer1</span><span class="p">.</span><span class="nx">C</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+
+    <span class="k">select</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">timer1</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;expired&#34;</span><span class="p">)</span>
+    <span class="k">default</span><span class="p">:</span>
+    <span class="p">}</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;done&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div>
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/opensource-apacheplc4x-need-payment/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Apache PLC4X authors to stop free community support, ask enterprise users to pay for their labour</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/cpp-http-client/">
+            <span class="next-text nav-default">High Performance C&#43;&#43; HTTP Client Principles and Implementation</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

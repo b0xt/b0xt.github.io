@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>An analysis of the Kubelet eviction mechanism - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article is based on reading the source code of Kubernetes v1.22.1
+ Kubelet allows nodes to be evicted if they are under-resourced. I have recently studied Kubelet&amp;rsquo;s eviction mechanism and found a lot to learn from it, so I&amp;rsquo;ll share it with you.
+Kubelet Configuration Kubelet&amp;rsquo;s eviction feature needs to be turned on in the configuration, and the threshold value for eviction needs to be configured.
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18  type KubeletConfiguration struct { ." /><meta name="keywords" content="kubelet, Eviction, Mechanism, k8s" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/kubelet-eviction-mechanism/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="An analysis of the Kubelet eviction mechanism" />
+<meta property="og:description" content="This article is based on reading the source code of Kubernetes v1.22.1
+ Kubelet allows nodes to be evicted if they are under-resourced. I have recently studied Kubelet&rsquo;s eviction mechanism and found a lot to learn from it, so I&rsquo;ll share it with you.
+Kubelet Configuration Kubelet&rsquo;s eviction feature needs to be turned on in the configuration, and the threshold value for eviction needs to be configured.
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18  type KubeletConfiguration struct { ." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/kubelet-eviction-mechanism/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-09T15:10:23+08:00" />
+<meta property="article:modified_time" content="2022-03-09T15:10:23+08:00" />
+
+<meta itemprop="name" content="An analysis of the Kubelet eviction mechanism">
+<meta itemprop="description" content="This article is based on reading the source code of Kubernetes v1.22.1
+ Kubelet allows nodes to be evicted if they are under-resourced. I have recently studied Kubelet&rsquo;s eviction mechanism and found a lot to learn from it, so I&rsquo;ll share it with you.
+Kubelet Configuration Kubelet&rsquo;s eviction feature needs to be turned on in the configuration, and the threshold value for eviction needs to be configured.
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18  type KubeletConfiguration struct { ."><meta itemprop="datePublished" content="2022-03-09T15:10:23+08:00" />
+<meta itemprop="dateModified" content="2022-03-09T15:10:23+08:00" />
+<meta itemprop="wordCount" content="1679">
+<meta itemprop="keywords" content="kubelet," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="An analysis of the Kubelet eviction mechanism"/>
+<meta name="twitter:description" content="This article is based on reading the source code of Kubernetes v1.22.1
+ Kubelet allows nodes to be evicted if they are under-resourced. I have recently studied Kubelet&rsquo;s eviction mechanism and found a lot to learn from it, so I&rsquo;ll share it with you.
+Kubelet Configuration Kubelet&rsquo;s eviction feature needs to be turned on in the configuration, and the threshold value for eviction needs to be configured.
+1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18  type KubeletConfiguration struct { ."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">An analysis of the Kubelet eviction mechanism</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-09 15:10:23 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1679 words </span>
+          <span class="more-meta"> 8 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#kubelet-configuration">Kubelet Configuration</a></li>
+        <li><a href="#how-eviction-manager-works">How Eviction Manager works</a>
+          <ul>
+            <li><a href="#notifier">notifier</a></li>
+            <li><a href="#synchronize">synchronize</a></li>
+            <li><a href="#calculate-the-eviction-order">Calculate the eviction order</a></li>
+            <li><a href="#eviction-pod">Eviction Pod</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <blockquote>
+<p>This article is based on reading the source code of Kubernetes v1.22.1</p>
+</blockquote>
+<p>Kubelet allows nodes to be evicted if they are under-resourced. I have recently studied Kubelet&rsquo;s eviction mechanism and found a lot to learn from it, so I&rsquo;ll share it with you.</p>
+<h2 id="kubelet-configuration">Kubelet Configuration</h2>
+<p>Kubelet&rsquo;s eviction feature needs to be turned on in the configuration, and the threshold value for eviction needs to be configured.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">KubeletConfiguration</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="o">...</span>
+	<span class="c1">// Map of signal names to quantities that defines hard eviction thresholds. For example: {&#34;memory.available&#34;: &#34;300Mi&#34;}.
+</span><span class="c1"></span>	<span class="nx">EvictionHard</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+	<span class="c1">// Map of signal names to quantities that defines soft eviction thresholds.  For example: {&#34;memory.available&#34;: &#34;300Mi&#34;}.
+</span><span class="c1"></span>	<span class="nx">EvictionSoft</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+	<span class="c1">// Map of signal names to quantities that defines grace periods for each soft eviction signal. For example: {&#34;memory.available&#34;: &#34;30s&#34;}.
+</span><span class="c1"></span>	<span class="nx">EvictionSoftGracePeriod</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+	<span class="c1">// Duration for which the kubelet has to wait before transitioning out of an eviction pressure condition.
+</span><span class="c1"></span>	<span class="nx">EvictionPressureTransitionPeriod</span> <span class="nx">metav1</span><span class="p">.</span><span class="nx">Duration</span>
+	<span class="c1">// Maximum allowed grace period (in seconds) to use when terminating pods in response to a soft eviction threshold being met.
+</span><span class="c1"></span>	<span class="nx">EvictionMaxPodGracePeriod</span> <span class="kt">int32</span>
+	<span class="c1">// Map of signal names to quantities that defines minimum reclaims, which describe the minimum
+</span><span class="c1"></span>	<span class="c1">// amount of a given resource the kubelet will reclaim when performing a pod eviction while
+</span><span class="c1"></span>	<span class="c1">// that resource is under pressure. For example: {&#34;imagefs.available&#34;: &#34;2Gi&#34;}
+</span><span class="c1"></span>	<span class="nx">EvictionMinimumReclaim</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Among them, EvictionHard means hard eviction, once the threshold is reached, it will be evicted directly; EvictionSoft means soft eviction, i.e., you can set the soft eviction period, only after the soft eviction period is exceeded, the period is set with EvictionSoftGracePeriod; EvictionMinimumReclaim means setting the minimum available threshold, such as imagefs.</p>
+<p>The eviction signals that can be set are.</p>
+<ul>
+<li>memory.available: node.status.capacity[memory] - node.stats.memory.workingSet, the node&rsquo;s available memory.</li>
+<li>nodefs.available: node.stats.fs.available, the size of the available capacity of the file system used by Kubelet.</li>
+<li>nodefs.inodesFree: node.stats.fs.inodesFree, the number of inodes available on the file system used by Kubelet.</li>
+<li>imagefs.available: node.stats.runtime.imagefs.available, the available capacity of the filesystem used to store images and container writable layers during container runtime.</li>
+<li>imagefs.inodesFree: node.stats.runtime.imagefs.inodesFree, the available inodes capacity of the file system used to store images and container writable layers when the container is running.</li>
+<li>allocatableMemory.available: the amount of available memory reserved for allocating Pods.</li>
+<li>pid.available: node.stats.rlimit.maxpid - node.stats.rlimit.curproc, the available PID to allocate Pods with.</li>
+</ul>
+<h2 id="how-eviction-manager-works">How Eviction Manager works</h2>
+<p>The main work of Eviction Manager is in the <code>synchronize</code> function. There are two places where the <code>synchronize</code> task is triggered, the monitor task, which is triggered every 10s, and the <code>notifier</code> task, which is started to listen for kernel events based on user-configured eviction signals.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/09/93ead070a7744d0c87fd094704f76325.png" alt="How Eviction Manager works"></p>
+<h3 id="notifier">notifier</h3>
+<p>The <code>notifier</code> is started by the <code>thresholdNotifier</code> in the eviction manager, each eviction signal configured by the user corresponds to a <code>thresholdNotifier</code>, and the <code>thresholdNotifier</code> and <code>notifier</code> communicate through the channel When a <code>notifier</code> sends a message to the channel, the corresponding <code>thresholdNotifier</code> triggers a <code>synchronize</code> logic.</p>
+<p>The <code>notifier</code> uses the kernel&rsquo;s cgroups Memory thresholds. cgroups allows the user state process to set the kernel to send a notification to the application when <code>memory.usage_in_bytes</code> reaches a certain threshold via <code>eventfd</code>. This is done by writing <code>&quot;&lt;event_fd&gt; &lt;fd of memory.usage_in_bytes&gt; &lt;threshold&gt;&quot;</code> to <code>cgroup.event_control</code>.</p>
+<p>The initialization code for <code>notifier</code> is as follows (some extraneous code has been removed for readability), mainly to find the file descriptor <code>watchfd</code> for <code>memory.usage_in_bytes</code> and <code>controlfd</code> for <code>cgroup.event_control</code> and to complete the <code>cgroup memory thrsholds</code> are registered.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">NewCgroupNotifier</span><span class="p">(</span><span class="nx">path</span><span class="p">,</span> <span class="nx">attribute</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">threshold</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">(</span><span class="nx">CgroupNotifier</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">watchfd</span><span class="p">,</span> <span class="nx">eventfd</span><span class="p">,</span> <span class="nx">epfd</span><span class="p">,</span> <span class="nx">controlfd</span> <span class="kt">int</span>
+
+	<span class="nx">watchfd</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">unix</span><span class="p">.</span><span class="nf">Open</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%s/%s&#34;</span><span class="p">,</span> <span class="nx">path</span><span class="p">,</span> <span class="nx">attribute</span><span class="p">),</span> <span class="nx">unix</span><span class="p">.</span><span class="nx">O_RDONLY</span><span class="p">|</span><span class="nx">unix</span><span class="p">.</span><span class="nx">O_CLOEXEC</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+	<span class="k">defer</span> <span class="nx">unix</span><span class="p">.</span><span class="nf">Close</span><span class="p">(</span><span class="nx">watchfd</span><span class="p">)</span>
+	
+	<span class="nx">controlfd</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">unix</span><span class="p">.</span><span class="nf">Open</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%s/cgroup.event_control&#34;</span><span class="p">,</span> <span class="nx">path</span><span class="p">),</span> <span class="nx">unix</span><span class="p">.</span><span class="nx">O_WRONLY</span><span class="p">|</span><span class="nx">unix</span><span class="p">.</span><span class="nx">O_CLOEXEC</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+	<span class="k">defer</span> <span class="nx">unix</span><span class="p">.</span><span class="nf">Close</span><span class="p">(</span><span class="nx">controlfd</span><span class="p">)</span>
+	
+	<span class="nx">eventfd</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">unix</span><span class="p">.</span><span class="nf">Eventfd</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nx">unix</span><span class="p">.</span><span class="nx">EFD_CLOEXEC</span><span class="p">)</span>
+	<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="c1">// Close eventfd if we get an error later in initialization
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">unix</span><span class="p">.</span><span class="nf">Close</span><span class="p">(</span><span class="nx">eventfd</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+	
+	<span class="nx">epfd</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">unix</span><span class="p">.</span><span class="nf">EpollCreate1</span><span class="p">(</span><span class="nx">unix</span><span class="p">.</span><span class="nx">EPOLL_CLOEXEC</span><span class="p">)</span>
+	<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="c1">// Close epfd if we get an error later in initialization
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">unix</span><span class="p">.</span><span class="nf">Close</span><span class="p">(</span><span class="nx">epfd</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+	
+	<span class="nx">config</span> <span class="o">:=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%d %d %d&#34;</span><span class="p">,</span> <span class="nx">eventfd</span><span class="p">,</span> <span class="nx">watchfd</span><span class="p">,</span> <span class="nx">threshold</span><span class="p">)</span>
+	<span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">unix</span><span class="p">.</span><span class="nf">Write</span><span class="p">(</span><span class="nx">controlfd</span><span class="p">,</span> <span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">config</span><span class="p">))</span>
+
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">linuxCgroupNotifier</span><span class="p">{</span>
+		<span class="nx">eventfd</span><span class="p">:</span> <span class="nx">eventfd</span><span class="p">,</span>
+		<span class="nx">epfd</span><span class="p">:</span>    <span class="nx">epfd</span><span class="p">,</span>
+		<span class="nx">stop</span><span class="p">:</span>    <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}),</span>
+	<span class="p">},</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The notifier also listens for the above <code>eventfd</code> via epoll at boot time, and sends a signal to the channel when it listens for an event sent by the kernel indicating that the memory used has exceeded the threshold.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">linuxCgroupNotifier</span><span class="p">)</span> <span class="nf">Start</span><span class="p">(</span><span class="nx">eventCh</span> <span class="kd">chan</span><span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="nx">err</span> <span class="o">:=</span> <span class="nx">unix</span><span class="p">.</span><span class="nf">EpollCtl</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">epfd</span><span class="p">,</span> <span class="nx">unix</span><span class="p">.</span><span class="nx">EPOLL_CTL_ADD</span><span class="p">,</span> <span class="nx">n</span><span class="p">.</span><span class="nx">eventfd</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">unix</span><span class="p">.</span><span class="nx">EpollEvent</span><span class="p">{</span>
+		<span class="nx">Fd</span><span class="p">:</span>     <span class="nb">int32</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">eventfd</span><span class="p">),</span>
+		<span class="nx">Events</span><span class="p">:</span> <span class="nx">unix</span><span class="p">.</span><span class="nx">EPOLLIN</span><span class="p">,</span>
+	<span class="p">})</span>
+
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">select</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">n</span><span class="p">.</span><span class="nx">stop</span><span class="p">:</span>
+			<span class="k">return</span>
+		<span class="k">default</span><span class="p">:</span>
+		<span class="p">}</span>
+		<span class="nx">event</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">wait</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">epfd</span><span class="p">,</span> <span class="nx">n</span><span class="p">.</span><span class="nx">eventfd</span><span class="p">,</span> <span class="nx">notifierRefreshInterval</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">InfoS</span><span class="p">(</span><span class="s">&#34;Eviction manager: error while waiting for memcg events&#34;</span><span class="p">,</span> <span class="s">&#34;err&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="k">return</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">!</span><span class="nx">event</span> <span class="p">{</span>
+			<span class="c1">// Timeout on wait.  This is expected if the threshold was not crossed
+</span><span class="c1"></span>			<span class="k">continue</span>
+		<span class="p">}</span>
+		<span class="c1">// Consume the event from the eventfd
+</span><span class="c1"></span>		<span class="nx">buf</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">eventSize</span><span class="p">)</span>
+		<span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">unix</span><span class="p">.</span><span class="nf">Read</span><span class="p">(</span><span class="nx">n</span><span class="p">.</span><span class="nx">eventfd</span><span class="p">,</span> <span class="nx">buf</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">InfoS</span><span class="p">(</span><span class="s">&#34;Eviction manager: error reading memcg events&#34;</span><span class="p">,</span> <span class="s">&#34;err&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+		<span class="nx">eventCh</span> <span class="o">&lt;-</span> <span class="kd">struct</span><span class="p">{}{}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The <code>synchronize</code> logic determines whether the <code>notifier</code> has been updated in 10s and restarts the <code>notifier</code> each time it is executed. The <code>cgroup memory threshold</code> is calculated by subtracting the total amount of memory from the user-set eviction threshold.</p>
+<h3 id="synchronize">synchronize</h3>
+<p>Eviction Manager&rsquo;s main logic <code>synchronize</code> is more detailed, so we won&rsquo;t post the source code here, but we will sort out the following matters.</p>
+<ol>
+<li>constructing a sorting function for each signal.</li>
+<li>update <code>threshold</code> and restart <code>notifier</code>.</li>
+<li>get the current node&rsquo;s resource usage (cgroup information) and all active pods.</li>
+<li>for each signal, determine separately whether the resource usage of the current node has reached the eviction threshold, and if none of them have, exit the current loop.</li>
+<li>prioritize all signals, with the priority being that memory-related signals are evicted first.</li>
+<li>send an eviction event to the apiserver.</li>
+<li>prioritize all active pods.</li>
+<li>evict the pods in the sorted order.</li>
+</ol>
+<h3 id="calculate-the-eviction-order">Calculate the eviction order</h3>
+<p>The order of eviction of pods depends on three main factors.</p>
+<ul>
+<li>whether the pod&rsquo;s resource usage exceeds its requests.</li>
+<li>The priority value of the pod.</li>
+<li>the memory usage of the pod.</li>
+</ul>
+<p>The order in which the three factors are judged is also based on the order in which they are registered into <code>orderedBy</code>. The multi-level ordering of the <code>orderedBy</code> function is also a worthwhile implementation in Kubernetes, so interested readers can check the source code for themselves.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// rankMemoryPressure orders the input pods for eviction in response to memory pressure.
+</span><span class="c1">// It ranks by whether or not the pod&#39;s usage exceeds its requests, then by priority, and
+</span><span class="c1">// finally by memory usage above requests.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">rankMemoryPressure</span><span class="p">(</span><span class="nx">pods</span> <span class="p">[]</span><span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">,</span> <span class="nx">stats</span> <span class="nx">statsFunc</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nf">orderedBy</span><span class="p">(</span><span class="nf">exceedMemoryRequests</span><span class="p">(</span><span class="nx">stats</span><span class="p">),</span> <span class="nx">priority</span><span class="p">,</span> <span class="nf">memory</span><span class="p">(</span><span class="nx">stats</span><span class="p">)).</span><span class="nf">Sort</span><span class="p">(</span><span class="nx">pods</span><span class="p">)</span>
+<span class="p">}</span>  
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="eviction-pod">Eviction Pod</h3>
+<p>Next is the implementation of eviction Pod. Eviction Manager evicts Pods with a clean kill, the specific implementation is not analyzed here, it is worth noting that there is a judgment before eviction, if <code>IsCriticalPod</code> returns true then no eviction.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">managerImpl</span><span class="p">)</span> <span class="nf">evictPod</span><span class="p">(</span><span class="nx">pod</span> <span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">,</span> <span class="nx">gracePeriodOverride</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">evictMsg</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">annotations</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="c1">// If the pod is marked as critical and static, and support for critical pod annotations is enabled,
+</span><span class="c1"></span>	<span class="c1">// do not evict such pods. Static pods are not re-admitted after evictions.
+</span><span class="c1"></span>	<span class="c1">// https://github.com/kubernetes/kubernetes/issues/40573 has more details.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">kubelettypes</span><span class="p">.</span><span class="nf">IsCriticalPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">klog</span><span class="p">.</span><span class="nf">ErrorS</span><span class="p">(</span><span class="kc">nil</span><span class="p">,</span> <span class="s">&#34;Eviction manager: cannot evict a critical pod&#34;</span><span class="p">,</span> <span class="s">&#34;pod&#34;</span><span class="p">,</span> <span class="nx">klog</span><span class="p">.</span><span class="nf">KObj</span><span class="p">(</span><span class="nx">pod</span><span class="p">))</span>
+		<span class="k">return</span> <span class="kc">false</span>
+	<span class="p">}</span>
+	<span class="c1">// record that we are evicting the pod
+</span><span class="c1"></span>	<span class="nx">m</span><span class="p">.</span><span class="nx">recorder</span><span class="p">.</span><span class="nf">AnnotatedEventf</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">annotations</span><span class="p">,</span> <span class="nx">v1</span><span class="p">.</span><span class="nx">EventTypeWarning</span><span class="p">,</span> <span class="nx">Reason</span><span class="p">,</span> <span class="nx">evictMsg</span><span class="p">)</span>
+	<span class="c1">// this is a blocking call and should only return when the pod and its containers are killed.
+</span><span class="c1"></span>	<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">3</span><span class="p">).</span><span class="nf">InfoS</span><span class="p">(</span><span class="s">&#34;Evicting pod&#34;</span><span class="p">,</span> <span class="s">&#34;pod&#34;</span><span class="p">,</span> <span class="nx">klog</span><span class="p">.</span><span class="nf">KObj</span><span class="p">(</span><span class="nx">pod</span><span class="p">),</span> <span class="s">&#34;podUID&#34;</span><span class="p">,</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">UID</span><span class="p">,</span> <span class="s">&#34;message&#34;</span><span class="p">,</span> <span class="nx">evictMsg</span><span class="p">)</span>
+	<span class="nx">err</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">killPodFunc</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="kc">true</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">gracePeriodOverride</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">status</span> <span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">PodStatus</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">status</span><span class="p">.</span><span class="nx">Phase</span> <span class="p">=</span> <span class="nx">v1</span><span class="p">.</span><span class="nx">PodFailed</span>
+		<span class="nx">status</span><span class="p">.</span><span class="nx">Reason</span> <span class="p">=</span> <span class="nx">Reason</span>
+		<span class="nx">status</span><span class="p">.</span><span class="nx">Message</span> <span class="p">=</span> <span class="nx">evictMsg</span>
+	<span class="p">})</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">klog</span><span class="p">.</span><span class="nf">ErrorS</span><span class="p">(</span><span class="nx">err</span><span class="p">,</span> <span class="s">&#34;Eviction manager: pod failed to evict&#34;</span><span class="p">,</span> <span class="s">&#34;pod&#34;</span><span class="p">,</span> <span class="nx">klog</span><span class="p">.</span><span class="nf">KObj</span><span class="p">(</span><span class="nx">pod</span><span class="p">))</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="nx">klog</span><span class="p">.</span><span class="nf">InfoS</span><span class="p">(</span><span class="s">&#34;Eviction manager: pod is evicted successfully&#34;</span><span class="p">,</span> <span class="s">&#34;pod&#34;</span><span class="p">,</span> <span class="nx">klog</span><span class="p">.</span><span class="nf">KObj</span><span class="p">(</span><span class="nx">pod</span><span class="p">))</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Then look at the code for <code>IsCriticalPod</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">IsCriticalPod</span><span class="p">(</span><span class="nx">pod</span> <span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nf">IsStaticPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">true</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nf">IsMirrorPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">true</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">Priority</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nf">IsCriticalPodBasedOnPriority</span><span class="p">(</span><span class="o">*</span><span class="nx">pod</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">Priority</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">true</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="kc">false</span>
+<span class="p">}</span>
+
+<span class="c1">// IsMirrorPod returns true if the passed Pod is a Mirror Pod.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">IsMirrorPod</span><span class="p">(</span><span class="nx">pod</span> <span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Annotations</span><span class="p">[</span><span class="nx">ConfigMirrorAnnotationKey</span><span class="p">]</span>
+	<span class="k">return</span> <span class="nx">ok</span>
+<span class="p">}</span>
+
+<span class="c1">// IsStaticPod returns true if the pod is a static pod.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">IsStaticPod</span><span class="p">(</span><span class="nx">pod</span> <span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="nx">source</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">GetPodSource</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">source</span> <span class="o">!=</span> <span class="nx">ApiserverSource</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">IsCriticalPodBasedOnPriority</span><span class="p">(</span><span class="nx">priority</span> <span class="kt">int32</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">priority</span> <span class="o">&gt;=</span> <span class="nx">scheduling</span><span class="p">.</span><span class="nx">SystemCriticalPriority</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>From the code, if the Pod is Static, Mirror, Critical Pod are not evicted. Static and Mirror are judged from the annotation of Pod; Critical is judged by the Priority value of Pod, if the Priority is <code>system-cluster-critical</code> / <code>system-node-critical</code>, it belongs to Critical Pod.</p>
+<p>However, it is worth noting that the <a href="https://kubernetes.io/docs/tasks/administer-cluster/guaranteed-scheduling-critical-addon-pods">official documentation</a> refers to Critical Pods as saying that if a non-Static Pod is marked as Critical, it is not completely guaranteed not to be evicted. Therefore, it is likely that the community has not thought through whether to evict in this case, and does not rule out changing this logic later, but it is also possible that the documentation is not up to date.</p>
+<h2 id="summary">Summary</h2>
+<p>This article analyzed Kubelet&rsquo;s Eviction Manager, including its listening to Linux CGroup events and determining Pod eviction priorities. Once we understand this, we can set the priority according to the importance of our application, even set it to Critical Pod.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/kubelet/">kubelet</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/how-csi-works/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">A Brief Analysis of How CSI Works</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/rust-shit-ref-borrow/">
+            <span class="next-text nav-default">Rust&#39;s confusing references and borrowings</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

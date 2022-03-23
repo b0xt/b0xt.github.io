@@ -1,0 +1,1328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How Kubernetes Controller Manager works - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article is based on reading the source code of Kubernetes v1.16. The article has some source code, but I will try to describe it clearly by matching pictures In the Kubernetes Master node, there are three important components: ApiServer, ControllerManager, and Scheduler, which are responsible for the management of the whole cluster together. In this article, we try to sort out the workflow and principle of ControllerManager. What is" /><meta name="keywords" content="kubernetes, Controller Manager" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/how-kubernetes-controller-manager-works/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="How Kubernetes Controller Manager works" />
+<meta property="og:description" content="This article is based on reading the source code of Kubernetes v1.16. The article has some source code, but I will try to describe it clearly by matching pictures In the Kubernetes Master node, there are three important components: ApiServer, ControllerManager, and Scheduler, which are responsible for the management of the whole cluster together. In this article, we try to sort out the workflow and principle of ControllerManager. What is" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/how-kubernetes-controller-manager-works/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-10T13:51:12+08:00" />
+<meta property="article:modified_time" content="2022-03-10T13:51:12+08:00" />
+
+<meta itemprop="name" content="How Kubernetes Controller Manager works">
+<meta itemprop="description" content="This article is based on reading the source code of Kubernetes v1.16. The article has some source code, but I will try to describe it clearly by matching pictures In the Kubernetes Master node, there are three important components: ApiServer, ControllerManager, and Scheduler, which are responsible for the management of the whole cluster together. In this article, we try to sort out the workflow and principle of ControllerManager. What is"><meta itemprop="datePublished" content="2022-03-10T13:51:12+08:00" />
+<meta itemprop="dateModified" content="2022-03-10T13:51:12+08:00" />
+<meta itemprop="wordCount" content="4673">
+<meta itemprop="keywords" content="kubernetes," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How Kubernetes Controller Manager works"/>
+<meta name="twitter:description" content="This article is based on reading the source code of Kubernetes v1.16. The article has some source code, but I will try to describe it clearly by matching pictures In the Kubernetes Master node, there are three important components: ApiServer, ControllerManager, and Scheduler, which are responsible for the management of the whole cluster together. In this article, we try to sort out the workflow and principle of ControllerManager. What is"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How Kubernetes Controller Manager works</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-10 13:51:12 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 4673 words </span>
+          <span class="more-meta"> 10 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#what-is-controller-manager">What is Controller Manager</a></li>
+        <li><a href="#controller-workflow">Controller Workflow</a></li>
+        <li><a href="#controller-manager-architecture">Controller Manager Architecture</a>
+          <ul>
+            <li><a href="#informer-factory">Informer Factory</a></li>
+            <li><a href="#informer-creation">Informer creation</a></li>
+            <li><a href="#informer-operation">Informer operation</a></li>
+          </ul>
+        </li>
+        <li><a href="#sharedindexinformer">sharedIndexInformer</a>
+          <ul>
+            <li><a href="#sharedprocessor">sharedProcessor</a></li>
+            <li><a href="#deltafifo">DeltaFIFO</a></li>
+            <li><a href="#controller">controller</a></li>
+            <li><a href="#indexer">Indexer</a></li>
+            <li><a href="#mutationdetector">MutationDetector</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <blockquote>
+<p>This article is based on reading the source code of Kubernetes v1.16. The article has some source code, but I will try to describe it clearly by matching pictures</p>
+</blockquote>
+<p>In the Kubernetes Master node, there are three important components: ApiServer, ControllerManager, and Scheduler, which are responsible for the management of the whole cluster together. In this article, we try to sort out the workflow and principle of ControllerManager.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/411295f4a5c240c99d9d66901b583652.png" alt="k8s ControllerManager"></p>
+<h2 id="what-is-controller-manager">What is Controller Manager</h2>
+<p>According to the official documentation: kube-controller-manager runs controllers, which are background threads that handle regular tasks in the cluster.</p>
+<p>For example, when a Pod created through Deployment exits abnormally, the RS Controller will accept and handle the exit and create a new Pod to maintain the expected number of copies.</p>
+<p>Almost every specific resource is managed by a specific Controller to maintain the expected state, and it is the Controller Manager&rsquo;s responsibility to aggregate all the Controllers:</p>
+<ol>
+<li>provide infrastructure to reduce the complexity of Controller implementation</li>
+<li>start and maintain the Controller&rsquo;s uptime</li>
+</ol>
+<p>In this way, Controller ensures that the resources in the cluster remain in the expected state, and Controller Manager ensures that the Controller remains in the expected state.</p>
+<h2 id="controller-workflow">Controller Workflow</h2>
+<p>Before we explain how the Controller Manager provides the infrastructure and runtime environment for the Controller, let&rsquo;s understand what the Controller workflow looks like.</p>
+<p>From a high-dimensional perspective, Controller Manager mainly provides the ability to distribute events, while different Controllers only need to register the corresponding Handler to wait for receiving and processing events.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/bbdb9339d80a40df8fcf99bf8c56b4a0.png" alt="Controller Workflow"></p>
+<p>Take Deployment Controller as an example, the <code>NewDeploymentController</code> method in <code>pkg/controller/deployment/deployment_controller.go</code> includes the registration of Event Handler, for For Deployment Controller, you only need to implement different processing logic according to different events, and then you can achieve the management of the corresponding resources.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">dInformer</span><span class="p">.</span><span class="nf">Informer</span><span class="p">().</span><span class="nf">AddEventHandler</span><span class="p">(</span><span class="nx">cache</span><span class="p">.</span><span class="nx">ResourceEventHandlerFuncs</span><span class="p">{</span>
+	<span class="nx">AddFunc</span><span class="p">:</span>    <span class="nx">dc</span><span class="p">.</span><span class="nx">addDeployment</span><span class="p">,</span>
+	<span class="nx">UpdateFunc</span><span class="p">:</span> <span class="nx">dc</span><span class="p">.</span><span class="nx">updateDeployment</span><span class="p">,</span>
+	<span class="c1">// This will enter the sync loop and no-op, because the deployment has been deleted from the store.
+</span><span class="c1"></span>	<span class="nx">DeleteFunc</span><span class="p">:</span> <span class="nx">dc</span><span class="p">.</span><span class="nx">deleteDeployment</span><span class="p">,</span>
+<span class="p">})</span>
+<span class="nx">rsInformer</span><span class="p">.</span><span class="nf">Informer</span><span class="p">().</span><span class="nf">AddEventHandler</span><span class="p">(</span><span class="nx">cache</span><span class="p">.</span><span class="nx">ResourceEventHandlerFuncs</span><span class="p">{</span>
+	<span class="nx">AddFunc</span><span class="p">:</span>    <span class="nx">dc</span><span class="p">.</span><span class="nx">addReplicaSet</span><span class="p">,</span>
+	<span class="nx">UpdateFunc</span><span class="p">:</span> <span class="nx">dc</span><span class="p">.</span><span class="nx">updateReplicaSet</span><span class="p">,</span>
+	<span class="nx">DeleteFunc</span><span class="p">:</span> <span class="nx">dc</span><span class="p">.</span><span class="nx">deleteReplicaSet</span><span class="p">,</span>
+<span class="p">})</span>
+<span class="nx">podInformer</span><span class="p">.</span><span class="nf">Informer</span><span class="p">().</span><span class="nf">AddEventHandler</span><span class="p">(</span><span class="nx">cache</span><span class="p">.</span><span class="nx">ResourceEventHandlerFuncs</span><span class="p">{</span>
+	<span class="nx">DeleteFunc</span><span class="p">:</span> <span class="nx">dc</span><span class="p">.</span><span class="nx">deletePod</span><span class="p">,</span>
+<span class="p">})</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As you can see, with the help of the Controller Manager, the logic of the Controller can be done very purely by implementing the corresponding EventHandler, so what specific work does the Controller Manager do?</p>
+<h2 id="controller-manager-architecture">Controller Manager Architecture</h2>
+<p>The key module that aids the Controller Manager in event distribution is client-go, and one of the more critical modules is informer.</p>
+<p>kubernetes provides an architecture diagram of client-go on github, from which you can see that the Controller is the bottom half (CustomController) of the description, while the Controller Manager is mainly the top half of the completion.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/dfd7e40c754543508789725f4ae61099.png" alt="Controller Manager Architecture"></p>
+<h3 id="informer-factory">Informer Factory</h3>
+<p>As you can see from the above diagram, Informer is a very critical &ldquo;bridge&rdquo;, so the management of Informer is the first thing that Controller Manager does.</p>
+<p>Since each Informer maintains a watch long connection to the Api Server, this single instance factory ensures that each type of Informer is instantiated only once by providing a unique entry point for all Controllers to get an Informer.</p>
+<p>The initialization logic of this singleton factory.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// NewSharedInformerFactoryWithOptions constructs a new instance of a SharedInformerFactory with additional options.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewSharedInformerFactoryWithOptions</span><span class="p">(</span><span class="nx">client</span> <span class="nx">kubernetes</span><span class="p">.</span><span class="nx">Interface</span><span class="p">,</span> <span class="nx">defaultResync</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">,</span> <span class="nx">options</span> <span class="o">...</span><span class="nx">SharedInformerOption</span><span class="p">)</span> <span class="nx">SharedInformerFactory</span> <span class="p">{</span>
+	<span class="nx">factory</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">sharedInformerFactory</span><span class="p">{</span>
+		<span class="nx">client</span><span class="p">:</span>           <span class="nx">client</span><span class="p">,</span>
+		<span class="nx">namespace</span><span class="p">:</span>        <span class="nx">v1</span><span class="p">.</span><span class="nx">NamespaceAll</span><span class="p">,</span>
+		<span class="nx">defaultResync</span><span class="p">:</span>    <span class="nx">defaultResync</span><span class="p">,</span>
+		<span class="nx">informers</span><span class="p">:</span>        <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="nx">reflect</span><span class="p">.</span><span class="nx">Type</span><span class="p">]</span><span class="nx">cache</span><span class="p">.</span><span class="nx">SharedIndexInformer</span><span class="p">),</span>
+		<span class="nx">startedInformers</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="nx">reflect</span><span class="p">.</span><span class="nx">Type</span><span class="p">]</span><span class="kt">bool</span><span class="p">),</span>
+		<span class="nx">customResync</span><span class="p">:</span>     <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="nx">reflect</span><span class="p">.</span><span class="nx">Type</span><span class="p">]</span><span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">),</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Apply all options
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">opt</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">options</span> <span class="p">{</span>
+		<span class="nx">factory</span> <span class="p">=</span> <span class="nf">opt</span><span class="p">(</span><span class="nx">factory</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="nx">factory</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As you can see from the initialization logic above, the most important part of the <code>sharedInformerFactory</code> is the map named <code>informers</code>, where the key is the resource type and the value is the Informer that cares about that resource type. each type of Informer will be instantiated only once and stored in the map. Different Controllers will only get the same Informer instance when they need the same resource.</p>
+<p>For Controller Manager, maintaining all the Informers to work properly is the basic condition for all Controllers to work properly. The <code>sharedInformerFactory</code> maintains all informer instances through this map, so the <code>sharedInformerFactory</code> also takes the responsibility of providing a unified startup portal.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Start initializes all requested informers.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">f</span> <span class="o">*</span><span class="nx">sharedInformerFactory</span><span class="p">)</span> <span class="nf">Start</span><span class="p">(</span><span class="nx">stopCh</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="nx">f</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">f</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+	<span class="k">for</span> <span class="nx">informerType</span><span class="p">,</span> <span class="nx">informer</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">f</span><span class="p">.</span><span class="nx">informers</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nx">f</span><span class="p">.</span><span class="nx">startedInformers</span><span class="p">[</span><span class="nx">informerType</span><span class="p">]</span> <span class="p">{</span>
+			<span class="k">go</span> <span class="nx">informer</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="nx">stopCh</span><span class="p">)</span>
+			<span class="nx">f</span><span class="p">.</span><span class="nx">startedInformers</span><span class="p">[</span><span class="nx">informerType</span><span class="p">]</span> <span class="p">=</span> <span class="kc">true</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When the Controller Manager starts, the most important thing is to run all the Informers through the <code>Start</code> method of this factory.</p>
+<h3 id="informer-creation">Informer creation</h3>
+<p>Here&rsquo;s how these Informers are created, the Controller Manager is initialized in the <code>NewControllerInitializers</code> function in <code>cmd/kube-controller-manager/app/controllermanager.go</code>. Because of the lengthy code, here is an example of the Deployment Controller only.</p>
+<p>The logic for initializing the Deployment Controller is in the <code>startDeploymentController</code> function in <code>cmd/kube-controller-manager/app/apps.go</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">startDeploymentController</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">ControllerContext</span><span class="p">)</span> <span class="p">(</span><span class="nx">http</span><span class="p">.</span><span class="nx">Handler</span><span class="p">,</span> <span class="kt">bool</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">ctx</span><span class="p">.</span><span class="nx">AvailableResources</span><span class="p">[</span><span class="nx">schema</span><span class="p">.</span><span class="nx">GroupVersionResource</span><span class="p">{</span><span class="nx">Group</span><span class="p">:</span> <span class="s">&#34;apps&#34;</span><span class="p">,</span> <span class="nx">Version</span><span class="p">:</span> <span class="s">&#34;v1&#34;</span><span class="p">,</span> <span class="nx">Resource</span><span class="p">:</span> <span class="s">&#34;deployments&#34;</span><span class="p">}]</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+	<span class="nx">dc</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">deployment</span><span class="p">.</span><span class="nf">NewDeploymentController</span><span class="p">(</span>
+		<span class="nx">ctx</span><span class="p">.</span><span class="nx">InformerFactory</span><span class="p">.</span><span class="nf">Apps</span><span class="p">().</span><span class="nf">V1</span><span class="p">().</span><span class="nf">Deployments</span><span class="p">(),</span>
+		<span class="nx">ctx</span><span class="p">.</span><span class="nx">InformerFactory</span><span class="p">.</span><span class="nf">Apps</span><span class="p">().</span><span class="nf">V1</span><span class="p">().</span><span class="nf">ReplicaSets</span><span class="p">(),</span>
+		<span class="nx">ctx</span><span class="p">.</span><span class="nx">InformerFactory</span><span class="p">.</span><span class="nf">Core</span><span class="p">().</span><span class="nf">V1</span><span class="p">().</span><span class="nf">Pods</span><span class="p">(),</span>
+		<span class="nx">ctx</span><span class="p">.</span><span class="nx">ClientBuilder</span><span class="p">.</span><span class="nf">ClientOrDie</span><span class="p">(</span><span class="s">&#34;deployment-controller&#34;</span><span class="p">),</span>
+	<span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">true</span><span class="p">,</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;error creating Deployment controller: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">go</span> <span class="nx">dc</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">ctx</span><span class="p">.</span><span class="nx">ComponentConfig</span><span class="p">.</span><span class="nx">DeploymentController</span><span class="p">.</span><span class="nx">ConcurrentDeploymentSyncs</span><span class="p">),</span> <span class="nx">ctx</span><span class="p">.</span><span class="nx">Stop</span><span class="p">)</span>
+	<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="kc">true</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The most critical logic is in <code>deployment.NewDeploymentController</code>, which actually creates the Deployment Controller, and the first three parameters of the creation function are Deployment, ReplicaSet, and Pod&rsquo;s Informer. As you can see, the Informer&rsquo;s singleton factory provides an entry point for creating Informers with different resources using the ApiGroup as the path.</p>
+<p>However, it is important to note that.<code>Apps().V1().Deployments()</code>  returns an instance of type <code>deploymentInformer</code>, but <code>deploymentInformer</code> is not really an Informer (despite its Informer name). It is just a template class whose main function is to provide templates for the creation of Informers focused on Deployment as a specific resource.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Deployments returns a DeploymentInformer.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">v</span> <span class="o">*</span><span class="nx">version</span><span class="p">)</span> <span class="nf">Deployments</span><span class="p">()</span> <span class="nx">DeploymentInformer</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">deploymentInformer</span><span class="p">{</span><span class="nx">factory</span><span class="p">:</span> <span class="nx">v</span><span class="p">.</span><span class="nx">factory</span><span class="p">,</span> <span class="nx">namespace</span><span class="p">:</span> <span class="nx">v</span><span class="p">.</span><span class="nx">namespace</span><span class="p">,</span> <span class="nx">tweakListOptions</span><span class="p">:</span> <span class="nx">v</span><span class="p">.</span><span class="nx">tweakListOptions</span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The real logic for creating an Informer is in <code>deploymentInformer.Informer()</code> (<code>client-go/informers/apps/v1/deployment.go</code>), and <code>f.defaultInformer</code> is the default Deployment Informer creation template method to create an Informer that focuses only on Deployment resources by passing the resource instance and this template method into the <code>InformerFor</code> method of the Informer factory.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">f</span> <span class="o">*</span><span class="nx">deploymentInformer</span><span class="p">)</span> <span class="nf">Informer</span><span class="p">()</span> <span class="nx">cache</span><span class="p">.</span><span class="nx">SharedIndexInformer</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">f</span><span class="p">.</span><span class="nx">factory</span><span class="p">.</span><span class="nf">InformerFor</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">appsv1</span><span class="p">.</span><span class="nx">Deployment</span><span class="p">{},</span> <span class="nx">f</span><span class="p">.</span><span class="nx">defaultInformer</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>To briefly explain.</p>
+<ol>
+<li>you can get an Informer template class of a specific type through the Informer factory (i.e. <code>deploymentInformer</code> in this case)</li>
+<li>it is the <code>Informer()</code> method of the Informer template class that actually creates the Informer for that particular resource. 3.</li>
+<li>the <code>Informer()</code> method just creates the real Informer through the <code>InformerFor</code> of the Informer factory</li>
+</ol>
+<p>The template method (design pattern) is used here, and although it&rsquo;s a bit convoluted, you can refer to the following diagram to sort it out. The key to understanding it is that the Informer&rsquo;s <strong>differentiated creation logic is delegated to the template class</strong>.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/5b66f58b9b43428d8dd5047d78611d22.png" alt="creation logic is delegated to the template class"></p>
+<p>Finally, the structure named <code>sharedIndexInformer</code> will be instantiated and will actually take on the responsibilities of the Informer. It is also the instance that is registered to the Informer factory map.</p>
+<h3 id="informer-operation">Informer operation</h3>
+<p>Since the real Informer instance is an object of type <code>sharedIndexInformer</code>, when the Informer factory is started (by executing the <code>Start</code> method), it is the <code>sharedIndexInformer</code> that is actually run.</p>
+<p>The <code>sharedIndexInformer</code> is a component in client-go, and its <code>Run</code> method is a few dozen lines long, but it does a lot of work. This is where we get to the most interesting part of the Controller Manager.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">sharedIndexInformer</span><span class="p">)</span> <span class="nf">Run</span><span class="p">(</span><span class="nx">stopCh</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="k">defer</span> <span class="nx">utilruntime</span><span class="p">.</span><span class="nf">HandleCrash</span><span class="p">()</span>
+
+	<span class="nx">fifo</span> <span class="o">:=</span> <span class="nf">NewDeltaFIFO</span><span class="p">(</span><span class="nx">MetaNamespaceKeyFunc</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">indexer</span><span class="p">)</span>
+
+	<span class="nx">cfg</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Config</span><span class="p">{</span>
+		<span class="nx">Queue</span><span class="p">:</span>            <span class="nx">fifo</span><span class="p">,</span>
+		<span class="nx">ListerWatcher</span><span class="p">:</span>    <span class="nx">s</span><span class="p">.</span><span class="nx">listerWatcher</span><span class="p">,</span>
+		<span class="nx">ObjectType</span><span class="p">:</span>       <span class="nx">s</span><span class="p">.</span><span class="nx">objectType</span><span class="p">,</span>
+		<span class="nx">FullResyncPeriod</span><span class="p">:</span> <span class="nx">s</span><span class="p">.</span><span class="nx">resyncCheckPeriod</span><span class="p">,</span>
+		<span class="nx">RetryOnError</span><span class="p">:</span>     <span class="kc">false</span><span class="p">,</span>
+		<span class="nx">ShouldResync</span><span class="p">:</span>     <span class="nx">s</span><span class="p">.</span><span class="nx">processor</span><span class="p">.</span><span class="nx">shouldResync</span><span class="p">,</span>
+
+		<span class="nx">Process</span><span class="p">:</span> <span class="nx">s</span><span class="p">.</span><span class="nx">HandleDeltas</span><span class="p">,</span>
+	<span class="p">}</span>
+
+	<span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">startedLock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+		<span class="k">defer</span> <span class="nx">s</span><span class="p">.</span><span class="nx">startedLock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+		<span class="nx">s</span><span class="p">.</span><span class="nx">controller</span> <span class="p">=</span> <span class="nf">New</span><span class="p">(</span><span class="nx">cfg</span><span class="p">)</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">controller</span><span class="p">.(</span><span class="o">*</span><span class="nx">controller</span><span class="p">).</span><span class="nx">clock</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">clock</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">started</span> <span class="p">=</span> <span class="kc">true</span>
+	<span class="p">}()</span>
+
+	<span class="c1">// Separate stop channel because Processor should be stopped strictly after controller
+</span><span class="c1"></span>	<span class="nx">processorStopCh</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+	<span class="kd">var</span> <span class="nx">wg</span> <span class="nx">wait</span><span class="p">.</span><span class="nx">Group</span>
+	<span class="k">defer</span> <span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>              <span class="c1">// Wait for Processor to stop
+</span><span class="c1"></span>	<span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">processorStopCh</span><span class="p">)</span> <span class="c1">// Tell Processor to stop
+</span><span class="c1"></span>	<span class="nx">wg</span><span class="p">.</span><span class="nf">StartWithChannel</span><span class="p">(</span><span class="nx">processorStopCh</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">cacheMutationDetector</span><span class="p">.</span><span class="nx">Run</span><span class="p">)</span>
+	<span class="nx">wg</span><span class="p">.</span><span class="nf">StartWithChannel</span><span class="p">(</span><span class="nx">processorStopCh</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">processor</span><span class="p">.</span><span class="nx">run</span><span class="p">)</span>
+
+	<span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">startedLock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+		<span class="k">defer</span> <span class="nx">s</span><span class="p">.</span><span class="nx">startedLock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nx">stopped</span> <span class="p">=</span> <span class="kc">true</span> <span class="c1">// Don&#39;t want any new listeners
+</span><span class="c1"></span>	<span class="p">}()</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">controller</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="nx">stopCh</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The startup logic of <code>sharedIndexInformer</code> does several things.</p>
+<ol>
+<li>creates a queue named <code>fifo</code>.</li>
+<li>creates and runs an instance called <code>controller</code>.</li>
+<li>started <code>cacheMutationDetector</code>.</li>
+<li>started <code>processor</code>.</li>
+</ol>
+<p>These terms (or components) were not mentioned in the previous article, but these four things are the core of what the Controller Manager does, so I&rsquo;ll cover each of them below.</p>
+<h2 id="sharedindexinformer">sharedIndexInformer</h2>
+<p><code>sharedIndexInformer</code> is a shared Informer framework where different Controllers only need to provide a template class (like the <code>deploymentInformer</code> mentioned above) to create an Informer specific to their needs.</p>
+<p>The <code>sharedIndexInformer</code> contains a bunch of tools to do the Informer&rsquo;s job, and the main code is in <code>client-go/tools/cache/shared_informer.go</code>. Its creation logic is also in there.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// NewSharedIndexInformer creates a new instance for the listwatcher.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewSharedIndexInformer</span><span class="p">(</span><span class="nx">lw</span> <span class="nx">ListerWatcher</span><span class="p">,</span> <span class="nx">objType</span> <span class="nx">runtime</span><span class="p">.</span><span class="nx">Object</span><span class="p">,</span> <span class="nx">defaultEventHandlerResyncPeriod</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">,</span> <span class="nx">indexers</span> <span class="nx">Indexers</span><span class="p">)</span> <span class="nx">SharedIndexInformer</span> <span class="p">{</span>
+	<span class="nx">realClock</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">clock</span><span class="p">.</span><span class="nx">RealClock</span><span class="p">{}</span>
+	<span class="nx">sharedIndexInformer</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">sharedIndexInformer</span><span class="p">{</span>
+		<span class="nx">processor</span><span class="p">:</span>                       <span class="o">&amp;</span><span class="nx">sharedProcessor</span><span class="p">{</span><span class="nx">clock</span><span class="p">:</span> <span class="nx">realClock</span><span class="p">},</span>
+		<span class="nx">indexer</span><span class="p">:</span>                         <span class="nf">NewIndexer</span><span class="p">(</span><span class="nx">DeletionHandlingMetaNamespaceKeyFunc</span><span class="p">,</span> <span class="nx">indexers</span><span class="p">),</span>
+		<span class="nx">listerWatcher</span><span class="p">:</span>                   <span class="nx">lw</span><span class="p">,</span>
+		<span class="nx">objectType</span><span class="p">:</span>                      <span class="nx">objType</span><span class="p">,</span>
+		<span class="nx">resyncCheckPeriod</span><span class="p">:</span>               <span class="nx">defaultEventHandlerResyncPeriod</span><span class="p">,</span>
+		<span class="nx">defaultEventHandlerResyncPeriod</span><span class="p">:</span> <span class="nx">defaultEventHandlerResyncPeriod</span><span class="p">,</span>
+		<span class="nx">cacheMutationDetector</span><span class="p">:</span>           <span class="nf">NewCacheMutationDetector</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%T&#34;</span><span class="p">,</span> <span class="nx">objType</span><span class="p">)),</span>
+		<span class="nx">clock</span><span class="p">:</span>                           <span class="nx">realClock</span><span class="p">,</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">sharedIndexInformer</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the creation logic, there are several things to look out for:</p>
+<ol>
+<li>processor: provides the function of EventHandler registration and event distribution</li>
+<li>indexer: provides resource caching functionality</li>
+<li>listerWatcher: provided by the template class, contains the List and Watch methods for a specific resource</li>
+<li>objectType: used to mark which specific resource type to focus on</li>
+<li>cacheMutationDetector: monitors the Informer&rsquo;s cache</li>
+</ol>
+<p>In addition, it also contains the <code>DeltaFIFO</code> queue and <code>controller</code> mentioned in the startup logic above, which are described below.</p>
+<h3 id="sharedprocessor">sharedProcessor</h3>
+<p>processor is a very interesting component in sharedIndexInformer. Controller Manager ensures that different Controllers share the same Informer through an Informer singleton factory, but different Controllers have different Handlers registered to the shared Informer.</p>
+<p>The processor is the component that manages the registered Handlers and distributes events to different Handlers.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">sharedProcessor</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">listenersStarted</span> <span class="kt">bool</span>
+	<span class="nx">listenersLock</span>    <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
+	<span class="nx">listeners</span>        <span class="p">[]</span><span class="o">*</span><span class="nx">processorListener</span>
+	<span class="nx">syncingListeners</span> <span class="p">[]</span><span class="o">*</span><span class="nx">processorListener</span>
+	<span class="nx">clock</span>            <span class="nx">clock</span><span class="p">.</span><span class="nx">Clock</span>
+	<span class="nx">wg</span>               <span class="nx">wait</span><span class="p">.</span><span class="nx">Group</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The core of sharedProcessor&rsquo;s work revolves around the Listener slice of <code>listeners</code>.</p>
+<p>When we register a Handler to the Informer, it is eventually converted into an instance of a structure called <code>processorListener</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">newProcessListener</span><span class="p">(</span><span class="nx">handler</span> <span class="nx">ResourceEventHandler</span><span class="p">,</span> <span class="nx">requestedResyncPeriod</span><span class="p">,</span> <span class="nx">resyncPeriod</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">,</span> <span class="nx">now</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">,</span> <span class="nx">bufferSize</span> <span class="kt">int</span><span class="p">)</span> <span class="o">*</span><span class="nx">processorListener</span> <span class="p">{</span>
+	<span class="nx">ret</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">processorListener</span><span class="p">{</span>
+		<span class="nx">nextCh</span><span class="p">:</span>                <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}),</span>
+		<span class="nx">addCh</span><span class="p">:</span>                 <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">interface</span><span class="p">{}),</span>
+		<span class="nx">handler</span><span class="p">:</span>               <span class="nx">handler</span><span class="p">,</span>
+		<span class="nx">pendingNotifications</span><span class="p">:</span>  <span class="o">*</span><span class="nx">buffer</span><span class="p">.</span><span class="nf">NewRingGrowing</span><span class="p">(</span><span class="nx">bufferSize</span><span class="p">),</span>
+		<span class="nx">requestedResyncPeriod</span><span class="p">:</span> <span class="nx">requestedResyncPeriod</span><span class="p">,</span>
+		<span class="nx">resyncPeriod</span><span class="p">:</span>          <span class="nx">resyncPeriod</span><span class="p">,</span>
+	<span class="p">}</span>
+
+	<span class="nx">ret</span><span class="p">.</span><span class="nf">determineNextResync</span><span class="p">(</span><span class="nx">now</span><span class="p">)</span>
+
+	<span class="k">return</span> <span class="nx">ret</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This instance contains mainly two channels and the Handler method registered outside. The <code>processorListener</code> object instantiated here will eventually be added to the <code>sharedProcessor.listeners</code> list.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">sharedProcessor</span><span class="p">)</span> <span class="nf">addListener</span><span class="p">(</span><span class="nx">listener</span> <span class="o">*</span><span class="nx">processorListener</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">p</span><span class="p">.</span><span class="nx">listenersLock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">p</span><span class="p">.</span><span class="nx">listenersLock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+	<span class="nx">p</span><span class="p">.</span><span class="nf">addListenerLocked</span><span class="p">(</span><span class="nx">listener</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">listenersStarted</span> <span class="p">{</span>
+		<span class="nx">p</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">listener</span><span class="p">.</span><span class="nx">run</span><span class="p">)</span>
+		<span class="nx">p</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">listener</span><span class="p">.</span><span class="nx">pop</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As shown in the diagram, the Handler method in the Controller will eventually be added to the Listener, which will be appended to the Listeners slice of the <code>sharedProcessor</code>.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/256470e72f3f4038a17786d1cb0a23b0.png" alt="Handler method in the Controller will eventually be added to the Listener"></p>
+<p>As mentioned before, <code>sharedIndexInformer</code> will run <code>sharedProcessor</code> when it starts, and the logic for starting <code>sharedProcessor</code> is related to these <code>listeners</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">sharedProcessor</span><span class="p">)</span> <span class="nf">run</span><span class="p">(</span><span class="nx">stopCh</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">p</span><span class="p">.</span><span class="nx">listenersLock</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+		<span class="k">defer</span> <span class="nx">p</span><span class="p">.</span><span class="nx">listenersLock</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">listener</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">p</span><span class="p">.</span><span class="nx">listeners</span> <span class="p">{</span>
+			<span class="nx">p</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">listener</span><span class="p">.</span><span class="nx">run</span><span class="p">)</span>
+			<span class="nx">p</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">listener</span><span class="p">.</span><span class="nx">pop</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">p</span><span class="p">.</span><span class="nx">listenersStarted</span> <span class="p">=</span> <span class="kc">true</span>
+	<span class="p">}()</span>
+	<span class="o">&lt;-</span><span class="nx">stopCh</span>
+	<span class="nx">p</span><span class="p">.</span><span class="nx">listenersLock</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">p</span><span class="p">.</span><span class="nx">listenersLock</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">listener</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">p</span><span class="p">.</span><span class="nx">listeners</span> <span class="p">{</span>
+		<span class="nb">close</span><span class="p">(</span><span class="nx">listener</span><span class="p">.</span><span class="nx">addCh</span><span class="p">)</span> <span class="c1">// Tell .pop() to stop. .pop() will tell .run() to stop
+</span><span class="c1"></span>	<span class="p">}</span>
+	<span class="nx">p</span><span class="p">.</span><span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span> <span class="c1">// Wait for all .pop() and .run() to stop
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As you can see, <code>sharedProcessor</code> will execute the <code>run</code> and <code>pop</code> methods of <code>listener</code> in sequence when it starts, so let&rsquo;s look at these two methods now.</p>
+<h4 id="starting-the-listener">Starting the listener</h4>
+<p>Since the listener contains the Handler methods registered with the Controller, the most important function of the listener is to trigger these methods when an event occurs, and <code>listener.run</code> is to keep getting events from the <code>nextCh</code> channel and executing the corresponding handler.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">processorListener</span><span class="p">)</span> <span class="nf">run</span><span class="p">()</span> <span class="p">{</span>
+	<span class="c1">// this call blocks until the channel is closed.  When a panic happens during the notification
+</span><span class="c1"></span>	<span class="c1">// we will catch it, **the offending item will be skipped!**, and after a short delay (one second)
+</span><span class="c1"></span>	<span class="c1">// the next notification will be attempted.  This is usually better than the alternative of never
+</span><span class="c1"></span>	<span class="c1">// delivering again.
+</span><span class="c1"></span>	<span class="nx">stopCh</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+	<span class="nx">wait</span><span class="p">.</span><span class="nf">Until</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="c1">// this gives us a few quick retries before a long pause and then a few more quick retries
+</span><span class="c1"></span>		<span class="nx">err</span> <span class="o">:=</span> <span class="nx">wait</span><span class="p">.</span><span class="nf">ExponentialBackoff</span><span class="p">(</span><span class="nx">retry</span><span class="p">.</span><span class="nx">DefaultRetry</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="p">(</span><span class="kt">bool</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">for</span> <span class="nx">next</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">p</span><span class="p">.</span><span class="nx">nextCh</span> <span class="p">{</span>
+				<span class="k">switch</span> <span class="nx">notification</span> <span class="o">:=</span> <span class="nx">next</span><span class="p">.(</span><span class="kd">type</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">case</span> <span class="nx">updateNotification</span><span class="p">:</span>
+					<span class="nx">p</span><span class="p">.</span><span class="nx">handler</span><span class="p">.</span><span class="nf">OnUpdate</span><span class="p">(</span><span class="nx">notification</span><span class="p">.</span><span class="nx">oldObj</span><span class="p">,</span> <span class="nx">notification</span><span class="p">.</span><span class="nx">newObj</span><span class="p">)</span>
+				<span class="k">case</span> <span class="nx">addNotification</span><span class="p">:</span>
+					<span class="nx">p</span><span class="p">.</span><span class="nx">handler</span><span class="p">.</span><span class="nf">OnAdd</span><span class="p">(</span><span class="nx">notification</span><span class="p">.</span><span class="nx">newObj</span><span class="p">)</span>
+				<span class="k">case</span> <span class="nx">deleteNotification</span><span class="p">:</span>
+					<span class="nx">p</span><span class="p">.</span><span class="nx">handler</span><span class="p">.</span><span class="nf">OnDelete</span><span class="p">(</span><span class="nx">notification</span><span class="p">.</span><span class="nx">oldObj</span><span class="p">)</span>
+				<span class="k">default</span><span class="p">:</span>
+					<span class="nx">utilruntime</span><span class="p">.</span><span class="nf">HandleError</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;unrecognized notification: %T&#34;</span><span class="p">,</span> <span class="nx">next</span><span class="p">))</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+			<span class="c1">// the only way to get here is if the p.nextCh is empty and closed
+</span><span class="c1"></span>			<span class="k">return</span> <span class="kc">true</span><span class="p">,</span> <span class="kc">nil</span>
+		<span class="p">})</span>
+
+		<span class="c1">// the only way to get here is if the p.nextCh is empty and closed
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nb">close</span><span class="p">(</span><span class="nx">stopCh</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">},</span> <span class="mi">1</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Minute</span><span class="p">,</span> <span class="nx">stopCh</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>You can see that <code>listener.run</code> keeps getting events from the <code>nextCh</code> channel, but where do the events in the <code>nextCh</code> channel come from? It is the responsibility of <code>listener.pop</code> to put the events in <code>nextCh</code>.</p>
+<p><code>listener.pop</code> is a very clever and interesting piece of logic.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">processorListener</span><span class="p">)</span> <span class="nf">pop</span><span class="p">()</span> <span class="p">{</span>
+	<span class="k">defer</span> <span class="nx">utilruntime</span><span class="p">.</span><span class="nf">HandleCrash</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">p</span><span class="p">.</span><span class="nx">nextCh</span><span class="p">)</span> <span class="c1">// Tell .run() to stop
+</span><span class="c1"></span>
+	<span class="kd">var</span> <span class="nx">nextCh</span> <span class="kd">chan</span><span class="o">&lt;-</span> <span class="kd">interface</span><span class="p">{}</span>
+	<span class="kd">var</span> <span class="nx">notification</span> <span class="kd">interface</span><span class="p">{}</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">select</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="nx">nextCh</span> <span class="o">&lt;-</span> <span class="nx">notification</span><span class="p">:</span>
+			<span class="c1">// Notification dispatched
+</span><span class="c1"></span>			<span class="kd">var</span> <span class="nx">ok</span> <span class="kt">bool</span>
+			<span class="nx">notification</span><span class="p">,</span> <span class="nx">ok</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">pendingNotifications</span><span class="p">.</span><span class="nf">ReadOne</span><span class="p">()</span>
+			<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span> <span class="c1">// Nothing to pop
+</span><span class="c1"></span>				<span class="nx">nextCh</span> <span class="p">=</span> <span class="kc">nil</span> <span class="c1">// Disable this select case
+</span><span class="c1"></span>			<span class="p">}</span>
+		<span class="k">case</span> <span class="nx">notificationToAdd</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">p</span><span class="p">.</span><span class="nx">addCh</span><span class="p">:</span>
+			<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+				<span class="k">return</span>
+			<span class="p">}</span>
+			<span class="k">if</span> <span class="nx">notification</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span> <span class="c1">// No notification to pop (and pendingNotifications is empty)
+</span><span class="c1"></span>				<span class="c1">// Optimize the case - skip adding to pendingNotifications
+</span><span class="c1"></span>				<span class="nx">notification</span> <span class="p">=</span> <span class="nx">notificationToAdd</span>
+				<span class="nx">nextCh</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">nextCh</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span> <span class="c1">// There is already a notification waiting to be dispatched
+</span><span class="c1"></span>				<span class="nx">p</span><span class="p">.</span><span class="nx">pendingNotifications</span><span class="p">.</span><span class="nf">WriteOne</span><span class="p">(</span><span class="nx">notificationToAdd</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The reason why <code>listener</code> contains two channels: <code>addCh</code> and <code>nextCh</code> is that Informer cannot predict whether <code>listener.handler</code> is consuming events faster than they can be produced, so it adds a buffer called <code>pendingNotifications</code>. queue to hold events that have not been consumed in time.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/f8fd5a025a42434e8ed3ec5777f4b44b.png" alt="pendingNotifications"></p>
+<p>The <code>pop</code> method, on the one hand, keeps getting the latest events from <code>addCh</code> to make sure the producer doesn&rsquo;t block. Then it determines if a buffer exists, and if it does, it adds the event to the buffer, and if not, it tries to push it to <code>nextCh</code>.</p>
+<p>On the other hand, it determines if there are any events left in the buffer, and if there is still stock, it keeps passing it to <code>nextCh</code>.</p>
+<p>The <code>pop</code> method implements a distribution mechanism with a buffer that allows events to be continuously passed from <code>addCh</code> to <code>nextCh</code>. But the question arises, where do the <code>addCh</code> events come from?</p>
+<p>The source is very simple, <code>listener</code> has an <code>add</code> method with an event as input, which pushes the new event into <code>addCh</code>. The <code>add</code> method is called by the <code>sharedProcessor</code> that manages all the <code>listener</code>s.</p>
+<p>As mentioned above, the <code>sharedProcessor</code> is responsible for managing all the Handlers and distributing events, but it is the <code>distribute</code> method that does the real distributing.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">sharedProcessor</span><span class="p">)</span> <span class="nf">distribute</span><span class="p">(</span><span class="nx">obj</span> <span class="kd">interface</span><span class="p">{},</span> <span class="nx">sync</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">p</span><span class="p">.</span><span class="nx">listenersLock</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">p</span><span class="p">.</span><span class="nx">listenersLock</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+
+	<span class="k">if</span> <span class="nx">sync</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">listener</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">p</span><span class="p">.</span><span class="nx">syncingListeners</span> <span class="p">{</span>
+			<span class="nx">listener</span><span class="p">.</span><span class="nf">add</span><span class="p">(</span><span class="nx">obj</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">listener</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">p</span><span class="p">.</span><span class="nx">listeners</span> <span class="p">{</span>
+			<span class="nx">listener</span><span class="p">.</span><span class="nf">add</span><span class="p">(</span><span class="nx">obj</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>So far, we have a clearer picture of one part:</p>
+<ol>
+<li>the Controller registers the Handler with the Informer.</li>
+<li>Informer maintains all Handlers (listener) through <code>sharedProcessor</code>.</li>
+<li>Informer receives the event and distributes it through <code>sharedProcessor.distribute</code>.</li>
+<li>the Controller is triggered by the corresponding Handler to handle its own logic</li>
+</ol>
+<p>So the remaining question is where do the Informer events come from?</p>
+<h3 id="deltafifo">DeltaFIFO</h3>
+<p>Before analyzing the Informer fetch event, a very interesting gadget that needs to be told in advance is the <code>fifo</code> queue created during <code>sharedIndexInformer.Run</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">fifo</span> <span class="o">:=</span> <span class="nf">NewDeltaFIFO</span><span class="p">(</span><span class="nx">MetaNamespaceKeyFunc</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">indexer</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>DeltaFIFO is a very interesting queue, the code for which is defined in <code>client-go/tools/cache/delta_fifo.go</code>. The most important thing for a queue is definitely the Add and Pop methods. DeltaFIFO provides several Add methods, and although different methods are distinguished according to different event types (add/update/delete/sync), they all end up executing <code>queueActionLocked</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// queueActionLocked appends to the delta list for the object.
+</span><span class="c1">// Caller must lock first.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">f</span> <span class="o">*</span><span class="nx">DeltaFIFO</span><span class="p">)</span> <span class="nf">queueActionLocked</span><span class="p">(</span><span class="nx">actionType</span> <span class="nx">DeltaType</span><span class="p">,</span> <span class="nx">obj</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">id</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">f</span><span class="p">.</span><span class="nf">KeyOf</span><span class="p">(</span><span class="nx">obj</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">KeyError</span><span class="p">{</span><span class="nx">obj</span><span class="p">,</span> <span class="nx">err</span><span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="c1">// If object is supposed to be deleted (last event is Deleted),
+</span><span class="c1"></span>	<span class="c1">// then we should ignore Sync events, because it would result in
+</span><span class="c1"></span>	<span class="c1">// recreation of this object.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">actionType</span> <span class="o">==</span> <span class="nx">Sync</span> <span class="o">&amp;&amp;</span> <span class="nx">f</span><span class="p">.</span><span class="nf">willObjectBeDeletedLocked</span><span class="p">(</span><span class="nx">id</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+
+	<span class="nx">newDeltas</span> <span class="o">:=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">f</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">id</span><span class="p">],</span> <span class="nx">Delta</span><span class="p">{</span><span class="nx">actionType</span><span class="p">,</span> <span class="nx">obj</span><span class="p">})</span>
+	<span class="nx">newDeltas</span> <span class="p">=</span> <span class="nf">dedupDeltas</span><span class="p">(</span><span class="nx">newDeltas</span><span class="p">)</span>
+
+	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">newDeltas</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">exists</span> <span class="o">:=</span> <span class="nx">f</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">id</span><span class="p">];</span> <span class="p">!</span><span class="nx">exists</span> <span class="p">{</span>
+			<span class="nx">f</span><span class="p">.</span><span class="nx">queue</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">f</span><span class="p">.</span><span class="nx">queue</span><span class="p">,</span> <span class="nx">id</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">f</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">id</span><span class="p">]</span> <span class="p">=</span> <span class="nx">newDeltas</span>
+		<span class="nx">f</span><span class="p">.</span><span class="nx">cond</span><span class="p">.</span><span class="nf">Broadcast</span><span class="p">()</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="c1">// We need to remove this from our map (extra items in the queue are
+</span><span class="c1"></span>		<span class="c1">// ignored if they are not in the map).
+</span><span class="c1"></span>		<span class="nb">delete</span><span class="p">(</span><span class="nx">f</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">id</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The first parameter of the <code>queueActionLocked</code> method, actionType, is the event type.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="p">(</span>
+	<span class="nx">Added</span>   <span class="nx">DeltaType</span> <span class="p">=</span> <span class="s">&#34;Added&#34;</span>   <span class="c1">// watch api 获得的创建事件
+</span><span class="c1"></span>	<span class="nx">Updated</span> <span class="nx">DeltaType</span> <span class="p">=</span> <span class="s">&#34;Updated&#34;</span> <span class="c1">// watch api 获得的更新事件
+</span><span class="c1"></span>	<span class="nx">Deleted</span> <span class="nx">DeltaType</span> <span class="p">=</span> <span class="s">&#34;Deleted&#34;</span> <span class="c1">// watch api 获得的删除事件
+</span><span class="c1"></span>	<span class="nx">Sync</span> <span class="nx">DeltaType</span> <span class="p">=</span> <span class="s">&#34;Sync&#34;</span>       <span class="c1">// 触发了 List Api，需要刷新缓存
+</span><span class="c1"></span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The event type and the incoming queue method show that this is a queue with business functions, not just &ldquo;first in, first out&rdquo;, and there are two very clever designs in the incoming queue method.</p>
+<ol>
+<li>the events in the queue will first determine if there are unconsumed events for the resource, and then handle them appropriately.</li>
+<li>if the list method finds that the resource has already been deleted, it will not be processed.</li>
+</ol>
+<p>The second point is easier to understand, if a list request is triggered and the resource to be processed is found to have been deleted, then it does not need to be queued again. The first point needs to be seen together with the out of queue method.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">f</span> <span class="o">*</span><span class="nx">DeltaFIFO</span><span class="p">)</span> <span class="nf">Pop</span><span class="p">(</span><span class="nx">process</span> <span class="nx">PopProcessFunc</span><span class="p">)</span> <span class="p">(</span><span class="kd">interface</span><span class="p">{},</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">f</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">f</span><span class="p">.</span><span class="nx">lock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="nb">len</span><span class="p">(</span><span class="nx">f</span><span class="p">.</span><span class="nx">queue</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="c1">// When the queue is empty, invocation of Pop() is blocked until new item is enqueued.
+</span><span class="c1"></span>			<span class="c1">// When Close() is called, the f.closed is set and the condition is broadcasted.
+</span><span class="c1"></span>			<span class="c1">// Which causes this loop to continue and return from the Pop().
+</span><span class="c1"></span>			<span class="k">if</span> <span class="nx">f</span><span class="p">.</span><span class="nf">IsClosed</span><span class="p">()</span> <span class="p">{</span>
+				<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">ErrFIFOClosed</span>
+			<span class="p">}</span>
+
+			<span class="nx">f</span><span class="p">.</span><span class="nx">cond</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nx">id</span> <span class="o">:=</span> <span class="nx">f</span><span class="p">.</span><span class="nx">queue</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+		<span class="nx">f</span><span class="p">.</span><span class="nx">queue</span> <span class="p">=</span> <span class="nx">f</span><span class="p">.</span><span class="nx">queue</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+		<span class="k">if</span> <span class="nx">f</span><span class="p">.</span><span class="nx">initialPopulationCount</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">f</span><span class="p">.</span><span class="nx">initialPopulationCount</span><span class="o">--</span>
+		<span class="p">}</span>
+		<span class="nx">item</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">f</span><span class="p">.</span><span class="nx">items</span><span class="p">[</span><span class="nx">id</span><span class="p">]</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+			<span class="c1">// Item may have been deleted subsequently.
+</span><span class="c1"></span>			<span class="k">continue</span>
+		<span class="p">}</span>
+		<span class="nb">delete</span><span class="p">(</span><span class="nx">f</span><span class="p">.</span><span class="nx">items</span><span class="p">,</span> <span class="nx">id</span><span class="p">)</span>
+		<span class="nx">err</span> <span class="o">:=</span> <span class="nf">process</span><span class="p">(</span><span class="nx">item</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">err</span><span class="p">.(</span><span class="nx">ErrRequeue</span><span class="p">);</span> <span class="nx">ok</span> <span class="p">{</span>
+			<span class="nx">f</span><span class="p">.</span><span class="nf">addIfNotPresent</span><span class="p">(</span><span class="nx">id</span><span class="p">,</span> <span class="nx">item</span><span class="p">)</span>
+			<span class="nx">err</span> <span class="p">=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">Err</span>
+		<span class="p">}</span>
+		<span class="c1">// Don&#39;t need to copyDeltas here, because we&#39;re transferring
+</span><span class="c1"></span>		<span class="c1">// ownership to the caller.
+</span><span class="c1"></span>		<span class="k">return</span> <span class="nx">item</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>DeltaFIFO&rsquo;s <code>Pop</code> method has one input, which is the handler function. When it comes out of the queue, DeltaFIFO will first get the resource <strong>all events</strong> according to the resource id, and then hand it over to the handler function.</p>
+<p>The workflow is shown in the figure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/b35bbd0c56754bfab018d57a1fdbcf19.png" alt="workflow"></p>
+<p>In general, DeltaFIFO&rsquo;s queue method first determines if the resource is already in <code>items</code>, and if it is, the resource is not yet consumed (still queued), so it appends the event directly to <code>items[resource_id]</code>. If it is not in <code>items</code>, then <code>items[resource_id]</code> is created and the resource id is appended to <code>queue</code>.</p>
+<p>The DeltaFIFO out-of-queue method gets the resource id at the top of the queue from <code>queue</code>, then takes all the events for that resource from <code>items</code>, and finally calls the <code>PopProcessFunc</code> type handler passed in by the <code>Pop</code> method.</p>
+<p>So, the feature of DeltaFIFO is that it is the events (of the resource) that are in the queue, and when it comes out of the queue, it gets all the events of the first resource in the queue. This design ensures that there is no starvation due to a resource creating events like crazy, so that other resources do not have the chance to be processed.</p>
+<h3 id="controller">controller</h3>
+<p>DeltaFIFO is a very important component, and the only thing that really makes it valuable is the Informer <code>controller</code>.</p>
+<p>While the K8s source code does use the word <code>controller</code>, this <code>controller</code> is not a resource controller like a Deployment Controller. Rather, it is a top-down event controller (taking events from the API Server and sending them down to the Informer for processing).</p>
+<p>The responsibilities of the <code>controller</code> are twofold.</p>
+<ol>
+<li>get events from the Api Server via List-Watch and push the events into DeltaFIFO</li>
+<li>call the Pop method of DeltaFIFO with the <code>HandleDeltas</code> method of the <code>sharedIndexInformer</code> as an argument</li>
+</ol>
+<p>The definition of <code>controller</code> is very simple and its core is <code>Reflector</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">controller</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">config</span>         <span class="nx">Config</span>
+	<span class="nx">reflector</span>      <span class="o">*</span><span class="nx">Reflector</span>
+	<span class="nx">reflectorMutex</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
+	<span class="nx">clock</span>          <span class="nx">clock</span><span class="p">.</span><span class="nx">Clock</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The code of <code>Reflector</code> is rather cumbersome but simple, it is to list-watch through the <code>listerWatcher</code> defined in sharedIndexInformer and push the obtained events into the DeltaFIFO.</p>
+<p>After the controller starts, it starts the Reflector and then executes the processLoop, which is a dead loop that keeps reading the resource events from the DeltaFIFO and handing them to the HandleDeltas method of the sharedIndexInformer (assigned to config. Process).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">controller</span><span class="p">)</span> <span class="nf">processLoop</span><span class="p">()</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">obj</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">config</span><span class="p">.</span><span class="nx">Queue</span><span class="p">.</span><span class="nf">Pop</span><span class="p">(</span><span class="nf">PopProcessFunc</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">config</span><span class="p">.</span><span class="nx">Process</span><span class="p">))</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="nx">ErrFIFOClosed</span> <span class="p">{</span>
+				<span class="k">return</span>
+			<span class="p">}</span>
+			<span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">config</span><span class="p">.</span><span class="nx">RetryOnError</span> <span class="p">{</span>
+				<span class="c1">// This is the safe way to re-enqueue.
+</span><span class="c1"></span>				<span class="nx">c</span><span class="p">.</span><span class="nx">config</span><span class="p">.</span><span class="nx">Queue</span><span class="p">.</span><span class="nf">AddIfNotPresent</span><span class="p">(</span><span class="nx">obj</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If we look at the HandleDeltas method of the sharedIndexInformer, we can see that the whole event consumption process works.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">sharedIndexInformer</span><span class="p">)</span> <span class="nf">HandleDeltas</span><span class="p">(</span><span class="nx">obj</span> <span class="kd">interface</span><span class="p">{})</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">blockDeltas</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">s</span><span class="p">.</span><span class="nx">blockDeltas</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+	<span class="c1">// from oldest to newest
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">d</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">obj</span><span class="p">.(</span><span class="nx">Deltas</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">switch</span> <span class="nx">d</span><span class="p">.</span><span class="nx">Type</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="nx">Sync</span><span class="p">,</span> <span class="nx">Added</span><span class="p">,</span> <span class="nx">Updated</span><span class="p">:</span>
+			<span class="nx">isSync</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nx">Type</span> <span class="o">==</span> <span class="nx">Sync</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">cacheMutationDetector</span><span class="p">.</span><span class="nf">AddObject</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">Object</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">old</span><span class="p">,</span> <span class="nx">exists</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">indexer</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">Object</span><span class="p">);</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">exists</span> <span class="p">{</span>
+				<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">indexer</span><span class="p">.</span><span class="nf">Update</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">Object</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+					<span class="k">return</span> <span class="nx">err</span>
+				<span class="p">}</span>
+				<span class="nx">s</span><span class="p">.</span><span class="nx">processor</span><span class="p">.</span><span class="nf">distribute</span><span class="p">(</span><span class="nx">updateNotification</span><span class="p">{</span><span class="nx">oldObj</span><span class="p">:</span> <span class="nx">old</span><span class="p">,</span> <span class="nx">newObj</span><span class="p">:</span> <span class="nx">d</span><span class="p">.</span><span class="nx">Object</span><span class="p">},</span> <span class="nx">isSync</span><span class="p">)</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">indexer</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">Object</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+					<span class="k">return</span> <span class="nx">err</span>
+				<span class="p">}</span>
+				<span class="nx">s</span><span class="p">.</span><span class="nx">processor</span><span class="p">.</span><span class="nf">distribute</span><span class="p">(</span><span class="nx">addNotification</span><span class="p">{</span><span class="nx">newObj</span><span class="p">:</span> <span class="nx">d</span><span class="p">.</span><span class="nx">Object</span><span class="p">},</span> <span class="nx">isSync</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="k">case</span> <span class="nx">Deleted</span><span class="p">:</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">indexer</span><span class="p">.</span><span class="nf">Delete</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">Object</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="k">return</span> <span class="nx">err</span>
+			<span class="p">}</span>
+			<span class="nx">s</span><span class="p">.</span><span class="nx">processor</span><span class="p">.</span><span class="nf">distribute</span><span class="p">(</span><span class="nx">deleteNotification</span><span class="p">{</span><span class="nx">oldObj</span><span class="p">:</span> <span class="nx">d</span><span class="p">.</span><span class="nx">Object</span><span class="p">},</span> <span class="kc">false</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We learned earlier that the <code>processor.attribute</code> method distributes events to all <code>listeners</code>, and the <code>controller</code> uses the <code>Reflector</code> to get the events from the ApiServer and put them in the queue, then takes the events from the queue via the <code>processLoop</code> for the resource to be processed, and finally calls the <code>processor.attribute</code> via the <code>HandleDeltas</code> method of the <code>sharedIndexInformer</code>. All events, and finally the <code>processor.attribute</code> is called via the <code>HandleDeltas</code> method of the <code>sharedIndexInformer</code>.</p>
+<p>Thus, we can organize the entire flow of events as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/d0d666a6dfc0401fbf95b7eaafaec788.png" alt="flow of events"></p>
+<h3 id="indexer">Indexer</h3>
+<p>Above, we have sorted out all the logic from receiving to distributing events, but in the HandleDeltas method of sharedIndexInformer, there is some logic that is more interesting, that is, all events are updated to <code>s.indexer</code> first and then distributed.</p>
+<p>As mentioned earlier, the Indexer is a thread-safe store, used as a cache in order to relieve the pressure on the ApiServer when the resource controller (Controller) queries the resource.</p>
+<p>When there is any event update, the cache in Indexer will be refreshed first, and then the event will be distributed to the resource controller, who will get the resource details from Indexer first, thus reducing unnecessary query requests to the APIServer.</p>
+<p>The specific implementation of Indexer storage is in client-go/tools/cache/thread_safe_store.go, and the data is stored in <code>threadSafeMap</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">threadSafeMap</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">lock</span>  <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
+	<span class="nx">items</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}</span>
+
+	<span class="c1">// indexers maps a name to an IndexFunc
+</span><span class="c1"></span>	<span class="nx">indexers</span> <span class="nx">Indexers</span>
+	<span class="c1">// indices maps a name to an Index
+</span><span class="c1"></span>	<span class="nx">indices</span> <span class="nx">Indices</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In essence, <code>threadSafeMap</code> is a map with a read/write lock, in addition to which it is possible to define indexes, which are interestingly implemented by two fields.</p>
+<ol>
+<li><code>Indexers</code> is a map that defines a number of indexing functions, key is indexName and value is the indexing function (which calculates the index value of the resource).</li>
+<li><code>Indices</code> holds the mapping between index values and data keys, <code>Indices</code> is a two-level map, the key of the first level is indexName, which corresponds to <code>Indexers</code> and determines what method is used to calculate the index value, and value is a map that holds the association &ldquo;index value - resource key&rdquo; association.</li>
+</ol>
+<p>The relevant logic is relatively simple and can be found in the following diagram.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/2cde3f5595e8485fb09a7bc0844bd4b5.png" alt="relevant logic is relatively simple"></p>
+<h3 id="mutationdetector">MutationDetector</h3>
+<p>The <code>HandleDeltas</code> method of the <code>sharedIndexInformer</code> updates data to the <code>s.indexer</code> in addition to the <code>s.cacheMutationDetector</code>.</p>
+<p>As mentioned at the beginning, when <code>sharedIndexInformer</code> starts, it also starts a <code>cacheMutationDetector</code> to monitor the indexer&rsquo;s cache.</p>
+<p>Because the indexer cache is actually a pointer, multiple Controllers accessing the indexer&rsquo;s cached resources actually get the same resource instance. If one Controller does not play nice and modifies the properties of a resource, it will definitely affect the correctness of other Controllers.</p>
+<p>When the Informer receives a new event, the MutationDetector saves a pointer to the resource (as does the indexer) and a deep copy of the resource. By periodically checking whether the resource pointed to by the pointer matches the deep copy stored at the beginning, we know whether the cached resource has been modified.</p>
+<p>However, whether monitoring is enabled or not is affected by the environment variable <code>KUBE_CACHE_MUTATION_DETECTOR</code>. If this environment variable is not set, sharedIndexInformer instantiates <code>dummyMutationDetector</code> and does nothing after startup.</p>
+<p>If <code>KUBE_CACHE_MUTATION_DETECTOR</code> is true, sharedIndexInformer instantiates <code>defaultCacheMutationDetector</code>, which performs periodic checks of the cache at 1s intervals, triggering a failure handler function if it finds the cache modified, or a panic if the function is not defined.</p>
+<h2 id="summary">Summary</h2>
+<p>This article explains the Controller Manager in a narrow sense, as it does not include a specific resource manager (Controller), but only explains how the Controller Manager &ldquo;Manages Controller&rdquo;.</p>
+<p>You can see that the Controller Manager does a lot of work to ensure that the Controller can focus only on the events it cares about, and the core of this work is the Informer. When you understand how the Informer works with other components, it becomes clear what the Controller Manager paves the way for the Resource Manager.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/kubernetes/">kubernetes</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/deployment-controller-workflow/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Deployment Controller Workflow</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/k8s-container-native-argo/">
+            <span class="next-text nav-default">Kubernetes container-native workflow engine: Argo</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

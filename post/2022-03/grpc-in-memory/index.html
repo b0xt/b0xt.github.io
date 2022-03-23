@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Memory-based communication for gRPC calls - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Apache Dubbo has the injvm method of communication, which can avoid the latency caused by the network, and also does not occupy the local port, which is a more convenient way of RPC communication for testing and local verification. I recently saw containerd&amp;rsquo;s code and found that it has similar requirements. But using ip port communication, there may be port conflict; using unix socket, there may be path conflict. I" /><meta name="keywords" content="grpc, Memory" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/grpc-in-memory/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Memory-based communication for gRPC calls" />
+<meta property="og:description" content="Apache Dubbo has the injvm method of communication, which can avoid the latency caused by the network, and also does not occupy the local port, which is a more convenient way of RPC communication for testing and local verification. I recently saw containerd&rsquo;s code and found that it has similar requirements. But using ip port communication, there may be port conflict; using unix socket, there may be path conflict. I" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/grpc-in-memory/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-06T16:16:22+08:00" />
+<meta property="article:modified_time" content="2022-03-06T16:16:22+08:00" />
+
+<meta itemprop="name" content="Memory-based communication for gRPC calls">
+<meta itemprop="description" content="Apache Dubbo has the injvm method of communication, which can avoid the latency caused by the network, and also does not occupy the local port, which is a more convenient way of RPC communication for testing and local verification. I recently saw containerd&rsquo;s code and found that it has similar requirements. But using ip port communication, there may be port conflict; using unix socket, there may be path conflict. I"><meta itemprop="datePublished" content="2022-03-06T16:16:22+08:00" />
+<meta itemprop="dateModified" content="2022-03-06T16:16:22+08:00" />
+<meta itemprop="wordCount" content="2312">
+<meta itemprop="keywords" content="grpc," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Memory-based communication for gRPC calls"/>
+<meta name="twitter:description" content="Apache Dubbo has the injvm method of communication, which can avoid the latency caused by the network, and also does not occupy the local port, which is a more convenient way of RPC communication for testing and local verification. I recently saw containerd&rsquo;s code and found that it has similar requirements. But using ip port communication, there may be port conflict; using unix socket, there may be path conflict. I"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Memory-based communication for gRPC calls</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-06 16:16:22 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2312 words </span>
+          <span class="more-meta"> 5 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#golanggrpc-abstraction-of-the-network">Golang/gRPC abstraction of the network</a>
+          <ul>
+            <li><a href="#1-os-system-abstraction">1. OS system abstraction</a></li>
+            <li><a href="#2-golang-abstraction">2. Golang abstraction</a></li>
+            <li><a href="#3-grpc-usage">3. gRPC Usage</a></li>
+          </ul>
+        </li>
+        <li><a href="#what-is-a-pipe">What is a pipe</a></li>
+        <li><a href="#how-to-use-pipe-as-a-connection-for-grpc">How to use pipe as a connection for gRPC</a></li>
+        <li><a href="#summarize">Summarize</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Apache Dubbo has the injvm method of communication, which can avoid the latency caused by the network, and also does not occupy the local port, which is a more convenient way of RPC communication for testing and local verification.</p>
+<p>I recently saw containerd&rsquo;s code and found that it has similar requirements.
+But using ip port communication, there may be port conflict; using unix socket, there may be path conflict.
+I looked into whether gRPC has a memory-based communication method similar to injvm. Then I found that pipe works very well, so I recorded it.</p>
+<h2 id="golanggrpc-abstraction-of-the-network">Golang/gRPC abstraction of the network</h2>
+<p>First, let&rsquo;s look at the architecture diagram for a single call to gRPC. Of course, this architecture diagram is currently focused only on the network abstraction distribution.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/06/61178cb3d7734773acfb4d69fc16abe2.png" alt="Golang/gRPC abstraction of the network"></p>
+<p>We focus on the socket part.</p>
+<h3 id="1-os-system-abstraction">1. OS system abstraction</h3>
+<p>First, on top of the network packet, the system abstracts out <a href="https://linux.die.net/man/2/socket">socket</a>, representing a virtual connection, which is unreliable for UDP and as reliable as it can be for TCP.</p>
+<p>For network programming, it is not enough to have a connection, but also to tell the developer how to create and close it.
+<strong>For server side</strong> , the system provides <a href="https://linux.die.net/man/2/accept"><code>accept</code> method</a> to receive connections.
+<strong>For the client</strong> , the system provides the <a href="https://linux.die.net/man/2/connect"><code>connect</code> method</a>, which is used to establish a connection with the server.</p>
+<h3 id="2-golang-abstraction">2. Golang abstraction</h3>
+<p>In Golang, the concept of socket peer is called <a href="https://pkg.go.dev/net#Conn"><code>net.Conn</code></a>, which represents a virtual connection.</p>
+<p>Next, for the server side, the act of accept is wrapped in the <a href="https://pkg.go.dev/net#Listener"><code>net.Listener</code> interface</a>; for the client side, Golang provides the <a href="https://pkg.go.dev/net#Dial"><code>net.Dial</code> method</a> based on connect.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Listener</span> <span class="kd">interface</span> <span class="p">{</span>
+  <span class="c1">// 接收来自客户端的网络连接
+</span><span class="c1"></span>  <span class="nf">Accept</span><span class="p">()</span> <span class="p">(</span><span class="nx">Conn</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span>
+  <span class="nf">Close</span><span class="p">()</span> <span class="kt">error</span>
+  <span class="nf">Addr</span><span class="p">()</span> <span class="nx">Addr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="3-grpc-usage">3. gRPC Usage</h3>
+<p>So how does gRPC use Listener and Dial?</p>
+<p>For the gRPC server, the <a href="https://pkg.go.dev/google.golang.org/grpc@v1.41.0#Server.Serve"><code>Serve</code> method</a> receives a Listener, indicating that the service is available on that Listener.</p>
+<p>For the gRPC client, the network is essentially just something that can connect to somewhere, so all that is needed is a <code>dialer func(context.Context, string) (net.Conn, error)</code> function.</p>
+<h2 id="what-is-a-pipe">What is a pipe</h2>
+<p>At the operating system level, <a href="https://linux.die.net/man/2/pipe"><code>pipe</code></a> represents a data pipe that is on both ends of this program and can be a good fit for our requirements: memory-based network communication.</p>
+<p>Golang also provides <a href="https://pkg.go.dev/net#Pipe"><code>net.Pipe()</code> function</a> based on pipe to create a bi-directional, memory-based communication pipe that, in terms of capability, can meet gRPC&rsquo;s requirements for the underlying communication very well.</p>
+<p>However, <code>net.Pipe</code> only generates two <code>net.Conn</code>s, i.e. only two network connections, no Listner as mentioned before, and no Dial method.</p>
+<p>So in combination with Golang&rsquo;s channel, <code>net.Pipe</code> is packaged as Listner and also provides Dial methods.</p>
+<ol>
+<li><code>Listener.Accept()</code>, just listen to a channel, when the client connects, the connection can be passed through the channel</li>
+<li><code>Dial method</code>, call Pipe, give one end to the server through the channel (as the server connection), and the other end as the client connection</li>
+</ol>
+<p>The code is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span><span class="lnt">83
+</span><span class="lnt">84
+</span><span class="lnt">85
+</span><span class="lnt">86
+</span><span class="lnt">87
+</span><span class="lnt">88
+</span><span class="lnt">89
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+  <span class="s">&#34;context&#34;</span>
+  <span class="s">&#34;errors&#34;</span>
+  <span class="s">&#34;net&#34;</span>
+  <span class="s">&#34;sync&#34;</span>
+  <span class="s">&#34;sync/atomic&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">var</span> <span class="nx">ErrPipeListenerClosed</span> <span class="p">=</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">`pipe listener already closed`</span><span class="p">)</span>
+
+<span class="kd">type</span> <span class="nx">PipeListener</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="nx">ch</span>    <span class="kd">chan</span> <span class="nx">net</span><span class="p">.</span><span class="nx">Conn</span>
+  <span class="nx">close</span> <span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}</span>
+  <span class="nx">done</span>  <span class="kt">uint32</span>
+  <span class="nx">m</span>     <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">ListenPipe</span><span class="p">()</span> <span class="o">*</span><span class="nx">PipeListener</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="o">&amp;</span><span class="nx">PipeListener</span><span class="p">{</span>
+    <span class="nx">ch</span><span class="p">:</span>    <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">net</span><span class="p">.</span><span class="nx">Conn</span><span class="p">),</span>
+    <span class="nx">close</span><span class="p">:</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}),</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// Accept 等待客户端连接
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">l</span> <span class="o">*</span><span class="nx">PipeListener</span><span class="p">)</span> <span class="nf">Accept</span><span class="p">()</span> <span class="p">(</span><span class="nx">c</span> <span class="nx">net</span><span class="p">.</span><span class="nx">Conn</span><span class="p">,</span> <span class="nx">e</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+  <span class="k">select</span> <span class="p">{</span>
+  <span class="k">case</span> <span class="nx">c</span> <span class="p">=</span> <span class="o">&lt;-</span><span class="nx">l</span><span class="p">.</span><span class="nx">ch</span><span class="p">:</span>
+  <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">l</span><span class="p">.</span><span class="nx">close</span><span class="p">:</span>
+    <span class="nx">e</span> <span class="p">=</span> <span class="nx">ErrPipeListenerClosed</span>
+  <span class="p">}</span>
+  <span class="k">return</span>
+<span class="p">}</span>
+
+<span class="c1">// Close 关闭 listener.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">l</span> <span class="o">*</span><span class="nx">PipeListener</span><span class="p">)</span> <span class="nf">Close</span><span class="p">()</span> <span class="p">(</span><span class="nx">e</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+  <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUint32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">done</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+    <span class="nx">l</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">l</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">l</span><span class="p">.</span><span class="nx">done</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+      <span class="k">defer</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">StoreUint32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">done</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+      <span class="nb">close</span><span class="p">(</span><span class="nx">l</span><span class="p">.</span><span class="nx">close</span><span class="p">)</span>
+      <span class="k">return</span>
+    <span class="p">}</span>
+  <span class="p">}</span>
+  <span class="nx">e</span> <span class="p">=</span> <span class="nx">ErrPipeListenerClosed</span>
+  <span class="k">return</span>
+<span class="p">}</span>
+
+<span class="c1">// Addr 返回 listener 的地址
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">l</span> <span class="o">*</span><span class="nx">PipeListener</span><span class="p">)</span> <span class="nf">Addr</span><span class="p">()</span> <span class="nx">net</span><span class="p">.</span><span class="nx">Addr</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="nf">pipeAddr</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">l</span> <span class="o">*</span><span class="nx">PipeListener</span><span class="p">)</span> <span class="nf">Dial</span><span class="p">(</span><span class="nx">network</span><span class="p">,</span> <span class="nx">addr</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">net</span><span class="p">.</span><span class="nx">Conn</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="nx">l</span><span class="p">.</span><span class="nf">DialContext</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">Background</span><span class="p">(),</span> <span class="nx">network</span><span class="p">,</span> <span class="nx">addr</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">l</span> <span class="o">*</span><span class="nx">PipeListener</span><span class="p">)</span> <span class="nf">DialContext</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">network</span><span class="p">,</span> <span class="nx">addr</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">conn</span> <span class="nx">net</span><span class="p">.</span><span class="nx">Conn</span><span class="p">,</span> <span class="nx">e</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+  <span class="c1">// PipeListener是否已经关闭
+</span><span class="c1"></span>  <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUint32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l</span><span class="p">.</span><span class="nx">done</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+    <span class="nx">e</span> <span class="p">=</span> <span class="nx">ErrPipeListenerClosed</span>
+    <span class="k">return</span>
+  <span class="p">}</span>
+
+  <span class="c1">// 创建pipe
+</span><span class="c1"></span>  <span class="nx">c0</span><span class="p">,</span> <span class="nx">c1</span> <span class="o">:=</span> <span class="nx">net</span><span class="p">.</span><span class="nf">Pipe</span><span class="p">()</span>
+  <span class="c1">// 等待连接传递到服务端接收
+</span><span class="c1"></span>  <span class="k">select</span> <span class="p">{</span>
+  <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
+    <span class="nx">e</span> <span class="p">=</span> <span class="nx">ctx</span><span class="p">.</span><span class="nf">Err</span><span class="p">()</span>
+  <span class="k">case</span> <span class="nx">l</span><span class="p">.</span><span class="nx">ch</span> <span class="o">&lt;-</span> <span class="nx">c0</span><span class="p">:</span>
+    <span class="nx">conn</span> <span class="p">=</span> <span class="nx">c1</span>
+  <span class="k">case</span> <span class="o">&lt;-</span><span class="nx">l</span><span class="p">.</span><span class="nx">close</span><span class="p">:</span>
+    <span class="nx">c0</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+    <span class="nx">c1</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+    <span class="nx">e</span> <span class="p">=</span> <span class="nx">ErrPipeListenerClosed</span>
+  <span class="p">}</span>
+  <span class="k">return</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">pipeAddr</span> <span class="kt">int</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">pipeAddr</span><span class="p">)</span> <span class="nf">Network</span><span class="p">()</span> <span class="kt">string</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="s">`pipe`</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">pipeAddr</span><span class="p">)</span> <span class="nf">String</span><span class="p">()</span> <span class="kt">string</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="s">`pipe`</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="how-to-use-pipe-as-a-connection-for-grpc">How to use pipe as a connection for gRPC</h2>
+<p>With the above wrapper, we can create a gRPC server-side and client-side based on this for memory-based RPC communication.</p>
+<p>First, we simply create a service that contains four invocations.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">syntax</span> <span class="p">=</span> <span class="s">&#34;proto3&#34;</span><span class="p">;</span>
+
+<span class="nx">option</span> <span class="nx">go_package</span> <span class="p">=</span> <span class="s">&#34;google.golang.org/grpc/examples/helloworld/helloworld&#34;</span><span class="p">;</span>
+<span class="nx">option</span> <span class="nx">java_multiple_files</span> <span class="p">=</span> <span class="kc">true</span><span class="p">;</span>
+<span class="nx">option</span> <span class="nx">java_package</span> <span class="p">=</span> <span class="s">&#34;io.grpc.examples.helloworld&#34;</span><span class="p">;</span>
+<span class="nx">option</span> <span class="nx">java_outer_classname</span> <span class="p">=</span> <span class="s">&#34;HelloWorldProto&#34;</span><span class="p">;</span>
+
+<span class="kn">package</span> <span class="nx">helloworld</span><span class="p">;</span>
+
+<span class="c1">// The greeting service definition.
+</span><span class="c1"></span><span class="nx">service</span> <span class="nx">Greeter</span> <span class="p">{</span>
+  <span class="c1">// unary调用
+</span><span class="c1"></span>  <span class="nx">rpc</span> <span class="nf">SayHello</span><span class="p">(</span><span class="nx">HelloRequest</span><span class="p">)</span> <span class="nf">returns</span> <span class="p">(</span><span class="nx">HelloReply</span><span class="p">)</span> <span class="p">{}</span>
+
+  <span class="c1">// 服务端流式调用
+</span><span class="c1"></span>  <span class="nx">rpc</span> <span class="nf">SayHelloReplyStream</span><span class="p">(</span><span class="nx">HelloRequest</span><span class="p">)</span> <span class="nf">returns</span> <span class="p">(</span><span class="nx">stream</span> <span class="nx">HelloReply</span><span class="p">);</span>
+
+  <span class="c1">// 客户端流式调用
+</span><span class="c1"></span>  <span class="nx">rpc</span> <span class="nf">SayHelloRequestStream</span><span class="p">(</span><span class="nx">stream</span> <span class="nx">HelloRequest</span><span class="p">)</span> <span class="nf">returns</span> <span class="p">(</span><span class="nx">HelloReply</span><span class="p">);</span>
+
+  <span class="c1">// 双向流式调用
+</span><span class="c1"></span>  <span class="nx">rpc</span> <span class="nf">SayHelloBiStream</span><span class="p">(</span><span class="nx">stream</span> <span class="nx">HelloRequest</span><span class="p">)</span> <span class="nf">returns</span> <span class="p">(</span><span class="nx">stream</span> <span class="nx">HelloReply</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="c1">// The request message containing the user&#39;s name.
+</span><span class="c1"></span><span class="nx">message</span> <span class="nx">HelloRequest</span> <span class="p">{</span>
+  <span class="kt">string</span> <span class="nx">name</span> <span class="p">=</span> <span class="mi">1</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="c1">// The response message containing the greetings
+</span><span class="c1"></span><span class="nx">message</span> <span class="nx">HelloReply</span> <span class="p">{</span>
+  <span class="kt">string</span> <span class="nx">message</span> <span class="p">=</span> <span class="mi">1</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Then generate the relevant stub code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">protoc --go_out<span class="o">=</span>. --go_opt<span class="o">=</span><span class="nv">paths</span><span class="o">=</span>source_relative <span class="se">\
+</span><span class="se"></span>  --go-grpc_out<span class="o">=</span>. --go-grpc_opt<span class="o">=</span><span class="nv">paths</span><span class="o">=</span>source_relative <span class="se">\
+</span><span class="se"></span>  helloworld/helloworld.proto
+</code></pre></td></tr></table>
+</div>
+</div><p>Then start writing the server-side code, the basic logic is to achieve a demo version of the server is good.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+  <span class="s">&#34;context&#34;</span>
+  <span class="s">&#34;log&#34;</span>
+
+  <span class="s">&#34;github.com/robberphex/grpc-in-memory/helloworld&#34;</span>
+  <span class="nx">pb</span> <span class="s">&#34;github.com/robberphex/grpc-in-memory/helloworld&#34;</span>
+<span class="p">)</span>
+
+<span class="c1">// helloworld.GreeterServer 的实现
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">server</span> <span class="kd">struct</span> <span class="p">{</span>
+  <span class="c1">// 为了后面代码兼容，必须聚合UnimplementedGreeterServer
+</span><span class="c1"></span>  <span class="c1">// 这样以后在proto文件中新增加一个方法的时候，这段代码至少不会报错
+</span><span class="c1"></span>  <span class="nx">pb</span><span class="p">.</span><span class="nx">UnimplementedGreeterServer</span>
+<span class="p">}</span>
+
+<span class="c1">// unary调用的服务端代码
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">server</span><span class="p">)</span> <span class="nf">SayHello</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">in</span> <span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloRequest</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloReply</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+  <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;Received: %v&#34;</span><span class="p">,</span> <span class="nx">in</span><span class="p">.</span><span class="nf">GetName</span><span class="p">())</span>
+  <span class="k">return</span> <span class="o">&amp;</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloReply</span><span class="p">{</span><span class="nx">Message</span><span class="p">:</span> <span class="s">&#34;Hello &#34;</span> <span class="o">+</span> <span class="nx">in</span><span class="p">.</span><span class="nf">GetName</span><span class="p">()},</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="c1">// 客户端流式调用的服务端代码
+</span><span class="c1">// 接收两个req，然后返回一个resp
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">server</span><span class="p">)</span> <span class="nf">SayHelloRequestStream</span><span class="p">(</span><span class="nx">streamServer</span> <span class="nx">pb</span><span class="p">.</span><span class="nx">Greeter_SayHelloRequestStreamServer</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+  <span class="nx">req</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">streamServer</span><span class="p">.</span><span class="nf">Recv</span><span class="p">()</span>
+  <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;error receiving: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">err</span>
+  <span class="p">}</span>
+  <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;Received: %v&#34;</span><span class="p">,</span> <span class="nx">req</span><span class="p">.</span><span class="nf">GetName</span><span class="p">())</span>
+  <span class="nx">req</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">streamServer</span><span class="p">.</span><span class="nf">Recv</span><span class="p">()</span>
+  <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;error receiving: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">err</span>
+  <span class="p">}</span>
+  <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;Received: %v&#34;</span><span class="p">,</span> <span class="nx">req</span><span class="p">.</span><span class="nf">GetName</span><span class="p">())</span>
+  <span class="nx">streamServer</span><span class="p">.</span><span class="nf">SendAndClose</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloReply</span><span class="p">{</span><span class="nx">Message</span><span class="p">:</span> <span class="s">&#34;Hello &#34;</span> <span class="o">+</span> <span class="nx">req</span><span class="p">.</span><span class="nf">GetName</span><span class="p">()})</span>
+  <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="c1">// 服务端流式调用的服务端代码
+</span><span class="c1">// 接收一个req，然后发送两个resp
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">server</span><span class="p">)</span> <span class="nf">SayHelloReplyStream</span><span class="p">(</span><span class="nx">req</span> <span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloRequest</span><span class="p">,</span> <span class="nx">streamServer</span> <span class="nx">pb</span><span class="p">.</span><span class="nx">Greeter_SayHelloReplyStreamServer</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+  <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;Received: %v&#34;</span><span class="p">,</span> <span class="nx">req</span><span class="p">.</span><span class="nf">GetName</span><span class="p">())</span>
+  <span class="nx">err</span> <span class="o">:=</span> <span class="nx">streamServer</span><span class="p">.</span><span class="nf">Send</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloReply</span><span class="p">{</span><span class="nx">Message</span><span class="p">:</span> <span class="s">&#34;Hello &#34;</span> <span class="o">+</span> <span class="nx">req</span><span class="p">.</span><span class="nf">GetName</span><span class="p">()})</span>
+  <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;error Send: %+v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">err</span>
+  <span class="p">}</span>
+  <span class="nx">err</span> <span class="p">=</span> <span class="nx">streamServer</span><span class="p">.</span><span class="nf">Send</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloReply</span><span class="p">{</span><span class="nx">Message</span><span class="p">:</span> <span class="s">&#34;Hello &#34;</span> <span class="o">+</span> <span class="nx">req</span><span class="p">.</span><span class="nf">GetName</span><span class="p">()</span> <span class="o">+</span> <span class="s">&#34;_dup&#34;</span><span class="p">})</span>
+  <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;error Send: %+v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">err</span>
+  <span class="p">}</span>
+  <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="c1">// 双向流式调用的服务端代码
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">server</span><span class="p">)</span> <span class="nf">SayHelloBiStream</span><span class="p">(</span><span class="nx">streamServer</span> <span class="nx">helloworld</span><span class="p">.</span><span class="nx">Greeter_SayHelloBiStreamServer</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+  <span class="nx">req</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">streamServer</span><span class="p">.</span><span class="nf">Recv</span><span class="p">()</span>
+  <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;error receiving: %+v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="c1">// 及时将错误返回给客户端，下同
+</span><span class="c1"></span>    <span class="k">return</span> <span class="nx">err</span>
+  <span class="p">}</span>
+  <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;Received: %v&#34;</span><span class="p">,</span> <span class="nx">req</span><span class="p">.</span><span class="nf">GetName</span><span class="p">())</span>
+  <span class="nx">err</span> <span class="p">=</span> <span class="nx">streamServer</span><span class="p">.</span><span class="nf">Send</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloReply</span><span class="p">{</span><span class="nx">Message</span><span class="p">:</span> <span class="s">&#34;Hello &#34;</span> <span class="o">+</span> <span class="nx">req</span><span class="p">.</span><span class="nf">GetName</span><span class="p">()})</span>
+  <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;error Send: %+v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">err</span>
+  <span class="p">}</span>
+  <span class="c1">// 离开这个函数后，streamServer会关闭，所以不推荐在单独的goroute发送消息
+</span><span class="c1"></span>  <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="c1">// 新建一个服务端实现
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewServerImpl</span><span class="p">()</span> <span class="o">*</span><span class="nx">server</span> <span class="p">{</span>
+  <span class="k">return</span> <span class="o">&amp;</span><span class="nx">server</span><span class="p">{}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Then we create a client based on a pipe connection to call the server.</p>
+<p>The following steps are included.</p>
+<ol>
+<li>create the server-side implementation</li>
+<li>create a listener based on the pipe, and then create a gRPC server based on it</li>
+<li>create a client connection based on the pipe, and then create a gRPC client to call the service</li>
+</ol>
+<p>The code is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span><span class="lnt">109
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+  <span class="s">&#34;context&#34;</span>
+  <span class="s">&#34;fmt&#34;</span>
+  <span class="s">&#34;log&#34;</span>
+  <span class="s">&#34;net&#34;</span>
+
+  <span class="nx">pb</span> <span class="s">&#34;github.com/robberphex/grpc-in-memory/helloworld&#34;</span>
+  <span class="s">&#34;google.golang.org/grpc&#34;</span>
+<span class="p">)</span>
+
+<span class="c1">// 将一个服务实现转化为一个客户端
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">serverToClient</span><span class="p">(</span><span class="nx">svc</span> <span class="o">*</span><span class="nx">server</span><span class="p">)</span> <span class="nx">pb</span><span class="p">.</span><span class="nx">GreeterClient</span> <span class="p">{</span>
+  <span class="c1">// 创建一个基于pipe的Listener
+</span><span class="c1"></span>  <span class="nx">pipe</span> <span class="o">:=</span> <span class="nf">ListenPipe</span><span class="p">()</span>
+
+  <span class="nx">s</span> <span class="o">:=</span> <span class="nx">grpc</span><span class="p">.</span><span class="nf">NewServer</span><span class="p">()</span>
+  <span class="c1">// 注册Greeter服务到gRPC
+</span><span class="c1"></span>  <span class="nx">pb</span><span class="p">.</span><span class="nf">RegisterGreeterServer</span><span class="p">(</span><span class="nx">s</span><span class="p">,</span> <span class="nx">svc</span><span class="p">)</span>
+  <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">Serve</span><span class="p">(</span><span class="nx">pipe</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;failed to serve: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+  <span class="p">}</span>
+  <span class="c1">// 客户端指定使用pipe作为网络连接
+</span><span class="c1"></span>  <span class="nx">clientConn</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">grpc</span><span class="p">.</span><span class="nf">Dial</span><span class="p">(</span><span class="s">`pipe`</span><span class="p">,</span>
+    <span class="nx">grpc</span><span class="p">.</span><span class="nf">WithInsecure</span><span class="p">(),</span>
+    <span class="nx">grpc</span><span class="p">.</span><span class="nf">WithContextDialer</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">c</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">s</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">net</span><span class="p">.</span><span class="nx">Conn</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+      <span class="k">return</span> <span class="nx">pipe</span><span class="p">.</span><span class="nf">DialContext</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="s">`pipe`</span><span class="p">,</span> <span class="nx">s</span><span class="p">)</span>
+    <span class="p">}),</span>
+  <span class="p">)</span>
+  <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;did not connect: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+  <span class="p">}</span>
+  <span class="c1">// 基于pipe连接，创建gRPC客户端
+</span><span class="c1"></span>  <span class="nx">c</span> <span class="o">:=</span> <span class="nx">pb</span><span class="p">.</span><span class="nf">NewGreeterClient</span><span class="p">(</span><span class="nx">clientConn</span><span class="p">)</span>
+  <span class="k">return</span> <span class="nx">c</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+  <span class="nx">svc</span> <span class="o">:=</span> <span class="nf">NewServerImpl</span><span class="p">()</span>
+  <span class="nx">c</span> <span class="o">:=</span> <span class="nf">serverToClient</span><span class="p">(</span><span class="nx">svc</span><span class="p">)</span>
+
+  <span class="nx">ctx</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">Background</span><span class="p">()</span>
+
+  <span class="c1">// unary调用
+</span><span class="c1"></span>  <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">5</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+    <span class="nx">r</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">SayHello</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloRequest</span><span class="p">{</span><span class="nx">Name</span><span class="p">:</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;world_unary_%d&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="p">)})</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;could not greet: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;Greeting: %s&#34;</span><span class="p">,</span> <span class="nx">r</span><span class="p">.</span><span class="nf">GetMessage</span><span class="p">())</span>
+  <span class="p">}</span>
+
+  <span class="c1">// 客户端流式调用
+</span><span class="c1"></span>  <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">5</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+    <span class="nx">streamClient</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">SayHelloRequestStream</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;could not SayHelloRequestStream: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">err</span> <span class="p">=</span> <span class="nx">streamClient</span><span class="p">.</span><span class="nf">Send</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloRequest</span><span class="p">{</span><span class="nx">Name</span><span class="p">:</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;SayHelloRequestStream_%d&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="p">)})</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;could not Send: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">err</span> <span class="p">=</span> <span class="nx">streamClient</span><span class="p">.</span><span class="nf">Send</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloRequest</span><span class="p">{</span><span class="nx">Name</span><span class="p">:</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;SayHelloRequestStream_%d_dup&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="p">)})</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;could not Send: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">reply</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">streamClient</span><span class="p">.</span><span class="nf">CloseAndRecv</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;could not Recv: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">reply</span><span class="p">.</span><span class="nf">GetMessage</span><span class="p">())</span>
+  <span class="p">}</span>
+
+  <span class="c1">// 服务端流式调用
+</span><span class="c1"></span>  <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">5</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+    <span class="nx">streamClient</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">SayHelloReplyStream</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloRequest</span><span class="p">{</span><span class="nx">Name</span><span class="p">:</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;SayHelloReplyStream_%d&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="p">)})</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;could not SayHelloReplyStream: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">reply</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">streamClient</span><span class="p">.</span><span class="nf">Recv</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;could not Recv: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">reply</span><span class="p">.</span><span class="nf">GetMessage</span><span class="p">())</span>
+    <span class="nx">reply</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">streamClient</span><span class="p">.</span><span class="nf">Recv</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;could not Recv: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">reply</span><span class="p">.</span><span class="nf">GetMessage</span><span class="p">())</span>
+  <span class="p">}</span>
+
+  <span class="c1">// 双向流式调用
+</span><span class="c1"></span>  <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">5</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+    <span class="nx">streamClient</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">SayHelloBiStream</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;could not SayHelloStream: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">err</span> <span class="p">=</span> <span class="nx">streamClient</span><span class="p">.</span><span class="nf">Send</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pb</span><span class="p">.</span><span class="nx">HelloRequest</span><span class="p">{</span><span class="nx">Name</span><span class="p">:</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;world_stream_%d&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="p">)})</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;could not Send: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">reply</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">streamClient</span><span class="p">.</span><span class="nf">Recv</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+      <span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;could not Recv: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">reply</span><span class="p">.</span><span class="nf">GetMessage</span><span class="p">())</span>
+  <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="summarize">Summarize</h2>
+<p>Of course, there are better ways to communicate as memory-based RPC calls, such as passing the object directly to the server and communicating directly by local calls.
+But this way breaks many conventions, such as object address, such as gRPC connection parameters do not take effect, and so on.</p>
+<p>In this article, the communication method based on Pipe is consistent with the normal RPC communication behavior except that the network layer goes through memory transfer, such as the same experience of serialization, through the HTTP/2 flow control, etc.. Of course, the performance will be a little worse than the native call, but the good thing is that for testing and verification scenarios, the consistency in behavior is more important.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/grpc/">grpc</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/error-reporting-with-kubernetes-events/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">How to report errors via Kubernetes events</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/webpack-tutorial/">
+            <span class="next-text nav-default">Webpack Quick Start</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

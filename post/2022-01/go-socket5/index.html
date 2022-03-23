@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Implementing a Socks5 Secure Proxy with Go - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="I recently finished reading The Go Programming Language , and wanted to write something to practice. Go is more suitable for writing server software, and before that I learned Socks5 protocol, so I decided to write a Socks5 proxy server. The basic function is finished, part of the idea is referred to ginuerzh/gost. I named it Subsocks, sub- meaning under &amp;hellip; (similar to &amp;ldquo;subway&amp;rdquo;). The project Repository is here: lyuhuang/subsocks. Here&amp;rsquo;s an introduction and a brief summary of its implementation." /><meta name="keywords" content="golang, socket5" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/go-socket5/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Implementing a Socks5 Secure Proxy with Go" />
+<meta property="og:description" content="I recently finished reading The Go Programming Language , and wanted to write something to practice. Go is more suitable for writing server software, and before that I learned Socks5 protocol, so I decided to write a Socks5 proxy server. The basic function is finished, part of the idea is referred to ginuerzh/gost. I named it Subsocks, sub- meaning under &hellip; (similar to &ldquo;subway&rdquo;). The project Repository is here: lyuhuang/subsocks. Here&rsquo;s an introduction and a brief summary of its implementation." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/go-socket5/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-03T11:25:02+08:00" />
+<meta property="article:modified_time" content="2022-01-03T11:25:02+08:00" />
+
+<meta itemprop="name" content="Implementing a Socks5 Secure Proxy with Go">
+<meta itemprop="description" content="I recently finished reading The Go Programming Language , and wanted to write something to practice. Go is more suitable for writing server software, and before that I learned Socks5 protocol, so I decided to write a Socks5 proxy server. The basic function is finished, part of the idea is referred to ginuerzh/gost. I named it Subsocks, sub- meaning under &hellip; (similar to &ldquo;subway&rdquo;). The project Repository is here: lyuhuang/subsocks. Here&rsquo;s an introduction and a brief summary of its implementation."><meta itemprop="datePublished" content="2022-01-03T11:25:02+08:00" />
+<meta itemprop="dateModified" content="2022-01-03T11:25:02+08:00" />
+<meta itemprop="wordCount" content="1683">
+<meta itemprop="keywords" content="golang,socket5," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Implementing a Socks5 Secure Proxy with Go"/>
+<meta name="twitter:description" content="I recently finished reading The Go Programming Language , and wanted to write something to practice. Go is more suitable for writing server software, and before that I learned Socks5 protocol, so I decided to write a Socks5 proxy server. The basic function is finished, part of the idea is referred to ginuerzh/gost. I named it Subsocks, sub- meaning under &hellip; (similar to &ldquo;subway&rdquo;). The project Repository is here: lyuhuang/subsocks. Here&rsquo;s an introduction and a brief summary of its implementation."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Implementing a Socks5 Secure Proxy with Go</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-03 11:25:02 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1683 words </span>
+          <span class="more-meta"> 8 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li>
+          <ul>
+            <li><a href="#use">Use</a></li>
+            <li><a href="#protocol-stack">Protocol Stack</a></li>
+            <li><a href="#socks5">Socks5</a></li>
+            <li><a href="#build-and-release">Build and Release</a></li>
+            <li><a href="#follow-up">Follow up</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>I recently finished reading <a href="https://www.gopl.io/"> <em>The Go Programming Language</em> </a>, and wanted to write something to practice. Go is more suitable for writing server software, and before that I learned <a href="https://luyuhuang.tech/2020/08/27/rfc1928.html">Socks5 protocol</a>, so I decided to write a Socks5 proxy server. The basic function is finished, part of the idea is referred to <a href="https://github.com/ginuerzh/gost">ginuerzh/gost</a>. I named it Subsocks, sub- meaning under &hellip; (similar to &ldquo;subway&rdquo;). The project Repository is here: <a href="https://github.com/luyuhuang/subsocks">lyuhuang/subsocks</a>. Here&rsquo;s an introduction and a brief summary of its implementation.</p>
+<h3 id="use">Use</h3>
+<p>A Subsocks process can be client-side or server-side, depending on the configuration. The client receives a Socks5 request from an application (e.g. a browser), encapsulates it in a specified security protocol (e.g. HTTPS), and sends it to the server. The server side then unwraps the request from the client and accesses the network.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/03/e14daa0ff11446ffa9b3079c07739e3d.png" alt="image"></p>
+<p>The configuration file format is <a href="https://github.com/toml-lang/toml">TOML</a>. Create a client configuration file <code>cli.toml</code> , with the following contents:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-toml" data-lang="toml"><span class="p">[</span><span class="nx">client</span><span class="p">]</span>
+<span class="nx">listen</span> <span class="p">=</span> <span class="s2">&#34;127.0.0.1:1030&#34;</span>
+
+<span class="nx">server</span><span class="p">.</span><span class="nx">protocol</span> <span class="p">=</span> <span class="s2">&#34;https&#34;</span>
+<span class="nx">server</span><span class="p">.</span><span class="nx">address</span> <span class="p">=</span> <span class="s2">&#34;SERVER_IP:1080&#34;</span> <span class="c"># replace SERVER_IP with the server IP</span>
+
+<span class="nx">http</span><span class="p">.</span><span class="nx">path</span> <span class="p">=</span> <span class="s2">&#34;/proxy&#34;</span> <span class="c"># same as http.path of the server</span>
+<span class="nx">tls</span><span class="p">.</span><span class="nx">skip_verify</span> <span class="p">=</span> <span class="kc">true</span> <span class="c"># skip verify the server&#39;s certificate since the certificate is self-signed</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Then start the client:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">subsocks -c cli.toml
+</code></pre></td></tr></table>
+</div>
+</div><p>Also create the server-side configuration file <code>ser.toml</code> :</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-toml" data-lang="toml"><span class="p">[</span><span class="nx">server</span><span class="p">]</span>
+<span class="nx">listen</span> <span class="p">=</span> <span class="s2">&#34;0.0.0.0:1080&#34;</span>
+<span class="nx">protocol</span> <span class="p">=</span> <span class="s2">&#34;https&#34;</span>
+
+<span class="nx">http</span><span class="p">.</span><span class="nx">path</span> <span class="p">=</span> <span class="s2">&#34;/proxy&#34;</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Then start the server:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">subsocks -c ser.toml
+</code></pre></td></tr></table>
+</div>
+</div><p>Then we set the browser Socks5 proxy address to <code>127.0.0.1:1030</code> and we are ready to use. The above example will use an automatically generated self-signed certificate, so the client should set <code>tls.skip_verify = true</code> to skip the certificate authentication. This approach may be vulnerable to man-in-the-middle attacks. A more secure approach is to configure <code>tls.cert</code> and <code>tls.key</code> on the server side to set a custom certificate, and to configure <code>tls.ca</code> on the client side to lock the certificate if it is not signed by an authoritative CA. Detailed documentation can be found on the <a href="https://github.com/luyuhuang/subsocks#readme">project home page</a>.</p>
+<h3 id="protocol-stack">Protocol Stack</h3>
+<p>Since Subsocks is Socks5 wrapped around other protocols, Subsocks has a few more layers in the protocol stack than a normal Socks5 proxy. We may need to implement Socks5 on top of HTTP or Websocket.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/03/1dffbdb6cc73497294f0f82b0b16f526.png" alt="image"></p>
+<p>Go is perfect for this. For example, adding a TLS layer to a normal TCP connection to make it a TLS connection can be done in a single line of code:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">tlsConn</span> <span class="o">:=</span> <span class="nx">tls</span><span class="p">.</span><span class="nf">Client</span><span class="p">(</span><span class="nx">conn</span><span class="p">,</span> <span class="nx">tlsConfig</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>tls.Client</code> passes in a <code>net.Conn</code> object and a TLS configuration, and returns a new <code>net.Conn</code> object. <code>net.Conn</code> is an interface, we only need to care about the <code>Read</code>, <code>Write</code> and other methods, everything else is transparent. The returned <code>tlsConn</code> can then be used as a normal connection, without having to care about the details of TLS at all.</p>
+<p>Similarly, we can implement an HTTP wrapper, pass in a <code>net.Conn</code>. Any data written on the new connection object will be wrapped in an HTTP request; any data read will be stripped of the HTTP headers. We simply write a type that implements the <code>net.Conn</code> interface.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">httpWrapper</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">net</span><span class="p">.</span><span class="nx">Conn</span>
+	<span class="nx">client</span> <span class="o">*</span><span class="nx">Client</span>
+	<span class="nx">buf</span>    <span class="o">*</span><span class="nx">bytes</span><span class="p">.</span><span class="nx">Buffer</span>
+	<span class="nx">ioBuf</span>  <span class="o">*</span><span class="nx">bufio</span><span class="p">.</span><span class="nx">Reader</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">newHTTPWrapper</span><span class="p">(</span><span class="nx">conn</span> <span class="nx">net</span><span class="p">.</span><span class="nx">Conn</span><span class="p">,</span> <span class="nx">client</span> <span class="o">*</span><span class="nx">Client</span><span class="p">)</span> <span class="o">*</span><span class="nx">httpWrapper</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">httpWrapper</span><span class="p">)</span> <span class="nf">Read</span><span class="p">(</span><span class="nx">b</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">(</span><span class="nx">n</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="mi">0</span><span class="p">,</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">h</span><span class="p">.</span><span class="nx">buf</span><span class="p">.</span><span class="nf">Len</span><span class="p">()</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">h</span><span class="p">.</span><span class="nx">buf</span><span class="p">.</span><span class="nf">Read</span><span class="p">(</span><span class="nx">b</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nx">res</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">http</span><span class="p">.</span><span class="nf">ReadResponse</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nx">ioBuf</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">defer</span> <span class="nx">res</span><span class="p">.</span><span class="nx">Body</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+
+	<span class="k">if</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">res</span><span class="p">.</span><span class="nx">Body</span><span class="p">.</span><span class="nf">Read</span><span class="p">(</span><span class="nx">b</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">err</span> <span class="o">!=</span> <span class="nx">io</span><span class="p">.</span><span class="nx">EOF</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">buf</span><span class="p">.</span><span class="nf">ReadFrom</span><span class="p">(</span><span class="nx">res</span><span class="p">.</span><span class="nx">Body</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">err</span> <span class="o">!=</span> <span class="nx">io</span><span class="p">.</span><span class="nx">EOF</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="nx">err</span> <span class="p">=</span> <span class="kc">nil</span>
+	<span class="k">return</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">httpWrapper</span><span class="p">)</span> <span class="nf">Write</span><span class="p">(</span><span class="nx">b</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">(</span><span class="nx">n</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">req</span> <span class="o">:=</span> <span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">{</span>
+		<span class="nx">Method</span><span class="p">:</span> <span class="s">&#34;POST&#34;</span><span class="p">,</span>
+		<span class="nx">Proto</span><span class="p">:</span>  <span class="s">&#34;HTTP/1.1&#34;</span><span class="p">,</span>
+		<span class="nx">URL</span><span class="p">:</span> <span class="o">&amp;</span><span class="nx">url</span><span class="p">.</span><span class="nx">URL</span><span class="p">{</span>
+			<span class="nx">Scheme</span><span class="p">:</span> <span class="nx">h</span><span class="p">.</span><span class="nx">client</span><span class="p">.</span><span class="nx">Config</span><span class="p">.</span><span class="nx">ServerProtocol</span><span class="p">,</span>
+			<span class="nx">Host</span><span class="p">:</span>   <span class="nx">h</span><span class="p">.</span><span class="nx">client</span><span class="p">.</span><span class="nx">Config</span><span class="p">.</span><span class="nx">ServerAddr</span><span class="p">,</span>
+			<span class="nx">Path</span><span class="p">:</span>   <span class="nx">h</span><span class="p">.</span><span class="nx">client</span><span class="p">.</span><span class="nx">Config</span><span class="p">.</span><span class="nx">HTTPPath</span><span class="p">,</span>
+		<span class="p">},</span>
+		<span class="nx">Host</span><span class="p">:</span>          <span class="nx">h</span><span class="p">.</span><span class="nx">client</span><span class="p">.</span><span class="nx">Config</span><span class="p">.</span><span class="nx">ServerAddr</span><span class="p">,</span>
+		<span class="nx">ContentLength</span><span class="p">:</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">b</span><span class="p">)),</span>
+		<span class="nx">Body</span><span class="p">:</span>          <span class="nx">ioutil</span><span class="p">.</span><span class="nf">NopCloser</span><span class="p">(</span><span class="nx">bytes</span><span class="p">.</span><span class="nf">NewBuffer</span><span class="p">(</span><span class="nx">b</span><span class="p">)),</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">req</span><span class="p">.</span><span class="nf">Write</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nx">Conn</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nb">len</span><span class="p">(</span><span class="nx">b</span><span class="p">),</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>httpWrapper</code> is embedded in <code>net.Conn</code>, and <code>httpWrapper.Conn</code> is assigned to the original connection, so other methods of <code>net.Conn</code>, such as <code>LocalAddr</code>, are equivalent to those of the original connection. We only implement <code>Read</code> and <code>Write</code> .</p>
+<p>The idea of <code>Read</code> is to read the body of the HTTP message into a buffer, read it in the buffer each time it is read, and wait if the buffer is empty. If the buffer is not empty, the buffer is read; otherwise, the HTTP message is read for its Body, and if it is not exhausted, the remaining data is written to the buffer. This has the same effect.</p>
+<p><code>Write</code> is simpler, just wrap the data in the HTTP request and send it out. Of course, some optimization can be done here, if the data is small, it will be written to a buffer and then sent out as an HTTP request.</p>
+<p>HTTPS is actually HTTP over TLS, so you only need to add a TLS layer on top of the HTTP wrapper to get the HTTPS wrapper:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">httpsConn</span> <span class="o">:=</span> <span class="nf">newHTTPWrapper</span><span class="p">(</span><span class="nx">tls</span><span class="p">.</span><span class="nf">Client</span><span class="p">(</span><span class="nx">conn</span><span class="p">,</span> <span class="nx">tlsConfig</span><span class="p">),</span> <span class="nx">client</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This is the idea of implementing wrappers for other protocols, calling different wrappers according to the configuration, wrapping a normal TCP connection into a protocol-specific connection, and then implementing Socks5 on top of it. At the moment I have implemented HTTP and Websocket, this pattern is also convenient for extending new protocols in the future.</p>
+<h3 id="socks5">Socks5</h3>
+<p>As a proxy protocol, the idea of Socks5 is basically to send a proxy request, then establish the proxy state, and then forward the data blindly. Note that all data passed between the Subsocks client and the server is encapsulated in the specified protocol. The whole process is similar to the Connect method of HTTP.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/03/7faba716666d4413bc5ea8bb083e33b4.png" alt="image"></p>
+<p>The flow of the Bind method is more or less the same as the Connect method, except that the server does not actively connect to the target server but opens the port and waits for a connection from the target server. Once the proxy state is established, it also forwards the data blindly.</p>
+<p>The UDP associate is a little more complicated. Because of the TCP protocol between the Subsocks client and server, the UDP associate method cannot be used directly. Here we refer to gost&rsquo;s approach and modify Socks5 protocol slightly to add a UDP over TCP method. The process has the following steps:</p>
+<ul>
+<li>Client connection to establish a TCP connection to the server;</li>
+<li>Negotiation (same as other methods);</li>
+<li>Client sends UDP over TCP request, DST.ADDR and DST.PORT fields can be empty;</li>
+<li>The server creates a UDP socket and returns its address to the client;</li>
+<li>The next data sent by the client to the server is in the same format as the Socks5 UDP request (see <a href="https://luyuhuang.tech/2020/08/27/rfc1928.html#7-%E5%9F%BA%E4%BA%8E-udp-%E5%AE%A2%E6%88%B7%E7%AB%AF%E7%9A%84%E8%BF%87%E7%A8%8B">RFC 1928 Section 7</a>), the server will also encapsulate all data received by the UDP socket in this format and send it to the client. This is done by::
+<ul>
+<li>The RSV field indicates the length of the packet, because TCP is a stream-oriented protocol and does not preserve message boundaries.</li>
+<li>ADDR and DST.PORT fields of the client packet, the server sends the data to the target server using the UDP protocol;</li>
+<li>ADDR and DST.PORT fields in the packet sent by the server to the client indicate the UDP address of the target server.</li>
+</ul>
+</li>
+</ul>
+<p>Again, the data passed by the UDP over TCP method is also encapsulated in the specified protocol. At this point, we have fully implemented the Socks5 protocol. Thanks to the many convenient features of Go, the overall implementation is not too complicated. Please refer to the source code for details.</p>
+<h3 id="build-and-release">Build and Release</h3>
+<p>I used Github Actions quite well for this project. I wanted to trigger an action for every tag, compile the binaries for each platform, and upload them to the release page.</p>
+<p>Thanks to Go&rsquo;s cross-compilation, we can easily compile binaries for each platform. I simply wrote a script to do this:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="cp">#!/usr/bin/env bash
+</span><span class="cp"></span>
+<span class="nv">platforms</span><span class="o">=(</span>
+<span class="s2">&#34;linux amd64&#34;</span>
+<span class="s2">&#34;linux 386&#34;</span>
+<span class="s2">&#34;windows amd64 .exe&#34;</span>
+<span class="s2">&#34;windows 386 .exe&#34;</span>
+<span class="s2">&#34;darwin amd64&#34;</span>
+<span class="o">)</span>
+
+rm -rf targets
+mkdir -p targets
+
+<span class="k">for</span> p in <span class="s2">&#34;</span><span class="si">${</span><span class="nv">platforms</span><span class="p">[@]</span><span class="si">}</span><span class="s2">&#34;</span><span class="p">;</span> <span class="k">do</span>
+	<span class="nb">eval</span> <span class="k">$(</span><span class="nb">echo</span> <span class="nv">$p</span> <span class="p">|</span> awk <span class="s1">&#39;{printf&#34;os=%s;arch=%s;ext=%s&#34;,$1,$2,$3}&#39;</span><span class="k">)</span>
+	<span class="nv">GOOS</span><span class="o">=</span><span class="nv">$os</span> <span class="nv">GOARCH</span><span class="o">=</span><span class="nv">$arch</span> go build -o targets/subsocks-<span class="nv">$os</span>-<span class="nv">$arch$ext</span>
+<span class="k">done</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Then you just need to execute the script in Github Actions. How do I upload to the release page? You can use the <a href="https://github.com/github/hub">hub command</a> directly in Github Actions, which can be used for many Github operations. The following command will create a release with attachments:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">hub release create -a FILE -m MESSAGE TAG
+</code></pre></td></tr></table>
+</div>
+</div><p>My <code>release.yml</code> is written like this:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Release</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="nt">on</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span><span class="nt">push</span><span class="p">:</span><span class="w">
+</span><span class="w">    </span><span class="nt">tags</span><span class="p">:</span><span class="w">
+</span><span class="w">    </span>- <span class="s1">&#39;v*&#39;</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="nt">jobs</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span><span class="nt">binary</span><span class="p">:</span><span class="w">
+</span><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Release binary files</span><span class="w">
+</span><span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l">ubuntu-latest</span><span class="w">
+</span><span class="w">    </span><span class="nt">steps</span><span class="p">:</span><span class="w">
+</span><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Set up Go 1.x</span><span class="w">
+</span><span class="w">      </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l">actions/setup-go@v2</span><span class="w">
+</span><span class="w">      </span><span class="nt">with</span><span class="p">:</span><span class="w">
+</span><span class="w">        </span><span class="nt">go-version</span><span class="p">:</span><span class="w"> </span><span class="l">^1.13</span><span class="w">
+</span><span class="w">
+</span><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Checkout</span><span class="w">
+</span><span class="w">      </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l">actions/checkout@v2</span><span class="w">
+</span><span class="w">
+</span><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Build</span><span class="w">
+</span><span class="w">      </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p">|</span><span class="sd">
+</span><span class="sd">        </span><span class="w">        </span><span class="l">bash build.sh</span><span class="w">
+</span><span class="w">
+</span><span class="w">    </span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">Release</span><span class="w">
+</span><span class="w">      </span><span class="nt">env</span><span class="p">:</span><span class="w">
+</span><span class="w">        </span><span class="nt">GITHUB_TOKEN</span><span class="p">:</span><span class="w"> </span><span class="l">${{ secrets.GITHUB_TOKEN }}</span><span class="w">
+</span><span class="w">      </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="p">|</span><span class="sd">
+</span><span class="sd">        set -x
+</span><span class="sd">        assets=()
+</span><span class="sd">        for asset in targets/*; do
+</span><span class="sd">          assets+=(&#34;-a&#34; &#34;$asset&#34;)
+</span><span class="sd">        done
+</span><span class="sd">        tag_name=&#34;${GITHUB_REF##*/}&#34;
+</span><span class="sd">        hub release create &#34;${assets[@]}&#34; -m &#34;$tag_name&#34; &#34;$tag_name&#34;</span><span class="w">        
+</span></code></pre></td></tr></table>
+</div>
+</div><h3 id="follow-up">Follow up</h3>
+<p>No user authentication mechanism has been implemented yet, and access control can only be achieved by configuring a secret path. Later, HTTP summary authentication can be implemented for access control purposes. I don&rsquo;t plan to implement Socks5 negotiation authentication mechanism, since Subsocks' Socks5 is based on other protocols, it is obviously better to do authentication in the lower protocol.</p>
+<p>Another thing I want to do is an intelligent proxy. It can decide whether a connection or request goes through a proxy based on some rules.</p>
+<p>It could be extended to support more protocols, such as SSH and so on. But it doesn&rsquo;t make much sense at the moment. Rather than that, it might be more useful to have the client support HTTP proxies, since some software only supports HTTP proxies.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          <a href="/tags/socket5/">socket5</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/lua-next/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">An interesting problem with the Lua next function</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/kcp/">
+            <span class="next-text nav-default">Explaining the principle and implementation of KCP protocol</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

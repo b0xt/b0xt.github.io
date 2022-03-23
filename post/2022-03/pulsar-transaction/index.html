@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Pulsar transaction implementation principle - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Apache Pulsar is a multi-tenant, high-performance inter-service messaging solution that supports multi-tenancy, low latency, read/write separation, cross-territory replication, fast scaling, flexible fault tolerance, and other features. This article will briefly introduce some concepts and principles of Pulsar server-side message acknowledgement. Preface Before transactional messages were available, the highest level of messaging assurance supported in Pulsar was to ensure that a Producer&amp;rsquo;s messages were saved exactly once on a single partition" /><meta name="keywords" content="pulsar, Transaction" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/pulsar-transaction/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Pulsar transaction implementation principle" />
+<meta property="og:description" content="Apache Pulsar is a multi-tenant, high-performance inter-service messaging solution that supports multi-tenancy, low latency, read/write separation, cross-territory replication, fast scaling, flexible fault tolerance, and other features. This article will briefly introduce some concepts and principles of Pulsar server-side message acknowledgement. Preface Before transactional messages were available, the highest level of messaging assurance supported in Pulsar was to ensure that a Producer&rsquo;s messages were saved exactly once on a single partition" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/pulsar-transaction/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-04T15:15:48+08:00" />
+<meta property="article:modified_time" content="2022-03-04T15:15:48+08:00" />
+
+<meta itemprop="name" content="Pulsar transaction implementation principle">
+<meta itemprop="description" content="Apache Pulsar is a multi-tenant, high-performance inter-service messaging solution that supports multi-tenancy, low latency, read/write separation, cross-territory replication, fast scaling, flexible fault tolerance, and other features. This article will briefly introduce some concepts and principles of Pulsar server-side message acknowledgement. Preface Before transactional messages were available, the highest level of messaging assurance supported in Pulsar was to ensure that a Producer&rsquo;s messages were saved exactly once on a single partition"><meta itemprop="datePublished" content="2022-03-04T15:15:48+08:00" />
+<meta itemprop="dateModified" content="2022-03-04T15:15:48+08:00" />
+<meta itemprop="wordCount" content="3185">
+<meta itemprop="keywords" content="pulsar," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Pulsar transaction implementation principle"/>
+<meta name="twitter:description" content="Apache Pulsar is a multi-tenant, high-performance inter-service messaging solution that supports multi-tenancy, low latency, read/write separation, cross-territory replication, fast scaling, flexible fault tolerance, and other features. This article will briefly introduce some concepts and principles of Pulsar server-side message acknowledgement. Preface Before transactional messages were available, the highest level of messaging assurance supported in Pulsar was to ensure that a Producer&rsquo;s messages were saved exactly once on a single partition"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Pulsar transaction implementation principle</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-04 15:15:48 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 3185 words </span>
+          <span class="more-meta"> 7 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#preface">Preface</a></li>
+        <li><a href="#introduction-to-transactions">Introduction to Transactions</a></li>
+        <li><a href="#transaction-flow">Transaction flow</a></li>
+        <li><a href="#implementation-of-transactions">Implementation of transactions</a>
+          <ul>
+            <li><a href="#environment-setup">Environment setup</a></li>
+            <li><a href="#tcs-and-rms">TCs and RMs</a></li>
+            <li><a href="#consumer-transaction-management">Consumer transaction management</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Apache Pulsar is a multi-tenant, high-performance inter-service messaging solution that supports multi-tenancy, low latency, read/write separation, cross-territory replication, fast scaling, flexible fault tolerance, and other features. This article will briefly introduce some concepts and principles of Pulsar server-side message acknowledgement.</p>
+<h2 id="preface">Preface</h2>
+<p>Before transactional messages were available, the highest level of messaging assurance supported in Pulsar was to ensure that a Producer&rsquo;s messages were saved exactly once on a single partition through the Broker&rsquo;s message de-duplication mechanism. When a Producer fails to send a message, the Broker ensures that the message is persisted only once, even if it retries sending the message. However, in the Partitioned Topic scenario, the Producer has no way to guarantee message atomicity across multiple partitions.</p>
+<p>When the Broker is down, the Producer may fail to send a message, and if the Producer does not retry or has exhausted the number of retries, the message will not be written to Pulsar. on the consumer side, the current message acknowledgement is a best-effort operation that does not ensure that the message will be acknowledged successfully, and if the message acknowledgement fails, this will cause the message to be re-delivered and the consumer will receive Pulsar can only guarantee that the consumer will consume the message at least once.</p>
+<p>Similarly, Pulsar Functions are only guaranteed to process a single message on an idempotent function once, i.e., the business needs to guarantee idempotency. It cannot guarantee that processing multiple messages or outputting multiple results will only happen once.</p>
+<p>For example, the execution steps of a Function are: consume messages from Topic-A1 and Topic-A2, then aggregate the messages in the Function (e.g., time window aggregation calculation), store the results in Topic-B, and finally acknowledge (ACK) the messages in Topic-A1 and Topic-A2 respectively. The Function may fail between &ldquo;outputting the result to Topic-B&rdquo; and &ldquo;acknowledging the message&rdquo;, or even when acknowledging a single message. This will cause all (or some) of the messages in Topic-A1 and Topic-A2 to be re-passed and re-processed, and new results to be generated, resulting in incorrect calculation results for the entire time window.</p>
+<p>Therefore, Pulsar needs transactional mechanisms to guarantee exact-once semantics (Exactly-once), where both production and consumption are guaranteed to be exact-once, without duplication and without data loss, even in the case of Broker downtime or Function processing failure.</p>
+<h2 id="introduction-to-transactions">Introduction to Transactions</h2>
+<p>Pulsar transaction messages are designed to guarantee the precise one-time semantics of the Pulsar Function, so that when a Producer sends multiple messages to different Partitions, they can all succeed or all fail at the same time. It can also ensure that when Consumers consume multiple messages, they can all confirm success or all fail at the same time. Of course, it is also possible to include both production and consumption in the same transaction, so that either all succeed or all fail.</p>
+<p>Let&rsquo;s take the Function scenario at the beginning of this section as an example to demonstrate the scenario of production and consumption in the same transaction.</p>
+<p>First, we need to enable transactions in broker.conf.</p>
+<p><code>\transactionCoordinatorEnabled=true</code>.</p>
+<p>Then, we create the PulsarClient and the transaction object separately. Both the producer and consumer APIs need to take this transaction object with them to ensure that they are in the same transaction.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="c1">//创建client，并启用事务
+</span><span class="c1"></span><span class="n">PulsarClient</span> <span class="n">pulsarClient</span> <span class="o">=</span> <span class="n">PulsarClient</span><span class="o">.</span><span class="na">builder</span><span class="o">()</span> 
+        <span class="o">.</span><span class="na">serviceUrl</span><span class="o">(</span><span class="s">&#34;pulsar://localhost:6650&#34;</span><span class="o">)</span>   
+        <span class="o">.</span><span class="na">enableTransaction</span><span class="o">(</span><span class="kc">true</span><span class="o">)</span>
+        <span class="o">.</span><span class="na">build</span><span class="o">();</span>
+        <span class="c1">// 创建事务Transaction txn = pulsarClient
+</span><span class="c1"></span>        <span class="o">.</span><span class="na">newTransaction</span><span class="o">()</span>
+        <span class="o">.</span><span class="na">withTransactionTimeout</span><span class="o">(</span><span class="n">1</span><span class="o">,</span> <span class="n">TimeUnit</span><span class="o">.</span><span class="na">MINUTES</span><span class="o">)</span>
+        <span class="o">.</span><span class="na">build</span><span class="o">()</span>
+        <span class="o">.</span><span class="na">get</span><span class="o">();</span>
+        
+<span class="n">String</span> <span class="n">sourceTopic</span> <span class="o">=</span> <span class="s">&#34;public/default/source-topic&#34;</span><span class="o">;</span>
+<span class="n">String</span> <span class="n">sinkTopic</span> <span class="o">=</span> <span class="s">&#34;public/default/sink-topic&#34;</span><span class="o">;</span>
+<span class="c1">//创建生产者和消费者Consumer&lt;String&gt; sourceConsumer = pulsarClient.newConsumer(Schema.STRING)
+</span><span class="c1"></span>        <span class="o">.</span><span class="na">topic</span><span class="o">(</span><span class="n">sourceTopic</span><span class="o">)</span>
+        <span class="o">.</span><span class="na">subscriptionName</span><span class="o">(</span><span class="s">&#34;my-sub&#34;</span><span class="o">)</span>
+        <span class="o">.</span><span class="na">subscribe</span><span class="o">();</span>
+        
+<span class="n">Producer</span><span class="o">&lt;</span><span class="n">String</span><span class="o">&gt;</span> <span class="n">sinkProducer</span> <span class="o">=</span> <span class="n">pulsarClient</span><span class="o">.</span><span class="na">newProducer</span><span class="o">(</span><span class="n">Schema</span><span class="o">.</span><span class="na">STRING</span><span class="o">)</span>
+        <span class="o">.</span><span class="na">topic</span><span class="o">(</span><span class="n">sinkTopic</span><span class="o">)</span>
+        <span class="o">.</span><span class="na">create</span><span class="o">();</span>
+        
+<span class="c1">// 从原Topic中消费一条消息，并发送到另外一个Topic中，它们在同一个事务内        Message&lt;String&gt; message = sourceConsumer.receive();
+</span><span class="c1"></span><span class="n">sinkProducer</span><span class="o">.</span><span class="na">newMessage</span><span class="o">(</span><span class="n">txn</span><span class="o">).</span><span class="na">value</span><span class="o">(</span><span class="s">&#34;sink data&#34;</span><span class="o">).</span><span class="na">sendAsync</span><span class="o">();</span>
+<span class="n">sourceConsumer</span><span class="o">.</span><span class="na">acknowledgeAsync</span><span class="o">(</span><span class="n">message</span><span class="o">.</span><span class="na">getMessageId</span><span class="o">(),</span> <span class="n">txn</span><span class="o">);</span>
+<span class="c1">// 提交事务
+</span><span class="c1"></span><span class="n">txn</span><span class="o">.</span><span class="na">commit</span><span class="o">().</span><span class="na">get</span><span class="o">();</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s take the Function example at the beginning of this subsection.</p>
+<p>When no transaction is enabled, if Function writes the result to SinkTopic first, but the message acknowledgement fails (Step-4 below fails), this causes the message to be recast (Step-1 below), and Function will recalculate a result and send it to SinkTopic again, so that a piece of data is recalculated and recast twice.</p>
+<p>If the transaction is not enabled, Function will acknowledge the message first and then write the data to SinkTopic (Step-4 and then Step-3). At this time, if the writing to SinkTopic fails and the message from SourceTopic has been acknowledged, the data will be lost and the final calculation result will be inaccurate.</p>
+<p>If the transaction is turned on, all the previous steps will be rolled back as long as there is no commit at the end, and the produced messages and confirmed messages are rolled back, so that the whole process can be started again without double calculation and data loss. The entire timing diagram is shown below.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/04/43cbc1f3fa6a4e56a79afa2ccceb8218.png" alt="pulsar"></p>
+<p>We just need to follow the steps above and understand exactly what each step does to get a clear picture of how the whole transaction is implemented. In the following subsections, we will go through it step by step.</p>
+<h2 id="transaction-flow">Transaction flow</h2>
+<p>Before understanding the whole transaction flow, we introduce the components of transactions in Pulsar, which are commonly found in distributed transactions, such as TC, TM, RM, etc.</p>
+<ol>
+<li>TM: Transaction initiator. Defines the boundary of the transaction and is responsible for informing the TC that the distributed transaction starts, commits, and rolls back. In Pulsar transactions, this role is played by each PulsarClient. 2.</li>
+<li>RM: Resource manager for each node. A TopicTransactionBuffer and a PendingAckHandle are defined in Pulsar to manage the resources produced and consumed respectively.
+TC: Transaction coordinator, a module used to process transaction requests from Pulsar Client to track its transaction status. Each TC is identified by a unique id (TCID), and TCs maintain their own transaction metadata stores independently of each other. TCIDs are used to generate transaction IDs and broadcast notifications to different nodes to commit and roll back transactions.</li>
+</ol>
+<p>In the following, we introduce the entire transaction flow with a Producer, the gray part in the diagram represents the storage, and there are two existing storage implementations, in-memory and Bookkeeper.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/04/ea2f6e9679e8484c9d958b9205e2f77b.png" alt="pulsar"></p>
+<ol>
+<li>A Pulsar cluster may have multiple TCs (16 by default), PulsarClient needs to select which TC to use when creating a transaction, and all subsequent transactions will be sent to this TC for creation, commit, rollback, etc. The selection rule is simple, as the TC&rsquo;s Topic is fixed, first Lookup to see all partitions in the The rules for selecting a TC are simple.</li>
+<li>Open transaction. code through pulsarClient.newTransaction() to open a transaction, the Client will send a newTxn command to the corresponding TC, TC generated and returned a new transaction ID object, the object stores the TC ID (for subsequent requests to find the node) and the transaction ID, the transaction ID is incremental, the same TC The transaction ID is incremental, and the same TC generates IDs without duplication.</li>
+<li>The Topic may be a partitioned topic and the message will be sent to different Broker nodes. In order to let the TC know which nodes the message will be sent to (the TC needs to notify these nodes when the subsequent transaction commits and rolls back), the Producer will register the partition information to the TC before sending the message. This way, the subsequent TC knows which nodes' RMs are to be notified to commit and rollback the transaction.</li>
+<li>Sending messages. This step is not much different from the normal message sending, but the message needs to go through the RM on each Broker first, which is defined as TopicTransactionBuffer in Pulsar. At this point, although the message has been written to the original Topic, but the consumer is not visible, the transaction isolation level in Pulsar is Read Commit.</li>
+<li>After the Producer sends all the messages, the transaction is submitted and the TC receives the submission request and broadcasts a notification to the RM node to submit the transaction and update the corresponding metadata so that the message can be consumed by the consumer.</li>
+</ol>
+<p><strong>How are the messages in Setp-4 guaranteed to persist into the Topic and not be visible?</strong></p>
+<p>A maxReadPosition property is stored in each Topic to identify the maximum position that can be read by the current Consumer. When the transaction has not been committed yet, the maxReadPosition will not change although the data has been persisted to the Topic. Therefore, the Consumer cannot consume the uncommitted data.</p>
+<p><strong>The message has been persisted and finally the transaction has to be rolled back, how to handle this part of data?</strong></p>
+<p>If the transaction is to be rolled back, the transaction will be recorded as Aborted in RM. If a transaction is found to have ended, it will be filtered out directly (the message will be confirmed internally).</p>
+<p><strong>What happens if the transaction is partially successful and partially unsuccessful when it is finally committed?</strong></p>
+<p>There is a timing object called TransactionOpRetryTimer in TC, all transactions that are not all successfully broadcast are given to it to retry until all nodes are finally all successful or exceed the retry count. So won&rsquo;t there be consistency problems with this process? First let&rsquo;s think about what the scenario is when this happens. Usually some Broker nodes are down causing these nodes to be unavailable or network jitter causing temporary unreachability. In Pulsar, if a Broker is down, the Topic attribution is transferred, and unless the entire cluster is unavailable, a new Broker can always be found and resolved by retrying. In the process of Topic attribution transfer, maxReadPosition is not changed, and consumers cannot consume messages. Even if the whole cluster is unavailable, Timer will still let the transaction commit by retrying when the cluster is subsequently restored.</p>
+<p><strong>Will it block the consumption of normal messages if the transaction is not completed?</strong>.</p>
+<p>Yes. Suppose we open a transaction, send a few transaction messages, but do not commit or roll back the transaction. At this point, if we continue to send ordinary messages to the Topic, the maxReadPosition will not change because the transaction messages have not been committed, and the consumer will not consume the new messages and will block the consumption of ordinary messages. This is the expected behavior, in order to ensure the order of messages. And different Topics will not affect each other, because each Topic has its own maxReadPosition.</p>
+<h2 id="implementation-of-transactions">Implementation of transactions</h2>
+<p>We can divide the implementation of the transaction into five parts: environment, TC, producer RM, consumer RM, and client. Since the management of production and consumer resources is separate, we will introduce them separately.</p>
+<h3 id="environment-setup">Environment setup</h3>
+<p>The setup of the transaction coordinator needs to start from the initialization of the Pulsar cluster. We have described how to build the cluster in Chapter 1, and the first time you need to execute a command to initialize the cluster metadata in ZooKeeper. At this point, Pulsar will automatically create a SystemNamespace and a Topic in it, the full Topic is shown below.</p>
+<p><code>persistent://pulsar/system/transaction_coordinator_assign</code></p>
+<p>This is a PartitionedTopic with 16 partitions by default, each partition is a separate TC. we can set the number of TCs with the &ndash;initial-num-transaction-coordinators parameter.</p>
+<h3 id="tcs-and-rms">TCs and RMs</h3>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/04/0d685d6b75e045d0a39ee0ec5375620b.png" alt="tcs and rms"></p>
+<ul>
+<li>TransactionMetadataStoreService is the overall coordinator of transactions on the Broker and we can think of it as the TC.</li>
+<li>TransactionMetadataStore is used by TC to store metadata of transactions, such as: newly created transactions, partitions registered up by Producer. This interface has two implementation classes, one is the implementation that saves the data to Bookkeeper and the other saves the data directly in memory.</li>
+<li>TransactionTimeoutTracker The server side is used to track transactions that time out.</li>
+<li>Various Providers, which are factory classes and require no special attention.</li>
+<li>TopicTransactionBuffer The RM of the producer, when the transaction message is sent to the Broker, the RM acts as a proxy to record some metadata and then store the message into the original Topic. internally contains the TopicTransactionBufferRecover and TransactionBufferSnapshotService is included internally. RM&rsquo;s metadata is structured as snapshots and refreshed regularly, and these two objects are responsible for snapshot recovery and snapshot preservation, respectively. Since the production messages are in Topic, there will be one for each Topic/Partition.</li>
+<li>PendingAckHandle Consumer&rsquo;s RM, one for each subscription since consumption is on a subscription basis.</li>
+</ul>
+<p>Since online environments usually use persistent transactions, the following principles are based on persistent implementations.</p>
+<p>All transaction-related services are initialized when the BrokerService is started, and each Partition is a Topic in the TC Topic, and the TransactionMetadataStoreService, when initialized, restores the previously persisted metadata from the The TransactionMetadataStoreService restores the previously persisted metadata from Bookkeeper during initialization. Each TC will save the following metadata.</p>
+<ul>
+<li>newTransaction. creates a new transaction and returns a unique transaction ID object.</li>
+<li>addProducedPartitionToTxn. Register information about the Partition for which the producer wants to send a message for subsequent TCs to notify the corresponding node of the RM commit/rollback transaction.</li>
+<li>addAckedPartitionToTxn. Register information about the Partition for which the consumer wants to consume the message, for subsequent TCs to notify the corresponding node of the RM commit/rollback transaction.</li>
+<li>endTransaction. ends a transaction, either commit, rollback or timeout, etc.</li>
+</ul>
+<p>If we set enableTransaction=true when initializing PulsarClient, an additional TransactionCoordinatorClient will be initialized when the Client is initialized. Since the TC Tenant, Namespace and Topic names are fixed, the TC client can discover all the Partition information through Lookup and cache it locally, and then when the Client creates a transaction, it will poll to select the TC to be used for the next transaction from this cache list.</p>
+<h4 id="producer-transaction-management">Producer Transaction Management</h4>
+<p>Next we will open a transaction.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="c1">// 创建事务
+</span><span class="c1"></span><span class="n">Transaction</span> <span class="n">txn</span> <span class="o">=</span> <span class="n">pulsarClient</span>
+        <span class="o">.</span><span class="na">newTransaction</span><span class="o">()</span>
+        <span class="o">.</span><span class="na">withTransactionTimeout</span><span class="o">(</span><span class="n">1</span><span class="o">,</span> <span class="n">TimeUnit</span><span class="o">.</span><span class="na">MINUTES</span><span class="o">)</span>
+        <span class="o">.</span><span class="na">build</span><span class="o">()</span>
+        <span class="o">.</span><span class="na">get</span><span class="o">();</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the above code, a newTxn is sent to a TC and a Transaction object is obtained.</p>
+<p>When a transaction is opened, TransactionCoordinatorClient selects a TC from the cache and sends a newTxn command to the Broker where the selected TC is located, the structure of the command is defined as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="n">message</span> <span class="n">CommandNewTxn</span> <span class="o">{</span>
+    <span class="n">required</span> <span class="n">uint64</span> <span class="n">request_id</span> <span class="o">=</span> <span class="n">1</span><span class="o">;</span>
+    <span class="n">optional</span> <span class="n">uint64</span> <span class="n">txn_ttl_seconds</span> <span class="o">=</span> <span class="n">2</span> <span class="o">[</span><span class="k">default</span> <span class="o">=</span> <span class="n">0</span><span class="o">];</span>
+    <span class="n">optional</span> <span class="n">uint64</span> <span class="n">tc_id</span> <span class="o">=</span> <span class="n">3</span> <span class="o">[</span><span class="k">default</span> <span class="o">=</span> <span class="n">0</span><span class="o">];</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Since the TCID is included in the command, there is no problem even if multiple TCs are managed by the same Broker, which will find the corresponding TC and process the request based on the TCID.</p>
+<p>Before sending a message, the Producer sends an AddPartitionToTxn command to the Broker, and only after it succeeds will it continue to send the real message. After the transaction message reaches the Broker, it is passed to the TransactionBuffer for processing. After passing the checks, the data will be saved in the TransactionBuffer, which is just a proxy (it will save some metadata), and it will eventually call the original Topic to save the message. constructor needs to pass in the original Topic object. We can think of TransactionBuffer as an RM on the Producer side.</p>
+<p>The TransactionBuffer stores two kinds of information, one is the original message, which is stored directly using the Topic. The other is a snapshot, which stores the Topic name, the maximum readable position information (to avoid Consumers reading uncommitted data), and the list of transactions that have been aborted in that Topic.</p>
+<p>The TransactionBuffer receives the message and writes an abortMarker directly to the original Topic to mark that the transaction has been aborted, and then updates the list in memory. abortMarker is also an ordinary message, but the metadata in the message header is different from the ordinary message. is also a normal message, but the metadata in the message header is not the same as in a normal message. This data is stored in the snapshot, mainly for fast data recovery after a Broker restart. If the snapshot data is lost, TopicTransactionBufferRecover reads all the data in the Topic from end to end, and updates the break list in memory for each abortMarker encountered. If a snapshot is available, we only need to read from the beginning at the snapshot to recover the data.</p>
+<h3 id="consumer-transaction-management">Consumer transaction management</h3>
+<p>The consumer needs to bring the transaction object with it when the message is acknowledged, identifying the use of transaction Ack.</p>
+<p><code>\consumer.acknowledge(message, txn);</code></p>
+<p>Each subscription on the server side has a PendingAckHandle object to manage the transaction Ack information, which we can consider as the RM that manages the consumer data. when the Broker finds a message acknowledgement request with transaction information, it will forward the request to the corresponding PendingAckHandle for processing.</p>
+<p>All message acknowledgements with transactions turned on do not directly modify the MarkDeleted location on the cursor, but are first persisted to an additional Ledger, a copy of which is also cached in the Broker&rsquo;s memory. This Ledger is managed by the pendingAckStore, which we can think of as the Consumer RM&rsquo;s log.</p>
+<p>When the transaction is committed, RM will call the consumer&rsquo;s corresponding Subscription and perform all the message acknowledgement operations just now. At the same time, a special Marker is also written in the log Ledger to identify that the transaction needs to be committed. When the transaction is rolled back, an AbortMarker will also be recorded in the log first, and then triggers the Message to be re-delivered.</p>
+<p>The log stored in the pendingAckStore is the redo log. When this component is initialized, it first reads all redo logs from the log Ledger, thus reconstructing the previous message acknowledgement information in memory. Because message acknowledgement is an idempotent operation, if the Broker inadvertently goes down, it only needs to re-execute the operation in the redo log. When the messages in the subscription are actually acknowledged, the corresponding redo log in the pendingAckStore can also be cleaned up. The cleanup is as simple as moving the MarkDelete location of the Ledger in the pendingAckStore.</p>
+<h4 id="talking-about-tc-again">Talking about TC again</h4>
+<p>All transactions commit and rollback, as the Client side informs the TC, or as the timeout TC automatically senses. the TC&rsquo;s log stores which Partitions the Producer&rsquo;s messages are to be sent to, and also which Partitions the Consumer will Ack. the RM is scattered on each Broker and records the messages sent throughout the transaction and the messages to be acknowledged. When the transaction ends, TC finds all the metadata with TCID as the key, knows which RMs on the Brokers need to be notified through the metadata, and finally launches a broadcast to notify RMs on these Brokers that the transaction needs to be committed/rolled back.</p>
+<p>Next, let&rsquo;s take a look at the server-side transaction component, as shown in the following figure.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/pulsar/">pulsar</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/package-json/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">package.json Guide</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/css-font-variation/">
+            <span class="next-text nav-default">CSS font-variation The charm of changeable fonts</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

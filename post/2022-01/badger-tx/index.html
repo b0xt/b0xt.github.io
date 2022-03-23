@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>badger transaction process - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="badger is dgraph&amp;rsquo;s open source LSMTree KV engine, which has KV separation, transaction, concurrent merge and other enhancements compared to leveldb, and is a more production-level storage engine in the go ecosystem. Here is a look at its transaction implementation. badger implements Serializable Snapshot isolation level (SSI) for optimistic concurrency-controlled transactions. Compared to Snapshot isolation level (SI), SSI tracks read operations in a transaction in addition to write operations for" /><meta name="keywords" content="badger, transaction" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/badger-tx/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="badger transaction process" />
+<meta property="og:description" content="badger is dgraph&rsquo;s open source LSMTree KV engine, which has KV separation, transaction, concurrent merge and other enhancements compared to leveldb, and is a more production-level storage engine in the go ecosystem. Here is a look at its transaction implementation. badger implements Serializable Snapshot isolation level (SSI) for optimistic concurrency-controlled transactions. Compared to Snapshot isolation level (SI), SSI tracks read operations in a transaction in addition to write operations for" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/badger-tx/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-12T13:11:30+08:00" />
+<meta property="article:modified_time" content="2022-01-12T13:11:30+08:00" />
+
+<meta itemprop="name" content="badger transaction process">
+<meta itemprop="description" content="badger is dgraph&rsquo;s open source LSMTree KV engine, which has KV separation, transaction, concurrent merge and other enhancements compared to leveldb, and is a more production-level storage engine in the go ecosystem. Here is a look at its transaction implementation. badger implements Serializable Snapshot isolation level (SSI) for optimistic concurrency-controlled transactions. Compared to Snapshot isolation level (SI), SSI tracks read operations in a transaction in addition to write operations for"><meta itemprop="datePublished" content="2022-01-12T13:11:30+08:00" />
+<meta itemprop="dateModified" content="2022-01-12T13:11:30+08:00" />
+<meta itemprop="wordCount" content="2189">
+<meta itemprop="keywords" content="badger," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="badger transaction process"/>
+<meta name="twitter:description" content="badger is dgraph&rsquo;s open source LSMTree KV engine, which has KV separation, transaction, concurrent merge and other enhancements compared to leveldb, and is a more production-level storage engine in the go ecosystem. Here is a look at its transaction implementation. badger implements Serializable Snapshot isolation level (SSI) for optimistic concurrency-controlled transactions. Compared to Snapshot isolation level (SI), SSI tracks read operations in a transaction in addition to write operations for"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">badger transaction process</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-12 13:11:30 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2189 words </span>
+          <span class="more-meta"> 5 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#lifecycle-of-a-transaction">Lifecycle of a transaction</a></li>
+        <li><a href="#transaction-start">Transaction start</a></li>
+        <li><a href="#transaction-execution">Transaction Execution</a></li>
+        <li><a href="#transaction-commit">Transaction Commit</a></li>
+        <li><a href="#transaction-cleanup">Transaction cleanup</a></li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>badger is dgraph&rsquo;s open source LSMTree KV engine, which has KV separation, transaction, concurrent merge and other enhancements compared to leveldb, and is a more production-level storage engine in the go ecosystem. Here is a look at its transaction implementation.</p>
+<p>badger implements Serializable Snapshot isolation level (SSI) for optimistic concurrency-controlled transactions. Compared to Snapshot isolation level (SI), SSI tracks read operations in a transaction in addition to write operations for conflict detection. Conflict checking is performed at Commit time, and data read by the current transaction that has been modified by another transaction during the execution of the transaction will fail to commit.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/12/a6cfb0274ce943248531bcc6b1533f34.png" alt="image"></p>
+<h2 id="lifecycle-of-a-transaction">Lifecycle of a transaction</h2>
+<p>The life cycle of an optimistic concurrency control transaction is roughly divided into four segments, granting, tracking reads and writes, committing, and cleaning up.</p>
+<ul>
+<li>Transaction start: get the timing at the start of the transaction</li>
+<li>Transaction process: track the key involved in the transaction&rsquo;s read and write operations, read operations during the transaction according to the snapshot at the time of the start, the transaction&rsquo;s write content is temporarily stored in memory</li>
+<li>Transaction commit: detects conflicts based on the keys tracked in the transaction, and obtains the timing of the transaction commit time to make the writes take effect</li>
+<li>Clean up the old transaction: When the active transaction is completed, the transaction-related data such as snapshot data and conflict detection data that are no longer needed can be released.</li>
+</ul>
+<p>To manage the lifecycle of a transaction, two parts of meta information need to be recorded separately for each transaction and at the global level.</p>
+<ul>
+<li>At the transaction level, you need to record the list of keys you read and write, as well as the start and commit timestamps of the transaction, which are maintained in the Txn structure.</li>
+<li>At the global level, you need to manage the global timestamp and the list of recently committed transactions, which is used for conflict checking the range of transactions committed in the middle of the transaction start and commit timestamps in a new transaction commit, and even the minimum timestamp of currently active transactions, which is used for cleaning up the old transaction information, which is maintained in the oracle structure.</li>
+</ul>
+<p>The timestamp obtained here is not a physical time, but a logical one: all data changes come from the moment the transaction is committed, so the timestamp is incremented only when the transaction is committed.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/12/d7a2610df516440a8994d20121005e30.png" alt="image"></p>
+<p>Take the above diagram as an example, transaction 4 needs to perform conflict detection with transaction 3 and transaction 1 at commit time, because the commit time of transaction 3 and transaction 1 is between the start and commit of transaction 4, and the keys written by transaction 3 and transaction 1 are considered to be in conflict if they overlap with the list of keys read and written by transaction 4.</p>
+<p>Next, let&rsquo;s go through the four lifecycles and go through the processes involved in badger.</p>
+<h2 id="transaction-start">Transaction start</h2>
+<p>The entry point for starting a new transaction is the db.newTransaction() function. This function is relatively simple, except for initializing a few fields, the only part that has behavioral semantics is the line <code>txn.readTs = db.orc.readTs()</code> where the request is granted. The entry point for starting a new transaction is the db.newTransaction() function. This function is relatively simple, except for initializing a few fields, the only part with behavioral semantics is the line <code>txn.readTs = db.orc.readTs()</code> where the time request is made. The entry point for starting a new transaction is the db.newTransaction() function. This function is relatively simple, except for initializing a few fields, the only part with behavioral semantics is the line <code>txn.readTs = db.orc.readTs()</code> where the time request is made.</p>
+<p>Take a look at the implementation of the readTs() function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">o</span> <span class="o">*</span><span class="nx">oracle</span><span class="p">)</span> <span class="nf">readTs</span><span class="p">()</span> <span class="kt">uint64</span> <span class="p">{</span>
+	<span class="c1">// 忽略 isManaged 部分逻辑
+</span><span class="c1"></span>
+	<span class="kd">var</span> <span class="nx">readTs</span> <span class="kt">uint64</span>
+	<span class="nx">o</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">readTs</span> <span class="p">=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">nextTxnTs</span> <span class="o">-</span> <span class="mi">1</span>
+	<span class="nx">o</span><span class="p">.</span><span class="nx">readMark</span><span class="p">.</span><span class="nf">Begin</span><span class="p">(</span><span class="nx">readTs</span><span class="p">)</span>
+	<span class="nx">o</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+	<span class="c1">// Wait for all txns which have no conflicts, have been assigned a commit
+</span><span class="c1"></span>	<span class="c1">// timestamp and are going through the write to value log and LSM tree
+</span><span class="c1"></span>	<span class="c1">// process. Not waiting here could mean that some txns which have been
+</span><span class="c1"></span>	<span class="c1">// committed would not be read.
+</span><span class="c1"></span>	<span class="nx">y</span><span class="p">.</span><span class="nf">Check</span><span class="p">(</span><span class="nx">o</span><span class="p">.</span><span class="nx">txnMark</span><span class="p">.</span><span class="nf">WaitForMark</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">Background</span><span class="p">(),</span> <span class="nx">readTs</span><span class="p">))</span>
+	<span class="k">return</span> <span class="nx">readTs</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The logic of the grant is simple, just copy the current timestamp recorded in the nextTxnTs field from the oracle object.</p>
+<p>Here is a detail, as mentioned earlier the incremental timestamp occurs at the commit of the transaction, there will be a time window when the timestamp has been incremented but the write has not yet fallen, so if the transaction starts at this time, it will read the old data instead of the post-timestamp snapshot. The solution is to wait for the transaction with the current timestamp to finish writing before starting the transaction.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/12/d0949a0d2ccb42a082e9441b7a81fcb1.png" alt="image"></p>
+<p>The txnMark field is a WaterMark structure type that internally maintains a heap data structure that can be used to track notifications of changes to the timestamp segment of a transaction.</p>
+<p>In addition to waiting for the current timestamp-related transaction to complete writing based on txnMark, the readTs function has a line o.readMark.Begin(readTs). readMark is a WaterMark structure like txnMark, but it does not take advantage of the WaterMark structure&rsquo;s ability to wait for point bits, only its s heap data structure to keep track of the timestamp range of currently active transactions, which is used to find out which transactions are ready to expire for recycling.</p>
+<h2 id="transaction-execution">Transaction Execution</h2>
+<p>During transaction execution, writes are temporarily stored in the pendingWrites buffer in memory. managed mode, if the same key is written to multiple times in a transaction, the historical version of the data inserted in the transaction is stored in the duplicateWrites buffer, ignoring the duplicateWrites field for now.</p>
+<p>The read operation during the transaction will first read the pendingWrites buffer, and then read the data in the LSM Tree. badger inherits the idea of iterator combination from leveldb, encapsulating the read link of pendingWrites as an Iterator, and working with MemTableIterator, TableIterator and other Iterators. TableIterator and other Iterators are combined into the final Iterator by MergeIterator.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// NewIterator returns a new iterator. Depending upon the options, either only keys, or both
+</span><span class="c1">// key-value pairs would be fetched. The keys are returned in lexicographically sorted order.
+</span><span class="c1">// Using prefetch is recommended if you&#39;re doing a long running iteration, for performance.
+</span><span class="c1">//
+</span><span class="c1">// Multiple Iterators:
+</span><span class="c1">// For a read-only txn, multiple iterators can be running simultaneously.  However, for a read-write
+</span><span class="c1">// txn, iterators have the nuance of being a snapshot of the writes for the transaction at the time
+</span><span class="c1">// iterator was created. If writes are performed after an iterator is created, then that iterator
+</span><span class="c1">// will not be able to see those writes. Only writes performed before an iterator was created can be
+</span><span class="c1">// viewed.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">txn</span> <span class="o">*</span><span class="nx">Txn</span><span class="p">)</span> <span class="nf">NewIterator</span><span class="p">(</span><span class="nx">opt</span> <span class="nx">IteratorOptions</span><span class="p">)</span> <span class="o">*</span><span class="nx">Iterator</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">txn</span><span class="p">.</span><span class="nx">discarded</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="s">&#34;Transaction has already been discarded&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">txn</span><span class="p">.</span><span class="nx">db</span><span class="p">.</span><span class="nf">IsClosed</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nb">panic</span><span class="p">(</span><span class="nx">ErrDBClosed</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Keep track of the number of active iterators.
+</span><span class="c1"></span>	<span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">txn</span><span class="p">.</span><span class="nx">numIterators</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+	<span class="c1">// TODO: If Prefix is set, only pick those memtables which have keys with
+</span><span class="c1"></span>	<span class="c1">// the prefix.
+</span><span class="c1"></span>	<span class="nx">tables</span><span class="p">,</span> <span class="nx">decr</span> <span class="o">:=</span> <span class="nx">txn</span><span class="p">.</span><span class="nx">db</span><span class="p">.</span><span class="nf">getMemTables</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nf">decr</span><span class="p">()</span>
+	<span class="nx">txn</span><span class="p">.</span><span class="nx">db</span><span class="p">.</span><span class="nx">vlog</span><span class="p">.</span><span class="nf">incrIteratorCount</span><span class="p">()</span>
+	<span class="kd">var</span> <span class="nx">iters</span> <span class="p">[]</span><span class="nx">y</span><span class="p">.</span><span class="nx">Iterator</span>
+	<span class="k">if</span> <span class="nx">itr</span> <span class="o">:=</span> <span class="nx">txn</span><span class="p">.</span><span class="nf">newPendingWritesIterator</span><span class="p">(</span><span class="nx">opt</span><span class="p">.</span><span class="nx">Reverse</span><span class="p">);</span> <span class="nx">itr</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">iters</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">iters</span><span class="p">,</span> <span class="nx">itr</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">tables</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">iters</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">iters</span><span class="p">,</span> <span class="nx">tables</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">sl</span><span class="p">.</span><span class="nf">NewUniIterator</span><span class="p">(</span><span class="nx">opt</span><span class="p">.</span><span class="nx">Reverse</span><span class="p">))</span>
+	<span class="p">}</span>
+	<span class="nx">iters</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">iters</span><span class="p">,</span> <span class="nx">txn</span><span class="p">.</span><span class="nx">db</span><span class="p">.</span><span class="nx">lc</span><span class="p">.</span><span class="nf">iterators</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">opt</span><span class="p">)</span><span class="o">...</span><span class="p">)</span> <span class="c1">// This will increment references.
+</span><span class="c1"></span>	<span class="nx">res</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Iterator</span><span class="p">{</span>
+		<span class="nx">txn</span><span class="p">:</span>    <span class="nx">txn</span><span class="p">,</span>
+		<span class="nx">iitr</span><span class="p">:</span>   <span class="nx">table</span><span class="p">.</span><span class="nf">NewMergeIterator</span><span class="p">(</span><span class="nx">iters</span><span class="p">,</span> <span class="nx">opt</span><span class="p">.</span><span class="nx">Reverse</span><span class="p">),</span>
+		<span class="nx">opt</span><span class="p">:</span>    <span class="nx">opt</span><span class="p">,</span>
+		<span class="nx">readTs</span><span class="p">:</span> <span class="nx">txn</span><span class="p">.</span><span class="nx">readTs</span><span class="p">,</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nx">res</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The badger stores commitTs as a suffix of the key in the LSM Tree, and the Iterator is also timestamp-aware in its iterations, iterating over the snapshot data at the time of readTs. This is consistent with the sequence number of leveldb and the iterative behavior of Snapshot.</p>
+<h2 id="transaction-commit">Transaction Commit</h2>
+<p>The commit entry point for the transaction is the Commit() function, which calls the commitAndSend() function, which is the bulk of the logic. The general process consists of.</p>
+<ol>
+<li>perform transaction conflict detection via orc.newCommitTs(txn), and if there is no conflict, get the grant commitTs</li>
+<li>loop to bind commitTs to the version of the Entry in pendingWrites and duplicateWrites, and make the stored key bind commitTs</li>
+<li>call txn.db.sendToWriteCh(entries) to put the write buffer into the drop write</li>
+<li>wait for the completion of the drop, then notify orc.doneCommit(commitTs) to move the txnMark point</li>
+</ol>
+<p>newCommitTs internally initiates conflict detection and expired transaction cleanup and causes transactions to be tracked to commitedTxns.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">o</span> <span class="o">*</span><span class="nx">oracle</span><span class="p">)</span> <span class="nf">newCommitTs</span><span class="p">(</span><span class="nx">txn</span> <span class="o">*</span><span class="nx">Txn</span><span class="p">)</span> <span class="kt">uint64</span> <span class="p">{</span>
+	<span class="nx">o</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">o</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+
+	<span class="k">if</span> <span class="nx">o</span><span class="p">.</span><span class="nf">hasConflict</span><span class="p">(</span><span class="nx">txn</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="mi">0</span>
+	<span class="p">}</span>
+
+	<span class="kd">var</span> <span class="nx">ts</span> <span class="kt">uint64</span>
+	<span class="nx">o</span><span class="p">.</span><span class="nf">doneRead</span><span class="p">(</span><span class="nx">txn</span><span class="p">)</span>
+	<span class="nx">o</span><span class="p">.</span><span class="nf">cleanupCommittedTransactions</span><span class="p">()</span>
+
+	<span class="c1">// This is the general case, when user doesn&#39;t specify the read and commit ts.
+</span><span class="c1"></span>	<span class="nx">ts</span> <span class="p">=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">nextTxnTs</span>
+	<span class="nx">o</span><span class="p">.</span><span class="nx">nextTxnTs</span><span class="o">++</span>
+	<span class="nx">o</span><span class="p">.</span><span class="nx">txnMark</span><span class="p">.</span><span class="nf">Begin</span><span class="p">(</span><span class="nx">ts</span><span class="p">)</span>
+
+	<span class="nx">y</span><span class="p">.</span><span class="nf">AssertTrue</span><span class="p">(</span><span class="nx">ts</span> <span class="o">&gt;=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">lastCleanupTs</span><span class="p">)</span>
+
+	<span class="k">if</span> <span class="nx">o</span><span class="p">.</span><span class="nx">detectConflicts</span> <span class="p">{</span>
+		<span class="c1">// We should ensure that txns are not added to o.committedTxns slice when
+</span><span class="c1"></span>		<span class="c1">// conflict detection is disabled otherwise this slice would keep growing.
+</span><span class="c1"></span>		<span class="nx">o</span><span class="p">.</span><span class="nx">committedTxns</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">o</span><span class="p">.</span><span class="nx">committedTxns</span><span class="p">,</span> <span class="nx">committedTxn</span><span class="p">{</span>
+			<span class="nx">ts</span><span class="p">:</span>           <span class="nx">ts</span><span class="p">,</span>
+			<span class="nx">conflictKeys</span><span class="p">:</span> <span class="nx">txn</span><span class="p">.</span><span class="nx">conflictKeys</span><span class="p">,</span>
+		<span class="p">})</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="nx">ts</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The logic of conflict detection is simple: it iterate through committedTxns, find out which transactions have been committed since the start of the current transaction, and determine whether the key you read exists in the write list of other transactions.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">  <span class="c1">// hasConflict must be called while having a lock.
+</span><span class="c1"></span>  <span class="kd">func</span> <span class="p">(</span><span class="nx">o</span> <span class="o">*</span><span class="nx">oracle</span><span class="p">)</span> <span class="nf">hasConflict</span><span class="p">(</span><span class="nx">txn</span> <span class="o">*</span><span class="nx">Txn</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+      <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">txn</span><span class="p">.</span><span class="nx">reads</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+          <span class="k">return</span> <span class="kc">false</span>
+      <span class="p">}</span>
+      <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">committedTxn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">o</span><span class="p">.</span><span class="nx">committedTxns</span> <span class="p">{</span>
+          <span class="c1">// If the committedTxn.ts is less than txn.readTs that implies that the
+</span><span class="c1"></span>          <span class="c1">// committedTxn finished before the current transaction started.
+</span><span class="c1"></span>          <span class="c1">// We don&#39;t need to check for conflict in that case.
+</span><span class="c1"></span>          <span class="c1">// This change assumes linearizability. Lack of linearizability could
+</span><span class="c1"></span>          <span class="c1">// cause the read ts of a new txn to be lower than the commit ts of
+</span><span class="c1"></span>          <span class="c1">// a txn before it (@mrjn).
+</span><span class="c1"></span>          <span class="k">if</span> <span class="nx">committedTxn</span><span class="p">.</span><span class="nx">ts</span> <span class="o">&lt;=</span> <span class="nx">txn</span><span class="p">.</span><span class="nx">readTs</span> <span class="p">{</span>
+              <span class="k">continue</span>
+          <span class="p">}</span>
+
+          <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ro</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">txn</span><span class="p">.</span><span class="nx">reads</span> <span class="p">{</span>
+              <span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">has</span> <span class="o">:=</span> <span class="nx">committedTxn</span><span class="p">.</span><span class="nx">conflictKeys</span><span class="p">[</span><span class="nx">ro</span><span class="p">];</span> <span class="nx">has</span> <span class="p">{</span>
+                  <span class="k">return</span> <span class="kc">true</span>
+              <span class="p">}</span>
+          <span class="p">}</span>
+      <span class="p">}</span>
+
+      <span class="k">return</span> <span class="kc">false</span>
+  <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="transaction-cleanup">Transaction cleanup</h2>
+<p>The committedTxns array, which records information about recent committed transactions, obviously cannot grow indefinitely. So when can the committedTxns array be cleaned up? The criterion is the start timestamp of the earliest active transaction. If the commit timestamp of a historical transaction is earlier than the start timestamp of the currently active transaction, it is not considered for conflict checking and can be recycled in committedTxns.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/12/67e9030206b849d5a221670a5744df73.png" alt="image"></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">o</span> <span class="o">*</span><span class="nx">oracle</span><span class="p">)</span> <span class="nf">cleanupCommittedTransactions</span><span class="p">()</span> <span class="p">{</span> <span class="c1">// Must be called under o.Lock
+</span><span class="c1"></span>	<span class="k">if</span> <span class="p">!</span><span class="nx">o</span><span class="p">.</span><span class="nx">detectConflicts</span> <span class="p">{</span>
+		<span class="c1">// When detectConflicts is set to false, we do not store any
+</span><span class="c1"></span>		<span class="c1">// committedTxns and so there&#39;s nothing to clean up.
+</span><span class="c1"></span>		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="c1">// Same logic as discardAtOrBelow but unlocked
+</span><span class="c1"></span>	<span class="kd">var</span> <span class="nx">maxReadTs</span> <span class="kt">uint64</span>
+	<span class="k">if</span> <span class="nx">o</span><span class="p">.</span><span class="nx">isManaged</span> <span class="p">{</span>
+		<span class="nx">maxReadTs</span> <span class="p">=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">discardTs</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="nx">maxReadTs</span> <span class="p">=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">readMark</span><span class="p">.</span><span class="nf">DoneUntil</span><span class="p">()</span> <span class="c1">// 在 readMark 堆中获取当前活跃事务的最早 readTs
+</span><span class="c1"></span>	<span class="p">}</span>
+
+	<span class="nx">y</span><span class="p">.</span><span class="nf">AssertTrue</span><span class="p">(</span><span class="nx">maxReadTs</span> <span class="o">&gt;=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">lastCleanupTs</span><span class="p">)</span>
+
+	<span class="c1">// do not run clean up if the maxReadTs (read timestamp of the
+</span><span class="c1"></span>	<span class="c1">// oldest transaction that is still in flight) has not increased
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">maxReadTs</span> <span class="o">==</span> <span class="nx">o</span><span class="p">.</span><span class="nx">lastCleanupTs</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="nx">o</span><span class="p">.</span><span class="nx">lastCleanupTs</span> <span class="p">=</span> <span class="nx">maxReadTs</span>
+
+	<span class="nx">tmp</span> <span class="o">:=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">committedTxns</span><span class="p">[:</span><span class="mi">0</span><span class="p">]</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">txn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">o</span><span class="p">.</span><span class="nx">committedTxns</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">txn</span><span class="p">.</span><span class="nx">ts</span> <span class="o">&lt;=</span> <span class="nx">maxReadTs</span> <span class="p">{</span>
+			<span class="k">continue</span>
+		<span class="p">}</span>
+		<span class="nx">tmp</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">tmp</span><span class="p">,</span> <span class="nx">txn</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">o</span><span class="p">.</span><span class="nx">committedTxns</span> <span class="p">=</span> <span class="nx">tmp</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>oracle will record lastCleanupTs to record the timestamp of the last cleanup to avoid unnecessary cleanup operations.</p>
+<h2 id="summary">Summary</h2>
+<ul>
+<li>The transaction-related structures in badger include Txn and oracle. Txn internal information is mainly the start timestamp, commit timestamp, and the list of read and write keys. oracle is equivalent to the transaction manager, which maintains the list of recently committed transactions, the global timestamp, and the earliest timestamp of currently active transactions.</li>
+<li>Transaction timestamps are logical timestamps that increment by 1 each time a transaction commits.</li>
+<li>The logic of conflict detection in SSI transactions is to find the list of transactions that committed during the execution of the current transaction and check if the key list read by the current transaction overlaps with the key list written by those transactions.</li>
+<li>The internal WaterMark structure is a heap, which is used to manage and find the beginning and end segments of the transaction. oracle&rsquo;s txnMarker is mainly used to coordinate the time window for waiting for the Commit grant and the drop, and the readMarker manages the earliest timestamp of the currently active transaction, which is used to clean up the expired committedTxns.</li>
+</ul>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/badger/">badger</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/notes-zgc/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">ZGC Notes: Colored Pointers</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/rocksdb-tx/">
+            <span class="next-text nav-default">Rocksdb transactions</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

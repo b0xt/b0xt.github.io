@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Implementing Lock Free Queues With Go - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="A queue is a very common data structure that allows only outgoing (dequeue) operations at the front end of a table (head) and incoming (enqueue) operations at the back end of a table (tail). Like the stack data structure, a queue is a linear table with restricted operations. The end that performs the insert operation is called the tail and the end that performs the delete operation is called the header." /><meta name="keywords" content="Go,Lock-Free-Queue" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2021-07/implementing-lock-free-queues-with-go/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Implementing Lock Free Queues With Go" />
+<meta property="og:description" content="A queue is a very common data structure that allows only outgoing (dequeue) operations at the front end of a table (head) and incoming (enqueue) operations at the back end of a table (tail). Like the stack data structure, a queue is a linear table with restricted operations. The end that performs the insert operation is called the tail and the end that performs the delete operation is called the header." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2021-07/implementing-lock-free-queues-with-go/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-07-09T14:41:53+08:00" />
+<meta property="article:modified_time" content="2021-07-09T14:41:53+08:00" />
+
+<meta itemprop="name" content="Implementing Lock Free Queues With Go">
+<meta itemprop="description" content="A queue is a very common data structure that allows only outgoing (dequeue) operations at the front end of a table (head) and incoming (enqueue) operations at the back end of a table (tail). Like the stack data structure, a queue is a linear table with restricted operations. The end that performs the insert operation is called the tail and the end that performs the delete operation is called the header."><meta itemprop="datePublished" content="2021-07-09T14:41:53+08:00" />
+<meta itemprop="dateModified" content="2021-07-09T14:41:53+08:00" />
+<meta itemprop="wordCount" content="2275">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Implementing Lock Free Queues With Go"/>
+<meta name="twitter:description" content="A queue is a very common data structure that allows only outgoing (dequeue) operations at the front end of a table (head) and incoming (enqueue) operations at the back end of a table (tail). Like the stack data structure, a queue is a linear table with restricted operations. The end that performs the insert operation is called the tail and the end that performs the delete operation is called the header."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Implementing Lock Free Queues With Go</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-07-09 14:41:53 </span>
+        <div class="post-category">
+            <a href="/categories/data-structure/"> data-structure </a>
+            <a href="/categories/algorithm/"> algorithm </a>
+            </div>
+          <span class="more-meta"> 2275 words </span>
+          <span class="more-meta"> 11 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#lock-free-queue-algorithm">lock-free queue algorithm</a></li>
+        <li><a href="#realization">Realization</a>
+          <ul>
+            <li><a href="#1-lock-free-queue">1. lock-free queue</a></li>
+            <li><a href="#2-two-lock-queue">2. two-lock queue</a></li>
+            <li><a href="#3-mutex-based-queue">3. mutex-based queue</a></li>
+          </ul>
+        </li>
+        <li><a href="#performance">Performance</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>A <code>queue</code> is a very common data structure that allows only outgoing (<code>dequeue</code>) operations at the front end of a table (<code>head</code>) and incoming (<code>enqueue</code>) operations at the back end of a table (<code>tail</code>). Like the stack data structure, a queue is a linear table with restricted operations. The end that performs the insert operation is called the <code>tail</code> and the end that performs the delete operation is called the  <code>header</code>.</p>
+<p>In a concurrent environment using queues, it is necessary to take into account the multi-threaded (multi-threaded) concurrent read and write problems, there may be multiple write (queue) operation threads, while there may also be multiple threads read operation threads, in this case, we want to ensure that the data is not lost, not duplicated, but also to ensure that the function of the queue remains unchanged, that is, the first-in-first-out logic, as long as there is data, you can get out of the column.</p>
+<p>Admittedly, concurrent access to the queue can be achieved through an out-of-exclusion lock. Generally, the queue is implemented through pointers and only operates at the head and tail of the queue, so the critical area protected by this out-of-exclusion lock does not have a very complex execution logic and the critical area is processed quickly, so in general the efficiency of the queue is already very high by implementing the out-of-exclusion lock. However, in some cases, by implementing lock-free algorithm, we can further improve the performance of concurrent queues.</p>
+<p>This article introduces some background knowledge of the <code>lock-free queue</code> algorithm, and implements three concurrent queues and provides the results of performance tests.</p>
+<p>The code base can be found on github: <a href="https://github.com/smallnest/queue">smallnest/queue</a></p>
+<h2 id="lock-free-queue-algorithm">lock-free queue algorithm</h2>
+<p>Speaking of lock-free queue algorithms, we have to mention Maged M. Michael and Michael L. Scott&rsquo;s 1996 paper <a href="https://www.cs.rochester.edu/u/scott/papers/1996_PODC_queues.pdf">Simple, Fast, and Practical Non-Blocking and Blocking
+Concurrent Queue Algorithms</a>, which reviews some implementations of concurrent queues and their limitations, proposes a very simple implementation of <code>lock-free queue</code>, and also provides a <code>two-lock queue</code> algorithm on specific machines such as those without CAS instructions. This article has been cited nearly 1000 times.</p>
+<p>It is only worth mentioning that Java&rsquo;s <code>ConcurrentLinkedQueue</code> is based on this algorithm:</p>
+<blockquote>
+<p>This implementation employs an efficient non-blocking algorithm based on one described in Simple, Fast, and Practical Non-Blocking and Blocking Concurrent Queue Algorithms by Maged M. Michael and Michael L. Scott.</p>
+</blockquote>
+<p>Most of the <code>lock-free</code> algorithms are implemented through <code>CAS</code> operations.</p>
+<p>This article provides a pseudo-code for the <code>lock-free queue</code> algorithm, which is also very small, so it can be easily implemented by various programming languages. I have listed the pseudo-code here:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">structure pointer_t {ptr: pointer to node_t, count: unsigned integer}
+ structure node_t {value: data type, next: pointer_t}
+ structure queue_t {Head: pointer_t, Tail: pointer_t}
+ 
+ initialize(Q: pointer to queue_t)
+    node = new_node()		// Allocate a free node
+    node-&gt;next.ptr = NULL	// Make it the only node in the linked list
+    Q-&gt;Head.ptr = Q-&gt;Tail.ptr = node	// Both Head and Tail point to it
+ 
+ enqueue(Q: pointer to queue_t, value: data type)
+  E1:   node = new_node()	// Allocate a new node from the free list
+  E2:   node-&gt;value = value	// Copy enqueued value into node
+  E3:   node-&gt;next.ptr = NULL	// Set next pointer of node to NULL
+  E4:   loop			// Keep trying until Enqueue is done
+  E5:      tail = Q-&gt;Tail	// Read Tail.ptr and Tail.count together
+  E6:      next = tail.ptr-&gt;next	// Read next ptr and count fields together
+  E7:      if tail == Q-&gt;Tail	// Are tail and next consistent?
+              // Was Tail pointing to the last node?
+  E8:         if next.ptr == NULL
+                 // Try to link node at the end of the linked list
+  E9:            if CAS(&amp;tail.ptr-&gt;next, next, &lt;node, next.count+1&gt;)
+ E10:               break	// Enqueue is done.  Exit loop
+ E11:            endif
+ E12:         else		// Tail was not pointing to the last node
+                 // Try to swing Tail to the next node
+ E13:            CAS(&amp;Q-&gt;Tail, tail, &lt;next.ptr, tail.count+1&gt;)
+ E14:         endif
+ E15:      endif
+ E16:   endloop
+        // Enqueue is done.  Try to swing Tail to the inserted node
+ E17:   CAS(&amp;Q-&gt;Tail, tail, &lt;node, tail.count+1&gt;)
+ 
+ dequeue(Q: pointer to queue_t, pvalue: pointer to data type): boolean
+  D1:   loop			     // Keep trying until Dequeue is done
+  D2:      head = Q-&gt;Head	     // Read Head
+  D3:      tail = Q-&gt;Tail	     // Read Tail
+  D4:      next = head.ptr-&gt;next    // Read Head.ptr-&gt;next
+  D5:      if head == Q-&gt;Head	     // Are head, tail, and next consistent?
+  D6:         if head.ptr == tail.ptr // Is queue empty or Tail falling behind?
+  D7:            if next.ptr == NULL  // Is queue empty?
+  D8:               return FALSE      // Queue is empty, couldn&#39;t dequeue
+  D9:            endif
+                 // Tail is falling behind.  Try to advance it
+ D10:            CAS(&amp;Q-&gt;Tail, tail, &lt;next.ptr, tail.count+1&gt;)
+ D11:         else		     // No need to deal with Tail
+                 // Read value before CAS
+                 // Otherwise, another dequeue might free the next node
+ D12:            *pvalue = next.ptr-&gt;value
+                 // Try to swing Head to the next node
+ D13:            if CAS(&amp;Q-&gt;Head, head, &lt;next.ptr, head.count+1&gt;)
+ D14:               break             // Dequeue is done.  Exit loop
+ D15:            endif
+ D16:         endif
+ D17:      endif
+ D18:   endloop
+ D19:   free(head.ptr)		     // It is safe now to free the old node
+ D20:   return TRUE                   // Queue was not empty, dequeue succeeded
+</code></pre></td></tr></table>
+</div>
+</div><p>initialize Initialize a queue, and use an auxiliary empty node to do the header, to facilitate the processing of incoming and outgoing queues.</p>
+<p>In the incoming pair, E1~E3 first create a new node, and save the incoming data on this node, the next step is to insert to the end of the queue.</p>
+<p>E4~E16 is a loop that keeps trying to insert the data into the queue, in the case of concurrency CAS may not be successful, so Hu keeps trying, there will always be one of the concurrent threads that is successful, so it is a lock-free algorithm.</p>
+<p>E5~E6 is to get the tail pointer and the next node pointed by the tail pointer. If there is no concurrency, the next node pointed by the tail pointer here is empty if there is no concurrency. But if in the case of concurrency, at the time of line E7 another thread may have joined the new node, or the previous tail node is out of the pair, so the implementation in E7 first makes a judgment and re-fetches if it is not satisfied.</p>
+<p>In the case that the condition of E8 is satisfied, it means that the currently acquired tail pointer is still the tail pointer, then in line E9 the node is added to the queue by CAS and the loop is jumped out, but the tail pointer has not changed at this time.
+Otherwise, a new node may have been added to the queue in the process, then in line E12, try to move the tail pointer backward to point to the new node.</p>
+<p>At the end of the loop, which is definitely already in the queue, try to point the tail pointer to the newly inserted node. Of course a new node may have joined at this time, causing CAS to be unsuccessful, but it doesn&rsquo;t matter, because the node has already joined the queue, except that it is no longer the tail node. The logic to update the joined node will move the tail node to the last newly joined node.</p>
+<p>At the time of queuing out, D2~D4 get the head pointer and tail pointer, and D5 marks a step in processing with the head pointer unchanged, indicating that there are no other queuing out operations at this time.</p>
+<p>D6~D10 is the same node pointed by the tail pointer and the head pointer. There are two cases: 1 is an empty queue, then directly return false, because there is no data out of the column, 2 is a new entry of data, has not had time to adjust the tail pointer, then this time to move the tail pointer. Then try again.</p>
+<p>Otherwise, D12 first get the first data, first save the data, then try to move the head pointer to this node. Return this data and null the current node data of the head pointer, because the head pointer is an auxiliary node and does not need to save data.</p>
+<h2 id="realization">Realization</h2>
+<h3 id="1-lock-free-queue">1. lock-free queue</h3>
+<p>According to the pseudo-code in the paper, we can implement a lock-free queue using Go. here the pointer we use <code>unsafe.Pointer</code> to implement it, which is convenient for <code>CAS</code> operations.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">queue</span>
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;sync/atomic&#34;</span>
+	<span class="s">&#34;unsafe&#34;</span>
+<span class="p">)</span>
+<span class="c1">// LKQueue is a lock-free unbounded queue.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">LKQueue</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">head</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+	<span class="nx">tail</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+<span class="p">}</span>
+<span class="kd">type</span> <span class="nx">node</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">value</span> <span class="kd">interface</span><span class="p">{}</span>
+	<span class="nx">next</span>  <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+<span class="p">}</span>
+<span class="c1">// NewLKQueue returns an empty queue.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewLKQueue</span><span class="p">()</span> <span class="o">*</span><span class="nx">LKQueue</span> <span class="p">{</span>
+	<span class="nx">n</span> <span class="o">:=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">node</span><span class="p">{})</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">LKQueue</span><span class="p">{</span><span class="nx">head</span><span class="p">:</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">tail</span><span class="p">:</span> <span class="nx">n</span><span class="p">}</span>
+<span class="p">}</span>
+<span class="c1">// Enqueue puts the given value v at the tail of the queue.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">q</span> <span class="o">*</span><span class="nx">LKQueue</span><span class="p">)</span> <span class="nf">Enqueue</span><span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="nx">n</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">node</span><span class="p">{</span><span class="nx">value</span><span class="p">:</span> <span class="nx">v</span><span class="p">}</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">tail</span> <span class="o">:=</span> <span class="nf">load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">q</span><span class="p">.</span><span class="nx">tail</span><span class="p">)</span>
+		<span class="nx">next</span> <span class="o">:=</span> <span class="nf">load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tail</span><span class="p">.</span><span class="nx">next</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">tail</span> <span class="o">==</span> <span class="nf">load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">q</span><span class="p">.</span><span class="nx">tail</span><span class="p">)</span> <span class="p">{</span> <span class="c1">// are tail and next consistent?
+</span><span class="c1"></span>			<span class="k">if</span> <span class="nx">next</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="k">if</span> <span class="nf">cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tail</span><span class="p">.</span><span class="nx">next</span><span class="p">,</span> <span class="nx">next</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span> <span class="p">{</span>
+					<span class="nf">cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">q</span><span class="p">.</span><span class="nx">tail</span><span class="p">,</span> <span class="nx">tail</span><span class="p">,</span> <span class="nx">n</span><span class="p">)</span> <span class="c1">// Enqueue is done.  try to swing tail to the inserted node
+</span><span class="c1"></span>					<span class="k">return</span>
+				<span class="p">}</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span> <span class="c1">// tail was not pointing to the last node
+</span><span class="c1"></span>				<span class="c1">// try to swing Tail to the next node
+</span><span class="c1"></span>				<span class="nf">cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">q</span><span class="p">.</span><span class="nx">tail</span><span class="p">,</span> <span class="nx">tail</span><span class="p">,</span> <span class="nx">next</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+<span class="c1">// Dequeue removes and returns the value at the head of the queue.
+</span><span class="c1">// It returns nil if the queue is empty.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">q</span> <span class="o">*</span><span class="nx">LKQueue</span><span class="p">)</span> <span class="nf">Dequeue</span><span class="p">()</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">head</span> <span class="o">:=</span> <span class="nf">load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">q</span><span class="p">.</span><span class="nx">head</span><span class="p">)</span>
+		<span class="nx">tail</span> <span class="o">:=</span> <span class="nf">load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">q</span><span class="p">.</span><span class="nx">tail</span><span class="p">)</span>
+		<span class="nx">next</span> <span class="o">:=</span> <span class="nf">load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">head</span><span class="p">.</span><span class="nx">next</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">head</span> <span class="o">==</span> <span class="nf">load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">q</span><span class="p">.</span><span class="nx">head</span><span class="p">)</span> <span class="p">{</span> <span class="c1">// are head, tail, and next consistent?
+</span><span class="c1"></span>			<span class="k">if</span> <span class="nx">head</span> <span class="o">==</span> <span class="nx">tail</span> <span class="p">{</span> <span class="c1">// is queue empty or tail falling behind?
+</span><span class="c1"></span>				<span class="k">if</span> <span class="nx">next</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span> <span class="c1">// is queue empty?
+</span><span class="c1"></span>					<span class="k">return</span> <span class="kc">nil</span>
+				<span class="p">}</span>
+				<span class="c1">// tail is falling behind.  try to advance it
+</span><span class="c1"></span>				<span class="nf">cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">q</span><span class="p">.</span><span class="nx">tail</span><span class="p">,</span> <span class="nx">tail</span><span class="p">,</span> <span class="nx">next</span><span class="p">)</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="c1">// read value before CAS otherwise another dequeue might free the next node
+</span><span class="c1"></span>				<span class="nx">v</span> <span class="o">:=</span> <span class="nx">next</span><span class="p">.</span><span class="nx">value</span>
+				<span class="k">if</span> <span class="nf">cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">q</span><span class="p">.</span><span class="nx">head</span><span class="p">,</span> <span class="nx">head</span><span class="p">,</span> <span class="nx">next</span><span class="p">)</span> <span class="p">{</span>
+					<span class="k">return</span> <span class="nx">v</span> <span class="c1">// Dequeue is done.  return
+</span><span class="c1"></span>				<span class="p">}</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">load</span><span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span> <span class="p">(</span><span class="nx">n</span> <span class="o">*</span><span class="nx">node</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="p">(</span><span class="o">*</span><span class="nx">node</span><span class="p">)(</span><span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadPointer</span><span class="p">(</span><span class="nx">p</span><span class="p">))</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">cas</span><span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">old</span><span class="p">,</span> <span class="nx">new</span> <span class="o">*</span><span class="nx">node</span><span class="p">)</span> <span class="p">(</span><span class="nx">ok</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapPointer</span><span class="p">(</span>
+		<span class="nx">p</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">old</span><span class="p">),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">new</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="2-two-lock-queue">2. two-lock queue</h3>
+<p>The lock-free queue above implements an efficient concurrent queue via CAS, while this paper also implements a two-lock algorithm that can be applied to multiprocessors without atomic operations.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">queue</span>
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;sync&#34;</span>
+<span class="p">)</span>
+<span class="c1">// CQueue is a concurrent unbounded queue which uses two-Lock concurrent queue qlgorithm.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">CQueue</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">head</span>  <span class="o">*</span><span class="nx">cnode</span>
+	<span class="nx">tail</span>  <span class="o">*</span><span class="nx">cnode</span>
+	<span class="nx">hlock</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+	<span class="nx">tlock</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+<span class="p">}</span>
+<span class="kd">type</span> <span class="nx">cnode</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">value</span> <span class="kd">interface</span><span class="p">{}</span>
+	<span class="nx">next</span>  <span class="o">*</span><span class="nx">cnode</span>
+<span class="p">}</span>
+<span class="c1">// NewCQueue returns an empty CQueue.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewCQueue</span><span class="p">()</span> <span class="o">*</span><span class="nx">CQueue</span> <span class="p">{</span>
+	<span class="nx">n</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">cnode</span><span class="p">{}</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">CQueue</span><span class="p">{</span><span class="nx">head</span><span class="p">:</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">tail</span><span class="p">:</span> <span class="nx">n</span><span class="p">}</span>
+<span class="p">}</span>
+<span class="c1">// Enqueue puts the given value v at the tail of the queue.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">q</span> <span class="o">*</span><span class="nx">CQueue</span><span class="p">)</span> <span class="nf">Enqueue</span><span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="nx">n</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">cnode</span><span class="p">{</span><span class="nx">value</span><span class="p">:</span> <span class="nx">v</span><span class="p">}</span>
+	<span class="nx">q</span><span class="p">.</span><span class="nx">tlock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">q</span><span class="p">.</span><span class="nx">tail</span><span class="p">.</span><span class="nx">next</span> <span class="p">=</span> <span class="nx">n</span> <span class="c1">// Link node at the end of the linked list
+</span><span class="c1"></span>	<span class="nx">q</span><span class="p">.</span><span class="nx">tail</span> <span class="p">=</span> <span class="nx">n</span>      <span class="c1">// Swing Tail to node
+</span><span class="c1"></span>	<span class="nx">q</span><span class="p">.</span><span class="nx">tlock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+<span class="c1">// Dequeue removes and returns the value at the head of the queue.
+</span><span class="c1">// It returns nil if the queue is empty.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">q</span> <span class="o">*</span><span class="nx">CQueue</span><span class="p">)</span> <span class="nf">Dequeue</span><span class="p">()</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="nx">q</span><span class="p">.</span><span class="nx">hlock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">n</span> <span class="o">:=</span> <span class="nx">q</span><span class="p">.</span><span class="nx">head</span>
+	<span class="nx">newHead</span> <span class="o">:=</span> <span class="nx">n</span><span class="p">.</span><span class="nx">next</span>
+	<span class="k">if</span> <span class="nx">newHead</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">q</span><span class="p">.</span><span class="nx">hlock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+	<span class="nx">v</span> <span class="o">:=</span> <span class="nx">newHead</span><span class="p">.</span><span class="nx">value</span>
+	<span class="nx">newHead</span><span class="p">.</span><span class="nx">value</span> <span class="p">=</span> <span class="kc">nil</span>
+	<span class="nx">q</span><span class="p">.</span><span class="nx">head</span> <span class="p">=</span> <span class="nx">newHead</span>
+	<span class="nx">q</span><span class="p">.</span><span class="nx">hlock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">v</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="3-mutex-based-queue">3. mutex-based queue</h3>
+<p>Traditionally, we can implement a <code>queue</code> composed of a <code>mutex + slice</code>, and implement a simple <code>queue</code> without excessive pursuit of performance (time + space).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">queue</span>
+<span class="kn">import</span> <span class="s">&#34;sync&#34;</span>
+<span class="c1">// SliceQueue is an unbounded queue which uses a slice as underlying.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">SliceQueue</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">data</span> <span class="p">[]</span><span class="kd">interface</span><span class="p">{}</span>
+	<span class="nx">mu</span>   <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+<span class="p">}</span>
+<span class="c1">// NewSliceQueue returns an empty queue.
+</span><span class="c1">// You can give a initial capacity.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">NewSliceQueue</span><span class="p">(</span><span class="nx">n</span> <span class="kt">int</span><span class="p">)</span> <span class="p">(</span><span class="nx">q</span> <span class="o">*</span><span class="nx">SliceQueue</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="o">&amp;</span><span class="nx">SliceQueue</span><span class="p">{</span><span class="nx">data</span><span class="p">:</span> <span class="nb">make</span><span class="p">([]</span><span class="kd">interface</span><span class="p">{},</span> <span class="mi">0</span><span class="p">,</span><span class="nx">n</span><span class="p">)}</span>
+<span class="p">}</span>
+<span class="c1">// Enqueue puts the given value v at the tail of the queue.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">q</span> <span class="o">*</span><span class="nx">SliceQueue</span><span class="p">)</span> <span class="nf">Enqueue</span><span class="p">(</span><span class="nx">v</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="nx">q</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="nx">q</span><span class="p">.</span><span class="nx">data</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">q</span><span class="p">.</span><span class="nx">data</span><span class="p">,</span> <span class="nx">v</span><span class="p">)</span>
+	<span class="nx">q</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+<span class="c1">// Dequeue removes and returns the value at the head of the queue.
+</span><span class="c1">// It returns nil if the queue is empty.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">q</span> <span class="o">*</span><span class="nx">SliceQueue</span><span class="p">)</span> <span class="nf">Dequeue</span><span class="p">()</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="nx">q</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">q</span><span class="p">.</span><span class="nx">data</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">q</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+	<span class="nx">v</span> <span class="o">:=</span> <span class="nx">q</span><span class="p">.</span><span class="nx">data</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+	<span class="nx">q</span><span class="p">.</span><span class="nx">data</span> <span class="p">=</span> <span class="nx">q</span><span class="p">.</span><span class="nx">data</span><span class="p">[</span><span class="mi">1</span><span class="p">:]</span>
+	<span class="nx">q</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">return</span> <span class="nx">v</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="performance">Performance</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">goos: darwin
+goarch: amd64
+pkg: github.com/smallnest/queue
+BenchmarkQueue/lock-free_queue#4-4           	 8399941	       177 ns/op
+BenchmarkQueue/two-lock_queue#4-4            	 7544263	       155 ns/op
+BenchmarkQueue/slice-based_queue#4-4         	 6436875	       194 ns/op
+BenchmarkQueue/lock-free_queue#32-4          	 8399769	       140 ns/op
+BenchmarkQueue/two-lock_queue#32-4           	 7486357	       155 ns/op
+BenchmarkQueue/slice-based_queue#32-4        	 4572828	       235 ns/op
+BenchmarkQueue/lock-free_queue#1024-4        	 8418556	       140 ns/op
+BenchmarkQueue/two-lock_queue#1024-4         	 7888488	       155 ns/op
+BenchmarkQueue/slice-based_queue#1024-4      	 8902573	       218 ns/op
+
+</code></pre></td></tr></table>
+</div>
+</div><hr>
+<p>Reference <code>https://colobu.com/2020/08/14/lock-free-queue-in-go/</code></p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2021-07/npx-tutorial/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Npx Tutorial</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2021-07/spring-cloud-gateway-custom-exception-handling/">
+            <span class="next-text nav-default">Spring Cloud Gateway Custom Exception Handling</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

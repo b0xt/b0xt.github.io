@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Linux kernel page replacement algorithms - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Previously, Yu Zhao from Google submitted a Patch to the Linux kernel that modified the page swap algorithm in the kernel memory management module, proposing a multi-level LRU. This article takes you through the advantages of the page swap algorithm and multi-level LRU.
+What are pages and page replacement We know that memory paging mechanisms are used on almost all modern operating systems and processors. In some embedded operating systems and in special cases where processor resources are tight and there is no need to consider inter-process safety, or even the concept of threads, memory paging is not necessary." /><meta name="keywords" content="linux, Multi, Lru" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/linux-multi-lru/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Linux kernel page replacement algorithms" />
+<meta property="og:description" content="Previously, Yu Zhao from Google submitted a Patch to the Linux kernel that modified the page swap algorithm in the kernel memory management module, proposing a multi-level LRU. This article takes you through the advantages of the page swap algorithm and multi-level LRU.
+What are pages and page replacement We know that memory paging mechanisms are used on almost all modern operating systems and processors. In some embedded operating systems and in special cases where processor resources are tight and there is no need to consider inter-process safety, or even the concept of threads, memory paging is not necessary." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/linux-multi-lru/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-19T10:13:24+08:00" />
+<meta property="article:modified_time" content="2022-01-19T10:13:24+08:00" />
+
+<meta itemprop="name" content="Linux kernel page replacement algorithms">
+<meta itemprop="description" content="Previously, Yu Zhao from Google submitted a Patch to the Linux kernel that modified the page swap algorithm in the kernel memory management module, proposing a multi-level LRU. This article takes you through the advantages of the page swap algorithm and multi-level LRU.
+What are pages and page replacement We know that memory paging mechanisms are used on almost all modern operating systems and processors. In some embedded operating systems and in special cases where processor resources are tight and there is no need to consider inter-process safety, or even the concept of threads, memory paging is not necessary."><meta itemprop="datePublished" content="2022-01-19T10:13:24+08:00" />
+<meta itemprop="dateModified" content="2022-01-19T10:13:24+08:00" />
+<meta itemprop="wordCount" content="1382">
+<meta itemprop="keywords" content="linux," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Linux kernel page replacement algorithms"/>
+<meta name="twitter:description" content="Previously, Yu Zhao from Google submitted a Patch to the Linux kernel that modified the page swap algorithm in the kernel memory management module, proposing a multi-level LRU. This article takes you through the advantages of the page swap algorithm and multi-level LRU.
+What are pages and page replacement We know that memory paging mechanisms are used on almost all modern operating systems and processors. In some embedded operating systems and in special cases where processor resources are tight and there is no need to consider inter-process safety, or even the concept of threads, memory paging is not necessary."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Linux kernel page replacement algorithms</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-19 10:13:24 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1382 words </span>
+          <span class="more-meta"> 7 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#what-are-pages-and-page-replacement">What are pages and page replacement</a></li>
+        <li><a href="#page-replacement-algorithms">Page Replacement Algorithms</a></li>
+        <li><a href="#the-problem-of-two-level-lru">The problem of two-level LRU</a>
+          <ul>
+            <li><a href="#tldr">TL;DR</a></li>
+            <li><a href="#granularity">Granularity</a></li>
+            <li><a href="#performance-issues-with-inverted-page-table-scans">Performance issues with inverted page table scans</a></li>
+          </ul>
+        </li>
+        <li><a href="#multigenerational-lru">Multigenerational LRU</a></li>
+        <li><a href="#conclusion">Conclusion</a></li>
+        <li><a href="#read-more">read more</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Previously, Yu Zhao from Google submitted a Patch to the Linux kernel that modified the page swap algorithm in the kernel memory management module, proposing a multi-level LRU. This article takes you through the advantages of the page swap algorithm and multi-level LRU.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/19/f2b63030b18240d88b803537086c76d6.png" alt="linux"></p>
+<h2 id="what-are-pages-and-page-replacement">What are pages and page replacement</h2>
+<p>We know that <strong>memory paging mechanisms</strong> are used on almost all modern operating systems and processors. In some embedded operating systems and in special cases where processor resources are tight and there is no need to consider inter-process safety, or even the concept of threads, memory paging is not necessary. Memory paging is proposed for <strong>virtual memory mechanisms</strong>, where each process has its own separate address space for inter-process isolation on most modern operating systems, which is called virtual memory. Virtual memory needs to have a mapping to physical memory, but the problem is that this mapping table takes up memory space, especially on 64-bit processors where the address space to be mapped is so large that if the addresses were mapped one to one, the mapping table would be larger than the physical memory. This requires a <strong>paging mapping</strong> of the memory into pages of a certain size, e.g. 4KB, which correspond to the 4KB pages in physical memory, which is the memory paging mechanism. However, the page table is still very large, and modern architectures generally use <strong>multi-level page tables</strong> to significantly reduce the space occupied by the page table, such as the four-level page table in Linux.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/19/7d6a3ed3a4df4c60b48ff48fdf1b4713.png" alt="four-level page table in Linux"></p>
+<p>Linux even uses a five-level page table on the latest Intel Xeon processors, so I won&rsquo;t go into the details of processor-specific support. It is worth noting that <strong>page tables require hardware support, i.e. support from the CPU&rsquo;s memory management unit (MMU)</strong> . Here is the MMU support for an Intel Xeon Gold 6230, you can see that 40 bits physical means that its MMU supports 40 bits of hardware addressing, and 48 bits physical is the size of the virtual address space supported by the current Linux four-level page table.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/19/e771953a7ccb418683530391b3a3edb7.png" alt="sobyte"></p>
+<p>And what is page replacement?</p>
+<p>Page replacement also comes from a feature that almost all modern operating systems have - the <strong>swap mechanism.</strong> When physical memory is nearly full, the operating system moves some of the less frequently used pages to disk to make room for more frequently used pages in order to keep the whole system available. Of course, this comes at the cost of reduced performance, and the mechanism is not foolproof, as the system can still become almost unusable when actively used memory is also borrowed near the size of physical memory, but at least this mechanism gives the system a chance to recover on its own, rather than having to have some processes killed by the OOM Killer. This swap mechanism obviously requires a good algorithm to determine which part of the page is &ldquo;stale&rdquo;, which brings us to the topic of this article - <strong>Page Replacement Algorithm</strong>.</p>
+<h2 id="page-replacement-algorithms">Page Replacement Algorithms</h2>
+<p>As operating systems have evolved over the last 50 years and page replacement algorithms have improved, let&rsquo;s take a look at some of the page replacement algorithms that have emerged.</p>
+<ul>
+<li><strong>Optimal algorithms:</strong> Nice try, even the definition of &ldquo;optimal&rdquo; depends on the actual scenario.</li>
+<li><strong>NRU (recently unused) algorithm:</strong> A simple algorithm that maintains a chain table, eliminating the end pages each time, and moving the pages to the head of the table on each read. It is an acceptable algorithm, with easy implementation and low performance loss.</li>
+<li><strong>FIFO:</strong> Maintains a queue and clears the pages at the head of the queue directly each time. Almost no performance overhead, but does not work well.</li>
+<li><strong>Second Chance FIFO:</strong> Maintains a cyclic queue that cleans up pages with an access flag bit of 0 each time, and sets the flag position to 1 after each access, so that as long as there is an access to a page in the cycle, it is saved from being cleaned up unless all pages are 1. Due to the high number of memory operations using cyclic queues, one of the following algorithms is generally used.</li>
+<li><strong>Clock Algorithm:</strong> Pointer and circular chain/queue implement SCFIFO, eliminating memory operations, and is the more commonly used algorithm, which works better and is a big improvement over NRU.</li>
+<li><strong>LRU (Least Recently Used) algorithm:</strong> Good approximation for optimal algorithms in most cases, excellent results, but more difficult to implement, current algorithms either have high time complexity or high space complexity. Hardware support is also required most of the time.</li>
+<li><strong>NFU algorithm:</strong> LRU simulated by software, using a frequency Freq counted by the system clock interrupt handler, works well but has some performance overhead and does not implement &ldquo;nearest&rdquo;.</li>
+<li><strong>Aging algorithm:</strong> Adds frequency aging to the NFU and implements &ldquo;nearest&rdquo;, with the older the usage being weighted less.</li>
+</ul>
+<p>The current page replacement algorithm used by the Linux kernel is the <strong>two-stage software LRU</strong>, which is divided into two chains of active and inactive types and implements the software LRU (NFU) algorithm, which is referred to as LRU in the following as hardware-based LRU is not available in today&rsquo;s architecture.</p>
+<h2 id="the-problem-of-two-level-lru">The problem of two-level LRU</h2>
+<h3 id="tldr">TL;DR</h3>
+<p>The current algorithm has too much CPU overhead and often makes bad decisions.</p>
+<h3 id="granularity">Granularity</h3>
+<p>The two classifications Active/Inactive is really a rather coarse granularity in today&rsquo;s hardware environment. Mind you, it is not uncommon, if not common, in the Linux-ruled server world for memory to be on T. Intel&rsquo;s recent rollout of Aeon memory in recent years has placed even higher demands on memory scheduling. This active/inactive classification is not a good one. Contexts like file access, where there are often periodic memory operations, and where pages move back and forth between the two tables, do not give a good indication of whether the page is active or not. And many code segments of executable files that are being executed are often removed simply because they have not been used for a fairly short period of time. This causes a delay in the response of the interactive process on Android and ChromeOS.</p>
+<h3 id="performance-issues-with-inverted-page-table-scans">Performance issues with inverted page table scans</h3>
+<p>Since the LRU algorithm needs to periodically update the page access counter based on an inverted page table (rmap), however, the rmap has a rather complex data structure with poor locality, resulting in poor CPU cache hit rates when scanning the rmap. The cache hit rate of modern CPUs has a huge impact on execution speed, and a low cache hit rate can reduce CPU execution speed to 10% or less of its peak.</p>
+<h2 id="multigenerational-lru">Multigenerational LRU</h2>
+<p>Yu Zhao&rsquo;s recent Patch submission proposes the Multigenerational LRU algorithm, which aims to solve the problem of the two-level LRU now used by the kernel. This Multigenerational LRU borrows ideas from the ageing algorithm, dividing the LRU table into a number of Generations <strong>according to</strong> page generation (allocation) time. The LRU page sweep uses an incremental scan of the <strong>page table</strong> based on pages accessed during the cycle, unless the memory distribution accessed during that time is very sparse, and usually the <strong>page table has better locality</strong> compared to the inverted page table, which in turn improves the CPU&rsquo;s cache hit ratio.</p>
+<p>In the mailing list Yu Zhao illustrates his use of the changed algorithm in several simulation scenarios.</p>
+<ul>
+<li>Android: 18% reduction in low memory kills, and thus 16% reduction in cold starts.</li>
+<li>Borg (Google&rsquo;s cloud resource orchestration system): active memory usage reduced.</li>
+<li>ChromeOS: inactive pages reduced memory usage by 96% and reduced OOM kills by 59%.</li>
+</ul>
+<h2 id="conclusion">Conclusion</h2>
+<p>Changes to the Linux kernel&rsquo;s page replacement algorithm can have a huge impact, even if they are only &ldquo;minor&rdquo; tweaks. As Linux is not limited to the usual scenarios, this Patch will need a long period of discussion and testing by various developers before it can finally be merged into the mainline. Although the majority of kernel developers have not yet commented on this, some have been positive and favorable about the new algorithm, so I also think this Patch will eventually make it into the mainline Linux kernel.</p>
+<h2 id="read-more">read more</h2>
+<ul>
+<li><a href="https://lwn.net/SubscriberLink/851184/01351eb745a6405d/">The multi-generational LRU</a></li>
+<li><a href="https://lwn.net/ml/linux-kernel/20210313075747.3781593-1-yuzhao@google.com/">[PATCH v1 00/14] Multigenerational LRU</a></li>
+<li>Long-term SLOs for reclaimed cloud computing resources <a href="https://research.google/pubs/pub43017/">https://research.google/pubs/pub43017/</a></li>
+<li>Profiling a warehouse-scale computer <a href="https://research.google/pubs/pub44271/">https://research.google/pubs/pub44271/</a></li>
+<li>Evaluation of NUMA-Aware Scheduling in Warehouse-Scale Clusters <a href="https://research.google/pubs/pub48329/">https://research.google/pubs/pub48329/</a></li>
+<li>Software-defined far memory in warehouse-scale computers <a href="https://research.google/pubs/pub48551/">https://research.google/pubs/pub48551/</a></li>
+<li>Borg: the Next Generation <a href="https://research.google/pubs/pub49065/">https://research.google/pubs/pub49065/</a></li>
+</ul>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/linux/">linux</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/git-failed-sending-http2-data/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Git: Failed sending HTTP2 data solution</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/linux-targeted-malware-increased-2021/">
+            <span class="next-text nav-default">Linux malware on the rise: XorDDoS, Mirai and Mozi most popular</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

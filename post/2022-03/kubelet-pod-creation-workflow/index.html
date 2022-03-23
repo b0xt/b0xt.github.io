@@ -1,0 +1,1428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Kubelet pod creation workflow - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article is based on reading the source code of Kubernetes v1.19.0-rc.3
+ Kubelet, one of the four components of Kubernetes, maintains the entire lifecycle of a pod and is the last link in the pod creation process of Kubernetes. This article will introduce how Kubelet creates pods.
+Architecture of Kubelet First look at a diagram of the Kubelet&amp;rsquo;s component architecture, as follows.
+It can be seen that Kubelet is mainly divided into three layers: API layer, syncLoop layer, CRI and the following; API layer is well understood, that is, the part that provides the interface to the outside; syncLoop layer is the core working layer of Kubelet, the main work of Kubelet is centered around this syncLoop, that is, the control loop, run by producers and consumers; CRI provides the interface of container and mirror services, the container can be accessed as a CRI plugin when running." /><meta name="keywords" content="kubelet, Pod, Creation Workflow" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/kubelet-pod-creation-workflow/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Kubelet pod creation workflow" />
+<meta property="og:description" content="This article is based on reading the source code of Kubernetes v1.19.0-rc.3
+ Kubelet, one of the four components of Kubernetes, maintains the entire lifecycle of a pod and is the last link in the pod creation process of Kubernetes. This article will introduce how Kubelet creates pods.
+Architecture of Kubelet First look at a diagram of the Kubelet&rsquo;s component architecture, as follows.
+It can be seen that Kubelet is mainly divided into three layers: API layer, syncLoop layer, CRI and the following; API layer is well understood, that is, the part that provides the interface to the outside; syncLoop layer is the core working layer of Kubelet, the main work of Kubelet is centered around this syncLoop, that is, the control loop, run by producers and consumers; CRI provides the interface of container and mirror services, the container can be accessed as a CRI plugin when running." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/kubelet-pod-creation-workflow/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-10T09:42:35+08:00" />
+<meta property="article:modified_time" content="2022-03-10T09:42:35+08:00" />
+
+<meta itemprop="name" content="Kubelet pod creation workflow">
+<meta itemprop="description" content="This article is based on reading the source code of Kubernetes v1.19.0-rc.3
+ Kubelet, one of the four components of Kubernetes, maintains the entire lifecycle of a pod and is the last link in the pod creation process of Kubernetes. This article will introduce how Kubelet creates pods.
+Architecture of Kubelet First look at a diagram of the Kubelet&rsquo;s component architecture, as follows.
+It can be seen that Kubelet is mainly divided into three layers: API layer, syncLoop layer, CRI and the following; API layer is well understood, that is, the part that provides the interface to the outside; syncLoop layer is the core working layer of Kubelet, the main work of Kubelet is centered around this syncLoop, that is, the control loop, run by producers and consumers; CRI provides the interface of container and mirror services, the container can be accessed as a CRI plugin when running."><meta itemprop="datePublished" content="2022-03-10T09:42:35+08:00" />
+<meta itemprop="dateModified" content="2022-03-10T09:42:35+08:00" />
+<meta itemprop="wordCount" content="4125">
+<meta itemprop="keywords" content="kubelet," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Kubelet pod creation workflow"/>
+<meta name="twitter:description" content="This article is based on reading the source code of Kubernetes v1.19.0-rc.3
+ Kubelet, one of the four components of Kubernetes, maintains the entire lifecycle of a pod and is the last link in the pod creation process of Kubernetes. This article will introduce how Kubelet creates pods.
+Architecture of Kubelet First look at a diagram of the Kubelet&rsquo;s component architecture, as follows.
+It can be seen that Kubelet is mainly divided into three layers: API layer, syncLoop layer, CRI and the following; API layer is well understood, that is, the part that provides the interface to the outside; syncLoop layer is the core working layer of Kubelet, the main work of Kubelet is centered around this syncLoop, that is, the control loop, run by producers and consumers; CRI provides the interface of container and mirror services, the container can be accessed as a CRI plugin when running."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Kubelet pod creation workflow</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-10 09:42:35 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 4125 words </span>
+          <span class="more-meta"> 20 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#architecture-of-kubelet">Architecture of Kubelet</a></li>
+        <li><a href="#how-kubelet-works">How Kubelet works</a></li>
+        <li><a href="#syncloop">SyncLoop</a></li>
+        <li><a href="#the-process-of-creating-a-pod">The process of creating a pod</a>
+          <ul>
+            <li><a href="#handler">Handler</a></li>
+            <li><a href="#the-work-of-podworkers">The work of podWorkers</a></li>
+            <li><a href="#syncpod">syncPod</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <blockquote>
+<p>This article is based on reading the source code of Kubernetes v1.19.0-rc.3</p>
+</blockquote>
+<p>Kubelet, one of the four components of Kubernetes, maintains the entire lifecycle of a pod and is the last link in the pod creation process of Kubernetes. This article will introduce how Kubelet creates pods.</p>
+<h2 id="architecture-of-kubelet">Architecture of Kubelet</h2>
+<p>First look at a diagram of the Kubelet&rsquo;s component architecture, as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/1261265caeda4f3089793bd4ab076666.png" alt="Kubelet&rsquo;s component architecture"></p>
+<p>It can be seen that Kubelet is mainly divided into three layers: API layer, syncLoop layer, CRI and the following; API layer is well understood, that is, the part that provides the interface to the outside; syncLoop layer is the core working layer of Kubelet, the main work of Kubelet is centered around this syncLoop, that is, the control loop, run by producers and consumers; CRI provides the interface of container and mirror services, the container can be accessed as a CRI plugin when running. The CRI provides an interface to the container and mirror services, which can be accessed as a CRI plug-in when the container is running.</p>
+<p>Let&rsquo;s take a look at some important components of the syncLoop layer.</p>
+<ul>
+<li>PLEG: Call the container runtime interface to get the information of containers/sandboxes of this node, compare it with the locally maintained pod cache, generate the corresponding PodLifecycleEvent, and then send it to Kubelet syncLoop through eventChannel, and then synchronize the pod by the timing task to finally reach the desired state of the user.</li>
+<li>CAdvisor: A container monitoring tool integrated in Kubelet, used to collect monitoring information of this node and containers.</li>
+<li>PodWorkers: Multiple pod handlers are registered to handle pods at different times, including creation, update, deletion, etc.</li>
+<li>oomWatcher: Listener of system OOM, will establish SystemOOM with CAdvisor module, and generate events related to OOM signals received from CAdvisor by Watch.</li>
+<li>containerGC: responsible for cleaning up the useless containers on the node, the specific garbage collection operation is implemented by the container runtime.</li>
+<li>imageGC: Responsible for image recycling on node nodes. When the local disk space where the image is stored reaches a certain threshold, the image recycling will be triggered and the image not used by the pod will be deleted.</li>
+<li>Managers: Contains various managers that manage various resources related to pods. Each manager has its own role and works together in SyncLoop.</li>
+</ul>
+<h2 id="how-kubelet-works">How Kubelet works</h2>
+<p>As mentioned above, Kubelet works mainly around a SyncLoop. With the help of a go channel, each component listens to the loop to consume events or produce pod-related events into it, and the whole control loop runs event-driven. This can be represented by the following diagram.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/566ce236885b48648c25932b1112d893.png" alt="How Kubelet works"></p>
+<p>For example, during the pod creation process, when a pod is dispatched to a node, it triggers a handler registered by Kubelet in the loop control, such as the HandlePods section in the figure above. At this point, Kubelet checks the state of the pod in Kubelet memory, determines that it is the pod that needs to be created, and triggers the logic corresponding to the ADD event in the Handler.</p>
+<h2 id="syncloop">SyncLoop</h2>
+<p>Let&rsquo;s look at the main loop, SyncLoop.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">kl</span> <span class="o">*</span><span class="nx">kubelet</span><span class="p">)</span> <span class="nf">syncLoop</span><span class="p">(</span><span class="nx">updates</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nx">PodUpdate</span><span class="p">,</span> <span class="nx">handler</span> <span class="nx">SyncHandler</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">klog</span><span class="p">.</span><span class="nf">Info</span><span class="p">(</span><span class="s">&#34;Starting kubelet main sync loop.&#34;</span><span class="p">)</span>
+	<span class="c1">// The syncTicker wakes up Kubelet to checks if there are any pod workers
+</span><span class="c1"></span>	<span class="c1">// that need to be sync&#39;d. A one-second period is sufficient because the
+</span><span class="c1"></span>	<span class="c1">// sync interval is defaulted to 10s.
+</span><span class="c1"></span>	<span class="nx">syncTicker</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTicker</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+	<span class="k">defer</span> <span class="nx">syncTicker</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+	<span class="nx">housekeepingTicker</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTicker</span><span class="p">(</span><span class="nx">housekeepingPeriod</span><span class="p">)</span>
+	<span class="k">defer</span> <span class="nx">housekeepingTicker</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+	<span class="nx">plegCh</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">pleg</span><span class="p">.</span><span class="nf">Watch</span><span class="p">()</span>
+	<span class="kd">const</span> <span class="p">(</span>
+		<span class="nx">base</span>   <span class="p">=</span> <span class="mi">100</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Millisecond</span>
+		<span class="nx">max</span>    <span class="p">=</span> <span class="mi">5</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span>
+		<span class="nx">factor</span> <span class="p">=</span> <span class="mi">2</span>
+	<span class="p">)</span>
+	<span class="nx">duration</span> <span class="o">:=</span> <span class="nx">base</span>
+	<span class="c1">// Responsible for checking limits in resolv.conf
+</span><span class="c1"></span>	<span class="c1">// The limits do not have anything to do with individual pods
+</span><span class="c1"></span>	<span class="c1">// Since this is called in syncLoop, we don&#39;t need to call it anywhere else
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">dnsConfigurer</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">dnsConfigurer</span><span class="p">.</span><span class="nx">ResolverConfig</span> <span class="o">!=</span> <span class="s">&#34;&#34;</span> <span class="p">{</span>
+		<span class="nx">kl</span><span class="p">.</span><span class="nx">dnsConfigurer</span><span class="p">.</span><span class="nf">CheckLimitsForResolvConf</span><span class="p">()</span>
+	<span class="p">}</span>
+
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">runtimeState</span><span class="p">.</span><span class="nf">runtimeErrors</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;skipping pod synchronization - %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="c1">// exponential backoff
+</span><span class="c1"></span>			<span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">duration</span><span class="p">)</span>
+			<span class="nx">duration</span> <span class="p">=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="nx">math</span><span class="p">.</span><span class="nf">Min</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">max</span><span class="p">),</span> <span class="nx">factor</span><span class="o">*</span><span class="nb">float64</span><span class="p">(</span><span class="nx">duration</span><span class="p">)))</span>
+			<span class="k">continue</span>
+		<span class="p">}</span>
+		<span class="c1">// reset backoff if we have a success
+</span><span class="c1"></span>		<span class="nx">duration</span> <span class="p">=</span> <span class="nx">base</span>
+
+		<span class="nx">kl</span><span class="p">.</span><span class="nx">syncLoopMonitor</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">kl</span><span class="p">.</span><span class="nx">clock</span><span class="p">.</span><span class="nf">Now</span><span class="p">())</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nx">kl</span><span class="p">.</span><span class="nf">syncLoopIteration</span><span class="p">(</span><span class="nx">updates</span><span class="p">,</span> <span class="nx">handler</span><span class="p">,</span> <span class="nx">syncTicker</span><span class="p">.</span><span class="nx">C</span><span class="p">,</span> <span class="nx">housekeepingTicker</span><span class="p">.</span><span class="nx">C</span><span class="p">,</span> <span class="nx">plegCh</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+		<span class="nx">kl</span><span class="p">.</span><span class="nx">syncLoopMonitor</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">kl</span><span class="p">.</span><span class="nx">clock</span><span class="p">.</span><span class="nf">Now</span><span class="p">())</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>SyncLoop starts a dead loop, where only the syncLoopIteration method is called. The syncLoopIteration iterates through all the incoming channels and hands over any pipeline that has a message to the handler.</p>
+<p>These channels include:</p>
+<ul>
+<li>configCh: The producer of this channel is provided by the PodConfig submodule in the kubeDeps object. This module will listen for changes in pod information from file, http, and apiserver, and will produce events to this channel once the pod information from a source is updated.</li>
+<li>plegCh: The producer of this channel is the pleg submodule, which will periodically query the container runtime for the current state of all containers, and if the state changes, it will produce events to this channel.</li>
+<li>syncCh: Sync the latest saved pod state periodically.</li>
+<li>livenessManager.Updates(): Health check finds that a pod is unavailable and the Kubelet will automatically perform the correct action based on the pod&rsquo;s restartPolicy.</li>
+<li>houseKeepingCh: pipeline for housekeeping events, doing pod cleanup.</li>
+</ul>
+<p>Code for syncLoopIteration.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">kl</span> <span class="o">*</span><span class="nx">kubelet</span><span class="p">)</span> <span class="nf">syncLoopIteration</span><span class="p">(</span><span class="nx">configCh</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nx">PodUpdate</span><span class="p">,</span> <span class="nx">handler</span> <span class="nx">SyncHandler</span><span class="p">,</span>
+	<span class="nx">syncCh</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">,</span> <span class="nx">housekeepingCh</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span><span class="p">,</span> <span class="nx">plegCh</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="o">*</span><span class="nx">pleg</span><span class="p">.</span><span class="nx">PodLifecycleEvent</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">select</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">u</span><span class="p">,</span> <span class="nx">open</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">configCh</span><span class="p">:</span>
+		<span class="c1">// Update from a config source; dispatch it to the right handler
+</span><span class="c1"></span>		<span class="c1">// callback.
+</span><span class="c1"></span>		<span class="k">if</span> <span class="p">!</span><span class="nx">open</span> <span class="p">{</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;Update channel is closed. Exiting the sync loop.&#34;</span><span class="p">)</span>
+			<span class="k">return</span> <span class="kc">false</span>
+		<span class="p">}</span>
+
+		<span class="k">switch</span> <span class="nx">u</span><span class="p">.</span><span class="nx">Op</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nx">ADD</span><span class="p">:</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">2</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;SyncLoop (ADD, %q): %q&#34;</span><span class="p">,</span> <span class="nx">u</span><span class="p">.</span><span class="nx">Source</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pods</span><span class="p">(</span><span class="nx">u</span><span class="p">.</span><span class="nx">Pods</span><span class="p">))</span>
+			<span class="c1">// After restarting, Kubelet will get all existing pods through
+</span><span class="c1"></span>			<span class="c1">// ADD as if they are new pods. These pods will then go through the
+</span><span class="c1"></span>			<span class="c1">// admission process and *may* be rejected. This can be resolved
+</span><span class="c1"></span>			<span class="c1">// once we have checkpointing.
+</span><span class="c1"></span>			<span class="nx">handler</span><span class="p">.</span><span class="nf">HandlePodAdditions</span><span class="p">(</span><span class="nx">u</span><span class="p">.</span><span class="nx">Pods</span><span class="p">)</span>
+		<span class="k">case</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nx">UPDATE</span><span class="p">:</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">2</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;SyncLoop (UPDATE, %q): %q&#34;</span><span class="p">,</span> <span class="nx">u</span><span class="p">.</span><span class="nx">Source</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">PodsWithDeletionTimestamps</span><span class="p">(</span><span class="nx">u</span><span class="p">.</span><span class="nx">Pods</span><span class="p">))</span>
+			<span class="nx">handler</span><span class="p">.</span><span class="nf">HandlePodUpdates</span><span class="p">(</span><span class="nx">u</span><span class="p">.</span><span class="nx">Pods</span><span class="p">)</span>
+		<span class="k">case</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nx">REMOVE</span><span class="p">:</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">2</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;SyncLoop (REMOVE, %q): %q&#34;</span><span class="p">,</span> <span class="nx">u</span><span class="p">.</span><span class="nx">Source</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pods</span><span class="p">(</span><span class="nx">u</span><span class="p">.</span><span class="nx">Pods</span><span class="p">))</span>
+			<span class="nx">handler</span><span class="p">.</span><span class="nf">HandlePodRemoves</span><span class="p">(</span><span class="nx">u</span><span class="p">.</span><span class="nx">Pods</span><span class="p">)</span>
+		<span class="k">case</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nx">RECONCILE</span><span class="p">:</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">4</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;SyncLoop (RECONCILE, %q): %q&#34;</span><span class="p">,</span> <span class="nx">u</span><span class="p">.</span><span class="nx">Source</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pods</span><span class="p">(</span><span class="nx">u</span><span class="p">.</span><span class="nx">Pods</span><span class="p">))</span>
+			<span class="nx">handler</span><span class="p">.</span><span class="nf">HandlePodReconcile</span><span class="p">(</span><span class="nx">u</span><span class="p">.</span><span class="nx">Pods</span><span class="p">)</span>
+		<span class="k">case</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nx">DELETE</span><span class="p">:</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">2</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;SyncLoop (DELETE, %q): %q&#34;</span><span class="p">,</span> <span class="nx">u</span><span class="p">.</span><span class="nx">Source</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pods</span><span class="p">(</span><span class="nx">u</span><span class="p">.</span><span class="nx">Pods</span><span class="p">))</span>
+			<span class="c1">// DELETE is treated as a UPDATE because of graceful deletion.
+</span><span class="c1"></span>			<span class="nx">handler</span><span class="p">.</span><span class="nf">HandlePodUpdates</span><span class="p">(</span><span class="nx">u</span><span class="p">.</span><span class="nx">Pods</span><span class="p">)</span>
+		<span class="k">case</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nx">SET</span><span class="p">:</span>
+			<span class="c1">// TODO: Do we want to support this?
+</span><span class="c1"></span>			<span class="nx">klog</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;Kubelet does not support snapshot update&#34;</span><span class="p">)</span>
+		<span class="k">default</span><span class="p">:</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;Invalid event type received: %d.&#34;</span><span class="p">,</span> <span class="nx">u</span><span class="p">.</span><span class="nx">Op</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="nx">kl</span><span class="p">.</span><span class="nx">sourcesReady</span><span class="p">.</span><span class="nf">AddSource</span><span class="p">(</span><span class="nx">u</span><span class="p">.</span><span class="nx">Source</span><span class="p">)</span>
+
+	<span class="k">case</span> <span class="nx">e</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">plegCh</span><span class="p">:</span>
+		<span class="k">if</span> <span class="nx">e</span><span class="p">.</span><span class="nx">Type</span> <span class="o">==</span> <span class="nx">pleg</span><span class="p">.</span><span class="nx">ContainerStarted</span> <span class="p">{</span>
+			<span class="c1">// record the most recent time we observed a container start for this pod.
+</span><span class="c1"></span>			<span class="c1">// this lets us selectively invalidate the runtimeCache when processing a delete for this pod
+</span><span class="c1"></span>			<span class="c1">// to make sure we don&#39;t miss handling graceful termination for containers we reported as having started.
+</span><span class="c1"></span>			<span class="nx">kl</span><span class="p">.</span><span class="nx">lastContainerStartedTime</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">ID</span><span class="p">,</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">())</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nf">isSyncPodWorthy</span><span class="p">(</span><span class="nx">e</span><span class="p">)</span> <span class="p">{</span>
+			<span class="c1">// PLEG event for a pod; sync it.
+</span><span class="c1"></span>			<span class="k">if</span> <span class="nx">pod</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">podManager</span><span class="p">.</span><span class="nf">GetPodByUID</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">ID</span><span class="p">);</span> <span class="nx">ok</span> <span class="p">{</span>
+				<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">2</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;SyncLoop (PLEG): %q, event: %#v&#34;</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pod</span><span class="p">(</span><span class="nx">pod</span><span class="p">),</span> <span class="nx">e</span><span class="p">)</span>
+				<span class="nx">handler</span><span class="p">.</span><span class="nf">HandlePodSyncs</span><span class="p">([]</span><span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">{</span><span class="nx">pod</span><span class="p">})</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="c1">// If the pod no longer exists, ignore the event.
+</span><span class="c1"></span>				<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">4</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;SyncLoop (PLEG): ignore irrelevant event: %#v&#34;</span><span class="p">,</span> <span class="nx">e</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+
+		<span class="k">if</span> <span class="nx">e</span><span class="p">.</span><span class="nx">Type</span> <span class="o">==</span> <span class="nx">pleg</span><span class="p">.</span><span class="nx">ContainerDied</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">containerID</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">e</span><span class="p">.</span><span class="nx">Data</span><span class="p">.(</span><span class="kt">string</span><span class="p">);</span> <span class="nx">ok</span> <span class="p">{</span>
+				<span class="nx">kl</span><span class="p">.</span><span class="nf">cleanUpContainersInPod</span><span class="p">(</span><span class="nx">e</span><span class="p">.</span><span class="nx">ID</span><span class="p">,</span> <span class="nx">containerID</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">syncCh</span><span class="p">:</span>
+		<span class="c1">// Sync pods waiting for sync
+</span><span class="c1"></span>		<span class="nx">podsToSync</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nf">getPodsToSync</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">podsToSync</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+		<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">4</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;SyncLoop (SYNC): %d pods; %s&#34;</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">podsToSync</span><span class="p">),</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pods</span><span class="p">(</span><span class="nx">podsToSync</span><span class="p">))</span>
+		<span class="nx">handler</span><span class="p">.</span><span class="nf">HandlePodSyncs</span><span class="p">(</span><span class="nx">podsToSync</span><span class="p">)</span>
+	<span class="k">case</span> <span class="nx">update</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">kl</span><span class="p">.</span><span class="nx">livenessManager</span><span class="p">.</span><span class="nf">Updates</span><span class="p">():</span>
+		<span class="k">if</span> <span class="nx">update</span><span class="p">.</span><span class="nx">Result</span> <span class="o">==</span> <span class="nx">proberesults</span><span class="p">.</span><span class="nx">Failure</span> <span class="p">{</span>
+			<span class="c1">// The liveness manager detected a failure; sync the pod.
+</span><span class="c1"></span>
+			<span class="c1">// We should not use the pod from livenessManager, because it is never updated after
+</span><span class="c1"></span>			<span class="c1">// initialization.
+</span><span class="c1"></span>			<span class="nx">pod</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">podManager</span><span class="p">.</span><span class="nf">GetPodByUID</span><span class="p">(</span><span class="nx">update</span><span class="p">.</span><span class="nx">PodUID</span><span class="p">)</span>
+			<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+				<span class="c1">// If the pod no longer exists, ignore the update.
+</span><span class="c1"></span>				<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">4</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;SyncLoop (container unhealthy): ignore irrelevant update: %#v&#34;</span><span class="p">,</span> <span class="nx">update</span><span class="p">)</span>
+				<span class="k">break</span>
+			<span class="p">}</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">1</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;SyncLoop (container unhealthy): %q&#34;</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pod</span><span class="p">(</span><span class="nx">pod</span><span class="p">))</span>
+			<span class="nx">handler</span><span class="p">.</span><span class="nf">HandlePodSyncs</span><span class="p">([]</span><span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">{</span><span class="nx">pod</span><span class="p">})</span>
+		<span class="p">}</span>
+	<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">housekeepingCh</span><span class="p">:</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nx">kl</span><span class="p">.</span><span class="nx">sourcesReady</span><span class="p">.</span><span class="nf">AllReady</span><span class="p">()</span> <span class="p">{</span>
+			<span class="c1">// If the sources aren&#39;t ready or volume manager has not yet synced the states,
+</span><span class="c1"></span>			<span class="c1">// skip housekeeping, as we may accidentally delete pods from unready sources.
+</span><span class="c1"></span>			<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">4</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;SyncLoop (housekeeping, skipped): sources aren&#39;t ready yet.&#34;</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">4</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;SyncLoop (housekeeping)&#34;</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">handler</span><span class="p">.</span><span class="nf">HandlePodCleanups</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">klog</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;Failed cleaning pods: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="the-process-of-creating-a-pod">The process of creating a pod</h2>
+<p>Kubelet pod creation process is triggered by ADD event in configCh, so here is the main flow of Kubelet after receiving ADD event.</p>
+<h3 id="handler">Handler</h3>
+<p>When an ADD event occurs in configCh, the loop will trigger the HandlePodAdditions method of SyncHandler. The flow of this method can be described by the following flowchart.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/27ddc28edf5e42f6a9975413d4d12095.png" alt="trigger the HandlePodAdditions method of SyncHandler"></p>
+<p>First of all, the handler will sort all the pod installation creation time, and then process them one by one.</p>
+<p>First add the pod to the podManager to facilitate subsequent operations; then determine if it is a mirror pod, if it is, it will be treated as a mirror pod, otherwise it will be treated as a normal pod, here is an explanation of mirror pod.</p>
+<p>A mirror pod is a copy of the static pod created by the kueblet in the apiserver. Since the static pod is managed directly by Kubelet, apiserver is not aware of the existence of the static pod and its lifecycle is hosted directly by Kubelet. In order to view the corresponding pod via the kubectl command, and to view the static pod&rsquo;s logs directly via the kubectl logs command, Kubelet creates a mirror pod for each static pod via the apiserver.</p>
+<p>The next step is to determine whether the pod can run on the node, which is also known as pod access control in Kubelet. Access control mainly includes these aspects:</p>
+<ol>
+<li>whether the node meets the pod affinity rules</li>
+<li>whether the node has enough resources to allocate to the pod</li>
+<li>whether the node uses HostNetwork or HostIPC, and if so, whether it is in the node&rsquo;s whitelist</li>
+<li>the /proc mount directory meets the requirements</li>
+<li>whether the pod is configured and whether the correct AppArmor is configured</li>
+</ol>
+<p>When all conditions are met, the podWorker is finally triggered to synchronize the pod.</p>
+<p>The code corresponding to HandlePodAdditions is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">kl</span> <span class="o">*</span><span class="nx">kubelet</span><span class="p">)</span> <span class="nf">HandlePodAdditions</span><span class="p">(</span><span class="nx">pods</span> <span class="p">[]</span><span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">start</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">clock</span><span class="p">.</span><span class="nf">Now</span><span class="p">()</span>
+	<span class="nx">sort</span><span class="p">.</span><span class="nf">Sort</span><span class="p">(</span><span class="nx">sliceutils</span><span class="p">.</span><span class="nf">PodsByCreationTime</span><span class="p">(</span><span class="nx">pods</span><span class="p">))</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">pod</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">pods</span> <span class="p">{</span>
+		<span class="nx">existingPods</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">podManager</span><span class="p">.</span><span class="nf">GetPods</span><span class="p">()</span>
+		<span class="c1">// Always add the pod to the pod manager. Kubelet relies on the pod
+</span><span class="c1"></span>		<span class="c1">// manager as the source of truth for the desired state. If a pod does
+</span><span class="c1"></span>		<span class="c1">// not exist in the pod manager, it means that it has been deleted in
+</span><span class="c1"></span>		<span class="c1">// the apiserver and no action (other than cleanup) is required.
+</span><span class="c1"></span>		<span class="nx">kl</span><span class="p">.</span><span class="nx">podManager</span><span class="p">.</span><span class="nf">AddPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span>
+
+		<span class="k">if</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nf">IsMirrorPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">kl</span><span class="p">.</span><span class="nf">handleMirrorPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">start</span><span class="p">)</span>
+			<span class="k">continue</span>
+		<span class="p">}</span>
+
+		<span class="k">if</span> <span class="p">!</span><span class="nx">kl</span><span class="p">.</span><span class="nf">podIsTerminated</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span> <span class="p">{</span>
+			<span class="c1">// Only go through the admission process if the pod is not
+</span><span class="c1"></span>			<span class="c1">// terminated.
+</span><span class="c1"></span>
+			<span class="c1">// We failed pods that we rejected, so activePods include all admitted
+</span><span class="c1"></span>			<span class="c1">// pods that are alive.
+</span><span class="c1"></span>			<span class="nx">activePods</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nf">filterOutTerminatedPods</span><span class="p">(</span><span class="nx">existingPods</span><span class="p">)</span>
+
+			<span class="c1">// Check if we can admit the pod; if not, reject it.
+</span><span class="c1"></span>			<span class="k">if</span> <span class="nx">ok</span><span class="p">,</span> <span class="nx">reason</span><span class="p">,</span> <span class="nx">message</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nf">canAdmitPod</span><span class="p">(</span><span class="nx">activePods</span><span class="p">,</span> <span class="nx">pod</span><span class="p">);</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+				<span class="nx">kl</span><span class="p">.</span><span class="nf">rejectPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">reason</span><span class="p">,</span> <span class="nx">message</span><span class="p">)</span>
+				<span class="k">continue</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="nx">mirrorPod</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">podManager</span><span class="p">.</span><span class="nf">GetMirrorPodByPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span>
+		<span class="nx">kl</span><span class="p">.</span><span class="nf">dispatchWork</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nx">SyncPodCreate</span><span class="p">,</span> <span class="nx">mirrorPod</span><span class="p">,</span> <span class="nx">start</span><span class="p">)</span>
+		<span class="nx">kl</span><span class="p">.</span><span class="nx">probeManager</span><span class="p">.</span><span class="nf">AddPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="the-work-of-podworkers">The work of podWorkers</h3>
+<p>Next, let&rsquo;s see what podWorker does. podWorker maintains a map called podUpdates, with pod uid as the key, and a channel for each pod; when a pod has an event, it first gets the corresponding channel from this map, then starts a goroutine to listen to this channel, and executes managePodLoop. On the other hand, podWorker passes the pods that need to be synchronized into this channel.</p>
+<p>After receiving the event, managePodLoop will first get the latest status of the pod from the pod cache to ensure that the pod currently being processed is up-to-date; then it will call the syncPod method to record the synchronized result in the workQueue and wait for the next scheduled synchronization task.</p>
+<p>The whole process is shown in the following figure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/e8e46bf6fbe649afb29c9b861f0a2367.png" alt="The work of podWorkers"></p>
+<p>The code in podWorker that handles pod events.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">podWorkers</span><span class="p">)</span> <span class="nf">UpdatePod</span><span class="p">(</span><span class="nx">options</span> <span class="o">*</span><span class="nx">UpdatePodOptions</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">pod</span> <span class="o">:=</span> <span class="nx">options</span><span class="p">.</span><span class="nx">Pod</span>
+	<span class="nx">uid</span> <span class="o">:=</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">UID</span>
+	<span class="kd">var</span> <span class="nx">podUpdates</span> <span class="kd">chan</span> <span class="nx">UpdatePodOptions</span>
+	<span class="kd">var</span> <span class="nx">exists</span> <span class="kt">bool</span>
+
+	<span class="nx">p</span><span class="p">.</span><span class="nx">podLock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+	<span class="k">defer</span> <span class="nx">p</span><span class="p">.</span><span class="nx">podLock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">podUpdates</span><span class="p">,</span> <span class="nx">exists</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">podUpdates</span><span class="p">[</span><span class="nx">uid</span><span class="p">];</span> <span class="p">!</span><span class="nx">exists</span> <span class="p">{</span>
+		<span class="nx">podUpdates</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">UpdatePodOptions</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+		<span class="nx">p</span><span class="p">.</span><span class="nx">podUpdates</span><span class="p">[</span><span class="nx">uid</span><span class="p">]</span> <span class="p">=</span> <span class="nx">podUpdates</span>
+
+		<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+			<span class="k">defer</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">HandleCrash</span><span class="p">()</span>
+			<span class="nx">p</span><span class="p">.</span><span class="nf">managePodLoop</span><span class="p">(</span><span class="nx">podUpdates</span><span class="p">)</span>
+		<span class="p">}()</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">p</span><span class="p">.</span><span class="nx">isWorking</span><span class="p">[</span><span class="nx">pod</span><span class="p">.</span><span class="nx">UID</span><span class="p">]</span> <span class="p">{</span>
+		<span class="nx">p</span><span class="p">.</span><span class="nx">isWorking</span><span class="p">[</span><span class="nx">pod</span><span class="p">.</span><span class="nx">UID</span><span class="p">]</span> <span class="p">=</span> <span class="kc">true</span>
+		<span class="nx">podUpdates</span> <span class="o">&lt;-</span> <span class="o">*</span><span class="nx">options</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="c1">// if a request to kill a pod is pending, we do not let anything overwrite that request.
+</span><span class="c1"></span>		<span class="nx">update</span><span class="p">,</span> <span class="nx">found</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">lastUndeliveredWorkUpdate</span><span class="p">[</span><span class="nx">pod</span><span class="p">.</span><span class="nx">UID</span><span class="p">]</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nx">found</span> <span class="o">||</span> <span class="nx">update</span><span class="p">.</span><span class="nx">UpdateType</span> <span class="o">!=</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nx">SyncPodKill</span> <span class="p">{</span>
+			<span class="nx">p</span><span class="p">.</span><span class="nx">lastUndeliveredWorkUpdate</span><span class="p">[</span><span class="nx">pod</span><span class="p">.</span><span class="nx">UID</span><span class="p">]</span> <span class="p">=</span> <span class="o">*</span><span class="nx">options</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="nx">podWorkers</span><span class="p">)</span> <span class="nf">managePodLoop</span><span class="p">(</span><span class="nx">podUpdates</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">UpdatePodOptions</span><span class="p">)</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">lastSyncTime</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Time</span>
+	<span class="k">for</span> <span class="nx">update</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">podUpdates</span> <span class="p">{</span>
+		<span class="nx">err</span> <span class="o">:=</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+			<span class="nx">podUID</span> <span class="o">:=</span> <span class="nx">update</span><span class="p">.</span><span class="nx">Pod</span><span class="p">.</span><span class="nx">UID</span>
+			<span class="nx">status</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">podCache</span><span class="p">.</span><span class="nf">GetNewerThan</span><span class="p">(</span><span class="nx">podUID</span><span class="p">,</span> <span class="nx">lastSyncTime</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">p</span><span class="p">.</span><span class="nx">recorder</span><span class="p">.</span><span class="nf">Eventf</span><span class="p">(</span><span class="nx">update</span><span class="p">.</span><span class="nx">Pod</span><span class="p">,</span> <span class="nx">v1</span><span class="p">.</span><span class="nx">EventTypeWarning</span><span class="p">,</span> <span class="nx">events</span><span class="p">.</span><span class="nx">FailedSync</span><span class="p">,</span> <span class="s">&#34;error determining status: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+				<span class="k">return</span> <span class="nx">err</span>
+			<span class="p">}</span>
+			<span class="nx">err</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">syncPodFn</span><span class="p">(</span><span class="nx">syncPodOptions</span><span class="p">{</span>
+				<span class="nx">mirrorPod</span><span class="p">:</span>      <span class="nx">update</span><span class="p">.</span><span class="nx">MirrorPod</span><span class="p">,</span>
+				<span class="nx">pod</span><span class="p">:</span>            <span class="nx">update</span><span class="p">.</span><span class="nx">Pod</span><span class="p">,</span>
+				<span class="nx">podStatus</span><span class="p">:</span>      <span class="nx">status</span><span class="p">,</span>
+				<span class="nx">killPodOptions</span><span class="p">:</span> <span class="nx">update</span><span class="p">.</span><span class="nx">KillPodOptions</span><span class="p">,</span>
+				<span class="nx">updateType</span><span class="p">:</span>     <span class="nx">update</span><span class="p">.</span><span class="nx">UpdateType</span><span class="p">,</span>
+			<span class="p">})</span>
+			<span class="nx">lastSyncTime</span> <span class="p">=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Now</span><span class="p">()</span>
+			<span class="k">return</span> <span class="nx">err</span>
+		<span class="p">}()</span>
+		<span class="c1">// notify the call-back function if the operation succeeded or not
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">update</span><span class="p">.</span><span class="nx">OnCompleteFunc</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">update</span><span class="p">.</span><span class="nf">OnCompleteFunc</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="c1">// IMPORTANT: we do not log errors here, the syncPodFn is responsible for logging errors
+</span><span class="c1"></span>			<span class="nx">klog</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;Error syncing pod %s (%q), skipping: %v&#34;</span><span class="p">,</span> <span class="nx">update</span><span class="p">.</span><span class="nx">Pod</span><span class="p">.</span><span class="nx">UID</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pod</span><span class="p">(</span><span class="nx">update</span><span class="p">.</span><span class="nx">Pod</span><span class="p">),</span> <span class="nx">err</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">p</span><span class="p">.</span><span class="nf">wrapUp</span><span class="p">(</span><span class="nx">update</span><span class="p">.</span><span class="nx">Pod</span><span class="p">.</span><span class="nx">UID</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="syncpod">syncPod</h3>
+<p>The syncPod method called by the podWorker above in managePodLoop is actually the SyncPod method of the Kubelet object, in the file pkg/kubelet/kubelet.go.</p>
+<p>This method is the one that actually interacts with the container runtime layer. First, it determines if it is a kill event, if so, it directly calls the runtime&rsquo;s killPod; then it determines if it can run on the node, which is the Kubelet access control mentioned above; then it determines if the CNI plugin is ready, if not, it only creates and updates the Then determine whether the pod is a static pod, and if so, create the corresponding mirror pod; then create the directory where the pod needs to be mounted; and finally call syncPod of runtime.</p>
+<p>The whole process is shown as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/88680dd1b0f14dff93f298e8e65420fc.png" alt="syncPod process"></p>
+<p>The syncPod code for Kubelet is as follows. To understand the main flow, I removed some of the optimization code, so you can check the source code yourself if you are interested.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span><span class="lnt">83
+</span><span class="lnt">84
+</span><span class="lnt">85
+</span><span class="lnt">86
+</span><span class="lnt">87
+</span><span class="lnt">88
+</span><span class="lnt">89
+</span><span class="lnt">90
+</span><span class="lnt">91
+</span><span class="lnt">92
+</span><span class="lnt">93
+</span><span class="lnt">94
+</span><span class="lnt">95
+</span><span class="lnt">96
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">kl</span> <span class="o">*</span><span class="nx">kubelet</span><span class="p">)</span> <span class="nf">syncPod</span><span class="p">(</span><span class="nx">o</span> <span class="nx">syncPodOptions</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="c1">// pull out the required options
+</span><span class="c1"></span>	<span class="nx">pod</span> <span class="o">:=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">pod</span>
+	<span class="nx">mirrorPod</span> <span class="o">:=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">mirrorPod</span>
+	<span class="nx">podStatus</span> <span class="o">:=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">podStatus</span>
+	<span class="nx">updateType</span> <span class="o">:=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">updateType</span>
+
+	<span class="c1">// if we want to kill a pod, do it now!
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">updateType</span> <span class="o">==</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nx">SyncPodKill</span> <span class="p">{</span>
+		<span class="o">...</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nf">killPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">podStatus</span><span class="p">,</span> <span class="nx">killPodOptions</span><span class="p">.</span><span class="nx">PodTerminationGracePeriodSecondsOverride</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">kl</span><span class="p">.</span><span class="nx">recorder</span><span class="p">.</span><span class="nf">Eventf</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">v1</span><span class="p">.</span><span class="nx">EventTypeWarning</span><span class="p">,</span> <span class="nx">events</span><span class="p">.</span><span class="nx">FailedToKillPod</span><span class="p">,</span> <span class="s">&#34;error killing pod: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="c1">// there was an error killing the pod, so we return that error directly
+</span><span class="c1"></span>			<span class="nx">utilruntime</span><span class="p">.</span><span class="nf">HandleError</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+			<span class="k">return</span> <span class="nx">err</span>
+		<span class="p">}</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+	<span class="nx">runnable</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nf">canRunPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">runnable</span><span class="p">.</span><span class="nx">Admit</span> <span class="p">{</span>
+		<span class="o">...</span>
+	<span class="p">}</span>
+   <span class="o">...</span>
+	<span class="c1">// If the network plugin is not ready, only start the pod if it uses the host network
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">runtimeState</span><span class="p">.</span><span class="nf">networkErrors</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nx">kubecontainer</span><span class="p">.</span><span class="nf">IsHostNetworkPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">kl</span><span class="p">.</span><span class="nx">recorder</span><span class="p">.</span><span class="nf">Eventf</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">v1</span><span class="p">.</span><span class="nx">EventTypeWarning</span><span class="p">,</span> <span class="nx">events</span><span class="p">.</span><span class="nx">NetworkNotReady</span><span class="p">,</span> <span class="s">&#34;%s: %v&#34;</span><span class="p">,</span> <span class="nx">NetworkNotReadyErrorMsg</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+		<span class="k">return</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;%s: %v&#34;</span><span class="p">,</span> <span class="nx">NetworkNotReadyErrorMsg</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">kl</span><span class="p">.</span><span class="nf">podIsTerminated</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span> <span class="p">{</span>
+		<span class="o">...</span>
+		<span class="k">if</span> <span class="p">!(</span><span class="nx">podKilled</span> <span class="o">&amp;&amp;</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">RestartPolicy</span> <span class="o">==</span> <span class="nx">v1</span><span class="p">.</span><span class="nx">RestartPolicyNever</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="p">!</span><span class="nx">pcm</span><span class="p">.</span><span class="nf">Exists</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">containerManager</span><span class="p">.</span><span class="nf">UpdateQOSCgroups</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+					<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">2</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;Failed to update QoS cgroups while syncing pod: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+				<span class="p">}</span>
+				<span class="o">...</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Create Mirror Pod for Static Pod if it doesn&#39;t already exist
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">kubetypes</span><span class="p">.</span><span class="nf">IsStaticPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span> <span class="p">{</span>
+		<span class="o">...</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">mirrorPod</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">deleted</span> <span class="p">{</span>
+			<span class="nx">node</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nf">GetNode</span><span class="p">()</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">node</span><span class="p">.</span><span class="nx">DeletionTimestamp</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">4</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;No need to create a mirror pod, since node %q has been removed from the cluster&#34;</span><span class="p">,</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">nodeName</span><span class="p">)</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">4</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;Creating a mirror pod for static pod %q&#34;</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pod</span><span class="p">(</span><span class="nx">pod</span><span class="p">))</span>
+				<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">podManager</span><span class="p">.</span><span class="nf">CreateMirrorPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+					<span class="nx">klog</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;Failed creating a mirror pod for %q: %v&#34;</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pod</span><span class="p">(</span><span class="nx">pod</span><span class="p">),</span> <span class="nx">err</span><span class="p">)</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Make data directories for the pod
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nf">makePodDataDirs</span><span class="p">(</span><span class="nx">pod</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">kl</span><span class="p">.</span><span class="nx">recorder</span><span class="p">.</span><span class="nf">Eventf</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">v1</span><span class="p">.</span><span class="nx">EventTypeWarning</span><span class="p">,</span> <span class="nx">events</span><span class="p">.</span><span class="nx">FailedToMakePodDataDirectories</span><span class="p">,</span> <span class="s">&#34;error making pod data directories: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+		<span class="nx">klog</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;Unable to make pod data directories for pod %q: %v&#34;</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pod</span><span class="p">(</span><span class="nx">pod</span><span class="p">),</span> <span class="nx">err</span><span class="p">)</span>
+		<span class="k">return</span> <span class="nx">err</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Volume manager will not mount volumes for terminated pods
+</span><span class="c1"></span>	<span class="k">if</span> <span class="p">!</span><span class="nx">kl</span><span class="p">.</span><span class="nf">podIsTerminated</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span> <span class="p">{</span>
+		<span class="c1">// Wait for volumes to attach/mount
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">volumeManager</span><span class="p">.</span><span class="nf">WaitForAttachAndMount</span><span class="p">(</span><span class="nx">pod</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">kl</span><span class="p">.</span><span class="nx">recorder</span><span class="p">.</span><span class="nf">Eventf</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">v1</span><span class="p">.</span><span class="nx">EventTypeWarning</span><span class="p">,</span> <span class="nx">events</span><span class="p">.</span><span class="nx">FailedMountVolume</span><span class="p">,</span> <span class="s">&#34;Unable to attach or mount volumes: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;Unable to attach or mount volumes for pod %q: %v; skipping pod&#34;</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pod</span><span class="p">(</span><span class="nx">pod</span><span class="p">),</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="k">return</span> <span class="nx">err</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Fetch the pull secrets for the pod
+</span><span class="c1"></span>	<span class="nx">pullSecrets</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nf">getPullSecretsForPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span>
+
+	<span class="c1">// Call the container runtime&#39;s SyncPod callback
+</span><span class="c1"></span>	<span class="nx">result</span> <span class="o">:=</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">containerRuntime</span><span class="p">.</span><span class="nf">SyncPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">podStatus</span><span class="p">,</span> <span class="nx">pullSecrets</span><span class="p">,</span> <span class="nx">kl</span><span class="p">.</span><span class="nx">backOff</span><span class="p">)</span>
+	<span class="nx">kl</span><span class="p">.</span><span class="nx">reasonCache</span><span class="p">.</span><span class="nf">Update</span><span class="p">(</span><span class="nx">pod</span><span class="p">.</span><span class="nx">UID</span><span class="p">,</span> <span class="nx">result</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">result</span><span class="p">.</span><span class="nf">Error</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// Do not return error if the only failures were pods in backoff
+</span><span class="c1"></span>		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">r</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">result</span><span class="p">.</span><span class="nx">SyncResults</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">r</span><span class="p">.</span><span class="nx">Error</span> <span class="o">!=</span> <span class="nx">kubecontainer</span><span class="p">.</span><span class="nx">ErrCrashLoopBackOff</span> <span class="o">&amp;&amp;</span> <span class="nx">r</span><span class="p">.</span><span class="nx">Error</span> <span class="o">!=</span> <span class="nx">images</span><span class="p">.</span><span class="nx">ErrImagePullBackOff</span> <span class="p">{</span>
+				<span class="c1">// Do not record an event here, as we keep all event logging for sync pod failures
+</span><span class="c1"></span>				<span class="c1">// local to container runtime so we get better errors
+</span><span class="c1"></span>				<span class="k">return</span> <span class="nx">err</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The whole process of creating a pod comes to the syncPod part of the runtime layer, so here&rsquo;s a look at the process here.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/7af91dedf2d9476b8781e0b1971521b0.png" alt="syncPod part process"></p>
+<p>The process is very clear, first calculate the pod sandbox and container changes, if the sandbox has changed, the pod will kill off, and then kill its related containers; then create a sandbox for the pod (whether it is a pod that needs to be newly created or a pod whose sandbox has changed and been deleted); later is to start the ephemeral container, init container and business container.</p>
+<p>Among them, the ephemeral container is a new feature of k8s v1.16, which runs temporarily in an existing pod in order to complete user-initiated operations, such as troubleshooting.</p>
+<p>The entire code is as follows, and here again some optimization code has been removed to show the main flow.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">kubeGenericRuntimeManager</span><span class="p">)</span> <span class="nf">SyncPod</span><span class="p">(</span><span class="nx">pod</span> <span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">,</span> <span class="nx">podStatus</span> <span class="o">*</span><span class="nx">kubecontainer</span><span class="p">.</span><span class="nx">PodStatus</span><span class="p">,</span> <span class="nx">pullSecrets</span> <span class="p">[]</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Secret</span><span class="p">,</span> <span class="nx">backOff</span> <span class="o">*</span><span class="nx">flowcontrol</span><span class="p">.</span><span class="nx">Backoff</span><span class="p">)</span> <span class="p">(</span><span class="nx">result</span> <span class="nx">kubecontainer</span><span class="p">.</span><span class="nx">PodSyncResult</span><span class="p">)</span> <span class="p">{</span>
+	<span class="c1">// Step 1: Compute sandbox and container changes.
+</span><span class="c1"></span>	<span class="nx">podContainerChanges</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">computePodActions</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">podStatus</span><span class="p">)</span>
+	<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">3</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;computePodActions got %+v for pod %q&#34;</span><span class="p">,</span> <span class="nx">podContainerChanges</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pod</span><span class="p">(</span><span class="nx">pod</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">podContainerChanges</span><span class="p">.</span><span class="nx">CreateSandbox</span> <span class="p">{</span>
+		<span class="nx">ref</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ref</span><span class="p">.</span><span class="nf">GetReference</span><span class="p">(</span><span class="nx">legacyscheme</span><span class="p">.</span><span class="nx">Scheme</span><span class="p">,</span> <span class="nx">pod</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">klog</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;Couldn&#39;t make a ref to pod %q: &#39;%v&#39;&#34;</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pod</span><span class="p">(</span><span class="nx">pod</span><span class="p">),</span> <span class="nx">err</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="o">...</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Step 2: Kill the pod if the sandbox has changed.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">podContainerChanges</span><span class="p">.</span><span class="nx">KillPod</span> <span class="p">{</span>
+		<span class="nx">killResult</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">killPodWithSyncResult</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">kubecontainer</span><span class="p">.</span><span class="nf">ConvertPodStatusToRunningPod</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">runtimeName</span><span class="p">,</span> <span class="nx">podStatus</span><span class="p">),</span> <span class="kc">nil</span><span class="p">)</span>
+		<span class="nx">result</span><span class="p">.</span><span class="nf">AddPodSyncResult</span><span class="p">(</span><span class="nx">killResult</span><span class="p">)</span>
+		<span class="o">...</span>
+
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="c1">// Step 3: kill any running containers in this pod which are not to keep.
+</span><span class="c1"></span>		<span class="k">for</span> <span class="nx">containerID</span><span class="p">,</span> <span class="nx">containerInfo</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">podContainerChanges</span><span class="p">.</span><span class="nx">ContainersToKill</span> <span class="p">{</span>
+			<span class="o">...</span>
+
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">killContainer</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">containerID</span><span class="p">,</span> <span class="nx">containerInfo</span><span class="p">.</span><span class="nx">name</span><span class="p">,</span> <span class="nx">containerInfo</span><span class="p">.</span><span class="nx">message</span><span class="p">,</span> <span class="kc">nil</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">killContainerResult</span><span class="p">.</span><span class="nf">Fail</span><span class="p">(</span><span class="nx">kubecontainer</span><span class="p">.</span><span class="nx">ErrKillContainer</span><span class="p">,</span> <span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+				<span class="nx">klog</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;killContainer %q(id=%q) for pod %q failed: %v&#34;</span><span class="p">,</span> <span class="nx">containerInfo</span><span class="p">.</span><span class="nx">name</span><span class="p">,</span> <span class="nx">containerID</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pod</span><span class="p">(</span><span class="nx">pod</span><span class="p">),</span> <span class="nx">err</span><span class="p">)</span>
+				<span class="k">return</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+	<span class="c1">// Step 4: Create a sandbox for the pod if necessary.
+</span><span class="c1"></span>	<span class="nx">podSandboxID</span> <span class="o">:=</span> <span class="nx">podContainerChanges</span><span class="p">.</span><span class="nx">SandboxID</span>
+	<span class="k">if</span> <span class="nx">podContainerChanges</span><span class="p">.</span><span class="nx">CreateSandbox</span> <span class="p">{</span>
+		<span class="kd">var</span> <span class="nx">msg</span> <span class="kt">string</span>
+		<span class="kd">var</span> <span class="nx">err</span> <span class="kt">error</span>
+		<span class="o">...</span>
+		<span class="nx">podSandboxID</span><span class="p">,</span> <span class="nx">msg</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">createPodSandbox</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">podContainerChanges</span><span class="p">.</span><span class="nx">Attempt</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="o">...</span>
+		<span class="p">}</span>
+		<span class="nx">klog</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">4</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;Created PodSandbox %q for pod %q&#34;</span><span class="p">,</span> <span class="nx">podSandboxID</span><span class="p">,</span> <span class="nx">format</span><span class="p">.</span><span class="nf">Pod</span><span class="p">(</span><span class="nx">pod</span><span class="p">))</span>
+		<span class="o">...</span>
+	<span class="p">}</span>
+
+	<span class="o">...</span>
+
+	<span class="c1">// Step 5: start ephemeral containers
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">utilfeature</span><span class="p">.</span><span class="nx">DefaultFeatureGate</span><span class="p">.</span><span class="nf">Enabled</span><span class="p">(</span><span class="nx">features</span><span class="p">.</span><span class="nx">EphemeralContainers</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">idx</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">podContainerChanges</span><span class="p">.</span><span class="nx">EphemeralContainersToStart</span> <span class="p">{</span>
+			<span class="nf">start</span><span class="p">(</span><span class="s">&#34;ephemeral container&#34;</span><span class="p">,</span> <span class="nf">ephemeralContainerStartSpec</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pod</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">EphemeralContainers</span><span class="p">[</span><span class="nx">idx</span><span class="p">]))</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Step 6: start the init container.
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">container</span> <span class="o">:=</span> <span class="nx">podContainerChanges</span><span class="p">.</span><span class="nx">NextInitContainerToStart</span><span class="p">;</span> <span class="nx">container</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="c1">// Start the next init container.
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">start</span><span class="p">(</span><span class="s">&#34;init container&#34;</span><span class="p">,</span> <span class="nf">containerStartSpec</span><span class="p">(</span><span class="nx">container</span><span class="p">));</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+        <span class="o">...</span>
+	<span class="p">}</span>
+
+	<span class="c1">// Step 7: start containers in podContainerChanges.ContainersToStart.
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">idx</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">podContainerChanges</span><span class="p">.</span><span class="nx">ContainersToStart</span> <span class="p">{</span>
+		<span class="nf">start</span><span class="p">(</span><span class="s">&#34;container&#34;</span><span class="p">,</span> <span class="nf">containerStartSpec</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pod</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">Containers</span><span class="p">[</span><span class="nx">idx</span><span class="p">]))</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Finally, let&rsquo;s look at what sandboxes are. In the field of computer security, a sandbox is a mechanism for isolating a program to limit the privileges of untrustworthy processes. docker uses this technique in containers, creating a sandbox for each container, defining its cgroup and various namespace to isolate the container; each pod in k8s shares a sandbox for each pod in k8s, so all containers in the same pod can interoperate and be isolated from the outside world.</p>
+<p>Let&rsquo;s look at the process of creating a sandbox for a pod in Kubelet. First, define the pod&rsquo;s DNS configuration, HostName, log path, and sandbox port, which are all shared by the containers in the pod; then define the linux configuration for the pod, including the father cgroup, IPC/Network/Pid namespace, sysctls, and Linux permissions; after everything is configured, then The whole process is as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/524df06351874217bc9d036f8d175ae7.png" alt="process of creating a sandbox for a pod in Kubelet"></p>
+<p>Source code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span><span class="lnt">109
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">kubeGenericRuntimeManager</span><span class="p">)</span> <span class="nf">createPodSandbox</span><span class="p">(</span><span class="nx">pod</span> <span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">,</span> <span class="nx">attempt</span> <span class="kt">uint32</span><span class="p">)</span> <span class="p">(</span><span class="kt">string</span><span class="p">,</span> <span class="kt">string</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">podSandboxConfig</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">generatePodSandboxConfig</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">attempt</span><span class="p">)</span>
+	<span class="o">...</span>
+
+	<span class="c1">// Create pod logs directory
+</span><span class="c1"></span>	<span class="nx">err</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">osInterface</span><span class="p">.</span><span class="nf">MkdirAll</span><span class="p">(</span><span class="nx">podSandboxConfig</span><span class="p">.</span><span class="nx">LogDirectory</span><span class="p">,</span> <span class="mo">0755</span><span class="p">)</span>
+	<span class="o">...</span>
+	<span class="nx">podSandBoxID</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">runtimeService</span><span class="p">.</span><span class="nf">RunPodSandbox</span><span class="p">(</span><span class="nx">podSandboxConfig</span><span class="p">,</span> <span class="nx">runtimeHandler</span><span class="p">)</span>
+	<span class="o">...</span>
+	<span class="k">return</span> <span class="nx">podSandBoxID</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">kubeGenericRuntimeManager</span><span class="p">)</span> <span class="nf">generatePodSandboxConfig</span><span class="p">(</span><span class="nx">pod</span> <span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">,</span> <span class="nx">attempt</span> <span class="kt">uint32</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">runtimeapi</span><span class="p">.</span><span class="nx">PodSandboxConfig</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">podUID</span> <span class="o">:=</span> <span class="nb">string</span><span class="p">(</span><span class="nx">pod</span><span class="p">.</span><span class="nx">UID</span><span class="p">)</span>
+	<span class="nx">podSandboxConfig</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">runtimeapi</span><span class="p">.</span><span class="nx">PodSandboxConfig</span><span class="p">{</span>
+		<span class="nx">Metadata</span><span class="p">:</span> <span class="o">&amp;</span><span class="nx">runtimeapi</span><span class="p">.</span><span class="nx">PodSandboxMetadata</span><span class="p">{</span>
+			<span class="nx">Name</span><span class="p">:</span>      <span class="nx">pod</span><span class="p">.</span><span class="nx">Name</span><span class="p">,</span>
+			<span class="nx">Namespace</span><span class="p">:</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Namespace</span><span class="p">,</span>
+			<span class="nx">Uid</span><span class="p">:</span>       <span class="nx">podUID</span><span class="p">,</span>
+			<span class="nx">Attempt</span><span class="p">:</span>   <span class="nx">attempt</span><span class="p">,</span>
+		<span class="p">},</span>
+		<span class="nx">Labels</span><span class="p">:</span>      <span class="nf">newPodLabels</span><span class="p">(</span><span class="nx">pod</span><span class="p">),</span>
+		<span class="nx">Annotations</span><span class="p">:</span> <span class="nf">newPodAnnotations</span><span class="p">(</span><span class="nx">pod</span><span class="p">),</span>
+	<span class="p">}</span>
+
+	<span class="nx">dnsConfig</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">runtimeHelper</span><span class="p">.</span><span class="nf">GetPodDNS</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span>
+	<span class="o">...</span>
+	<span class="nx">podSandboxConfig</span><span class="p">.</span><span class="nx">DnsConfig</span> <span class="p">=</span> <span class="nx">dnsConfig</span>
+
+	<span class="k">if</span> <span class="p">!</span><span class="nx">kubecontainer</span><span class="p">.</span><span class="nf">IsHostNetworkPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">podHostname</span><span class="p">,</span> <span class="nx">podDomain</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">runtimeHelper</span><span class="p">.</span><span class="nf">GeneratePodHostNameAndDomain</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span>
+		<span class="nx">podHostname</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">util</span><span class="p">.</span><span class="nf">GetNodenameForKernel</span><span class="p">(</span><span class="nx">podHostname</span><span class="p">,</span> <span class="nx">podDomain</span><span class="p">,</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">SetHostnameAsFQDN</span><span class="p">)</span>
+		<span class="nx">podSandboxConfig</span><span class="p">.</span><span class="nx">Hostname</span> <span class="p">=</span> <span class="nx">podHostname</span>
+	<span class="p">}</span>
+
+	<span class="nx">logDir</span> <span class="o">:=</span> <span class="nf">BuildPodLogsDirectory</span><span class="p">(</span><span class="nx">pod</span><span class="p">.</span><span class="nx">Namespace</span><span class="p">,</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Name</span><span class="p">,</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">UID</span><span class="p">)</span>
+	<span class="nx">podSandboxConfig</span><span class="p">.</span><span class="nx">LogDirectory</span> <span class="p">=</span> <span class="nx">logDir</span>
+
+	<span class="nx">portMappings</span> <span class="o">:=</span> <span class="p">[]</span><span class="o">*</span><span class="nx">runtimeapi</span><span class="p">.</span><span class="nx">PortMapping</span><span class="p">{}</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">c</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">Containers</span> <span class="p">{</span>
+		<span class="nx">containerPortMappings</span> <span class="o">:=</span> <span class="nx">kubecontainer</span><span class="p">.</span><span class="nf">MakePortMappings</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">)</span>
+		<span class="o">...</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">portMappings</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">podSandboxConfig</span><span class="p">.</span><span class="nx">PortMappings</span> <span class="p">=</span> <span class="nx">portMappings</span>
+	<span class="p">}</span>
+
+	<span class="nx">lc</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">generatePodSandboxLinuxConfig</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span>
+	<span class="o">...</span>
+	<span class="nx">podSandboxConfig</span><span class="p">.</span><span class="nx">Linux</span> <span class="p">=</span> <span class="nx">lc</span>
+
+	<span class="k">return</span> <span class="nx">podSandboxConfig</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="c1">// generatePodSandboxLinuxConfig generates LinuxPodSandboxConfig from v1.Pod.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">kubeGenericRuntimeManager</span><span class="p">)</span> <span class="nf">generatePodSandboxLinuxConfig</span><span class="p">(</span><span class="nx">pod</span> <span class="o">*</span><span class="nx">v1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">runtimeapi</span><span class="p">.</span><span class="nx">LinuxPodSandboxConfig</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">cgroupParent</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">runtimeHelper</span><span class="p">.</span><span class="nf">GetPodCgroupParent</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span>
+	<span class="nx">lc</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">runtimeapi</span><span class="p">.</span><span class="nx">LinuxPodSandboxConfig</span><span class="p">{</span>
+		<span class="nx">CgroupParent</span><span class="p">:</span> <span class="nx">cgroupParent</span><span class="p">,</span>
+		<span class="nx">SecurityContext</span><span class="p">:</span> <span class="o">&amp;</span><span class="nx">runtimeapi</span><span class="p">.</span><span class="nx">LinuxSandboxSecurityContext</span><span class="p">{</span>
+			<span class="nx">Privileged</span><span class="p">:</span> <span class="nx">kubecontainer</span><span class="p">.</span><span class="nf">HasPrivilegedContainer</span><span class="p">(</span><span class="nx">pod</span><span class="p">),</span>
+			<span class="nx">SeccompProfilePath</span><span class="p">:</span> <span class="nx">v1</span><span class="p">.</span><span class="nx">SeccompProfileRuntimeDefault</span><span class="p">,</span>
+		<span class="p">},</span>
+	<span class="p">}</span>
+
+	<span class="nx">sysctls</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">utilfeature</span><span class="p">.</span><span class="nx">DefaultFeatureGate</span><span class="p">.</span><span class="nf">Enabled</span><span class="p">(</span><span class="nx">features</span><span class="p">.</span><span class="nx">Sysctls</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">SecurityContext</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">c</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">SecurityContext</span><span class="p">.</span><span class="nx">Sysctls</span> <span class="p">{</span>
+				<span class="nx">sysctls</span><span class="p">[</span><span class="nx">c</span><span class="p">.</span><span class="nx">Name</span><span class="p">]</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">Value</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="nx">lc</span><span class="p">.</span><span class="nx">Sysctls</span> <span class="p">=</span> <span class="nx">sysctls</span>
+
+	<span class="k">if</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">SecurityContext</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">sc</span> <span class="o">:=</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">SecurityContext</span>
+		<span class="k">if</span> <span class="nx">sc</span><span class="p">.</span><span class="nx">RunAsUser</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">lc</span><span class="p">.</span><span class="nx">SecurityContext</span><span class="p">.</span><span class="nx">RunAsUser</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">runtimeapi</span><span class="p">.</span><span class="nx">Int64Value</span><span class="p">{</span><span class="nx">Value</span><span class="p">:</span> <span class="nb">int64</span><span class="p">(</span><span class="o">*</span><span class="nx">sc</span><span class="p">.</span><span class="nx">RunAsUser</span><span class="p">)}</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">sc</span><span class="p">.</span><span class="nx">RunAsGroup</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">lc</span><span class="p">.</span><span class="nx">SecurityContext</span><span class="p">.</span><span class="nx">RunAsGroup</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">runtimeapi</span><span class="p">.</span><span class="nx">Int64Value</span><span class="p">{</span><span class="nx">Value</span><span class="p">:</span> <span class="nb">int64</span><span class="p">(</span><span class="o">*</span><span class="nx">sc</span><span class="p">.</span><span class="nx">RunAsGroup</span><span class="p">)}</span>
+		<span class="p">}</span>
+		<span class="nx">lc</span><span class="p">.</span><span class="nx">SecurityContext</span><span class="p">.</span><span class="nx">NamespaceOptions</span> <span class="p">=</span> <span class="nf">namespacesForPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">)</span>
+
+		<span class="k">if</span> <span class="nx">sc</span><span class="p">.</span><span class="nx">FSGroup</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">lc</span><span class="p">.</span><span class="nx">SecurityContext</span><span class="p">.</span><span class="nx">SupplementalGroups</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">lc</span><span class="p">.</span><span class="nx">SecurityContext</span><span class="p">.</span><span class="nx">SupplementalGroups</span><span class="p">,</span> <span class="nb">int64</span><span class="p">(</span><span class="o">*</span><span class="nx">sc</span><span class="p">.</span><span class="nx">FSGroup</span><span class="p">))</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">groups</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">runtimeHelper</span><span class="p">.</span><span class="nf">GetExtraSupplementalGroupsForPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">);</span> <span class="nb">len</span><span class="p">(</span><span class="nx">groups</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">lc</span><span class="p">.</span><span class="nx">SecurityContext</span><span class="p">.</span><span class="nx">SupplementalGroups</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">lc</span><span class="p">.</span><span class="nx">SecurityContext</span><span class="p">.</span><span class="nx">SupplementalGroups</span><span class="p">,</span> <span class="nx">groups</span><span class="o">...</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">sc</span><span class="p">.</span><span class="nx">SupplementalGroups</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">sg</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">sc</span><span class="p">.</span><span class="nx">SupplementalGroups</span> <span class="p">{</span>
+				<span class="nx">lc</span><span class="p">.</span><span class="nx">SecurityContext</span><span class="p">.</span><span class="nx">SupplementalGroups</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">lc</span><span class="p">.</span><span class="nx">SecurityContext</span><span class="p">.</span><span class="nx">SupplementalGroups</span><span class="p">,</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">sg</span><span class="p">))</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">sc</span><span class="p">.</span><span class="nx">SELinuxOptions</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">lc</span><span class="p">.</span><span class="nx">SecurityContext</span><span class="p">.</span><span class="nx">SelinuxOptions</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">runtimeapi</span><span class="p">.</span><span class="nx">SELinuxOption</span><span class="p">{</span>
+				<span class="nx">User</span><span class="p">:</span>  <span class="nx">sc</span><span class="p">.</span><span class="nx">SELinuxOptions</span><span class="p">.</span><span class="nx">User</span><span class="p">,</span>
+				<span class="nx">Role</span><span class="p">:</span>  <span class="nx">sc</span><span class="p">.</span><span class="nx">SELinuxOptions</span><span class="p">.</span><span class="nx">Role</span><span class="p">,</span>
+				<span class="nx">Type</span><span class="p">:</span>  <span class="nx">sc</span><span class="p">.</span><span class="nx">SELinuxOptions</span><span class="p">.</span><span class="nx">Type</span><span class="p">,</span>
+				<span class="nx">Level</span><span class="p">:</span> <span class="nx">sc</span><span class="p">.</span><span class="nx">SELinuxOptions</span><span class="p">.</span><span class="nx">Level</span><span class="p">,</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="nx">lc</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="summary">Summary</h2>
+<p>The core work of Kubelet revolves around the control loop, which uses go&rsquo;s channel as a basis for the producer and consumer to work together to make the control loop work and achieve the desired state.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/kubelet/">kubelet</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/kubelet-quality-of-service-management-for-pods/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Quality of Service Management for Pods by Kubelet</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/how-the-kubernetes-network-plugin-works/">
+            <span class="next-text nav-default">How the Kubernetes Network Plugin Works</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

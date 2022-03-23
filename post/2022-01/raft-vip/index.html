@@ -1,0 +1,954 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Implementing VIP functionality with Raft - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Background When deploying an application that is highly available, we usually place a HAProxy in front of the application so that when any one Server fails, the HAProxy will automatically switch over, but HAProxy also has a single point of failure, so we need more than one HAProxy to ensure that the business is not interrupted, and this time we need another software to work with: Keepalived. Keepalived is only" /><meta name="keywords" content="golang, raft, vip" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/raft-vip/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Implementing VIP functionality with Raft" />
+<meta property="og:description" content="Background When deploying an application that is highly available, we usually place a HAProxy in front of the application so that when any one Server fails, the HAProxy will automatically switch over, but HAProxy also has a single point of failure, so we need more than one HAProxy to ensure that the business is not interrupted, and this time we need another software to work with: Keepalived. Keepalived is only" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/raft-vip/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-17T13:33:18+08:00" />
+<meta property="article:modified_time" content="2022-01-17T13:33:18+08:00" />
+
+<meta itemprop="name" content="Implementing VIP functionality with Raft">
+<meta itemprop="description" content="Background When deploying an application that is highly available, we usually place a HAProxy in front of the application so that when any one Server fails, the HAProxy will automatically switch over, but HAProxy also has a single point of failure, so we need more than one HAProxy to ensure that the business is not interrupted, and this time we need another software to work with: Keepalived. Keepalived is only"><meta itemprop="datePublished" content="2022-01-17T13:33:18+08:00" />
+<meta itemprop="dateModified" content="2022-01-17T13:33:18+08:00" />
+<meta itemprop="wordCount" content="2425">
+<meta itemprop="keywords" content="golang,raft," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Implementing VIP functionality with Raft"/>
+<meta name="twitter:description" content="Background When deploying an application that is highly available, we usually place a HAProxy in front of the application so that when any one Server fails, the HAProxy will automatically switch over, but HAProxy also has a single point of failure, so we need more than one HAProxy to ensure that the business is not interrupted, and this time we need another software to work with: Keepalived. Keepalived is only"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Implementing VIP functionality with Raft</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-17 13:33:18 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2425 words </span>
+          <span class="more-meta"> 5 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#background">Background</a></li>
+        <li><a href="#hashicorpraft">hashicorp/raft</a>
+          <ul>
+            <li><a href="#otoolephraftd">otoolep/hraftd</a></li>
+          </ul>
+        </li>
+        <li><a href="#vip">VIP</a>
+          <ul>
+            <li><a href="#network">network</a></li>
+            <li><a href="#raft-1">raft</a></li>
+            <li><a href="#serve">serve</a></li>
+            <li><a href="#arp">ARP</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="background">Background</h2>
+<p>When deploying an application that is highly available, we usually place a HAProxy in front of the application so that when any one Server fails, the HAProxy will automatically switch over, but HAProxy also has a single point of failure, so we need more than one HAProxy to ensure that the business is not interrupted, and this time we need another software to work with: Keepalived. Keepalived is only used to provide VIPs to ensure that when one Keepalived fails, the VIPs are automatically configured on other Keepalived nodes.</p>
+<p>One problem with Keepalived is that the virtual route ID must be unique within the same network segment, so when we want to deploy multiple clusters within a network segment, we need to intervene to assign the virtual route ID, which is inconvenient. This time we will use Raft to implement the VIP logic ourselves.</p>
+<h2 id="hashicorpraft">hashicorp/raft</h2>
+<p>There are a number of open source implementations of Raft, of which the <a href="https://github.com/hashicorp/raft">Raft library</a> implemented by Hashicorp has been used by software such as Consul and has a friendly interface and has been chosen to be used for its implementation. There are many examples of Raft in use on Github, one of the simpler and more complete is <a href="https://github.com/otoolep/hraftd">otoolep/hraftd</a>, let&rsquo;s see how he uses it.</p>
+<h3 id="otoolephraftd">otoolep/hraftd</h3>
+<h4 id="maingo">main.go</h4>
+<p>There are 4 main things done in main.go: <code>store.New</code> , <code>store.Open</code> , <code>http.New</code> , <code>http.Start</code> and first let&rsquo;s see how the program is started.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">init</span><span class="p">()</span> <span class="p">{</span>
+    <span class="c1">// 设置命令行参数
+</span><span class="c1"></span>	<span class="nx">flag</span><span class="p">.</span><span class="nf">BoolVar</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">inmem</span><span class="p">,</span> <span class="s">&#34;inmem&#34;</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="s">&#34;Use in-memory storage for Raft&#34;</span><span class="p">)</span>
+	<span class="o">...</span>
+	<span class="nx">flag</span><span class="p">.</span><span class="nx">Usage</span> <span class="p">=</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Fprintf</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span><span class="p">,</span> <span class="s">&#34;Usage: %s [options] &lt;raft-data-path&gt; \n&#34;</span><span class="p">,</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+		<span class="nx">flag</span><span class="p">.</span><span class="nf">PrintDefaults</span><span class="p">()</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="c1">// 解析命令行参数
+</span><span class="c1"></span>	<span class="nx">flag</span><span class="p">.</span><span class="nf">Parse</span><span class="p">()</span>
+    <span class="o">...</span>
+    <span class="c1">// 创建一个 Store 对象
+</span><span class="c1"></span>	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">store</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nx">inmem</span><span class="p">)</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">RaftDir</span> <span class="p">=</span> <span class="nx">raftDir</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">RaftBind</span> <span class="p">=</span> <span class="nx">raftAddr</span>
+    <span class="c1">// 运行 Store 
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">Open</span><span class="p">(</span><span class="nx">joinAddr</span> <span class="o">==</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">nodeID</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;failed to open store: %s&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+	<span class="p">}</span>
+    <span class="c1">// 新建一个 http 对象并运行
+</span><span class="c1"></span>	<span class="nx">h</span> <span class="o">:=</span> <span class="nx">httpd</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nx">httpAddr</span><span class="p">,</span> <span class="nx">s</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">Start</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;failed to start HTTP service: %s&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+	<span class="p">}</span>
+
+	<span class="c1">// 如果 joinAddr 参数不为空，则处理 join 请求
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nx">joinAddr</span> <span class="o">!=</span> <span class="s">&#34;&#34;</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">join</span><span class="p">(</span><span class="nx">joinAddr</span><span class="p">,</span> <span class="nx">raftAddr</span><span class="p">,</span> <span class="nx">nodeID</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">log</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;failed to join node at %s: %s&#34;</span><span class="p">,</span> <span class="nx">joinAddr</span><span class="p">,</span> <span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;hraftd started successfully&#34;</span><span class="p">)</span>
+    <span class="c1">// 监听系统信号，若接收到 os.Interrupt 则程序退出
+</span><span class="c1"></span>	<span class="nx">terminate</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Signal</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="nx">signal</span><span class="p">.</span><span class="nf">Notify</span><span class="p">(</span><span class="nx">terminate</span><span class="p">,</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Interrupt</span><span class="p">)</span>
+	<span class="o">&lt;-</span><span class="nx">terminate</span>
+	<span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;hraftd exiting&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="http">http</h4>
+<p>We know from main.go that <code>http.Start</code> is called, so let&rsquo;s look at the http implementation first, regardless of what Store is.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Start starts the service.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Service</span><span class="p">)</span> <span class="nf">Start</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="c1">// Service 实现了 ServeHTTP 方法
+</span><span class="c1"></span>	<span class="nx">http</span><span class="p">.</span><span class="nf">Handle</span><span class="p">(</span><span class="s">&#34;/&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">)</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">err</span> <span class="o">:=</span> <span class="nx">server</span><span class="p">.</span><span class="nf">Serve</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">ln</span><span class="p">)</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Service</span><span class="p">)</span> <span class="nf">ServeHTTP</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">strings</span><span class="p">.</span><span class="nf">HasPrefix</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">URL</span><span class="p">.</span><span class="nx">Path</span><span class="p">,</span> <span class="s">&#34;/key&#34;</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">s</span><span class="p">.</span><span class="nf">handleKeyRequest</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="nx">r</span><span class="p">)</span>
+    <span class="c1">// 先忽略其他分支
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The main request handler is the <code>s.handleKeyRequest</code> method.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Service</span><span class="p">)</span> <span class="nf">handleKeyRequest</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">switch</span> <span class="nx">r</span><span class="p">.</span><span class="nx">Method</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="s">&#34;GET&#34;</span><span class="p">:</span>
+		<span class="nx">k</span> <span class="o">:=</span> <span class="nf">getKey</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">k</span> <span class="o">==</span> <span class="s">&#34;&#34;</span> <span class="p">{</span>
+			<span class="nx">w</span><span class="p">.</span><span class="nf">WriteHeader</span><span class="p">(</span><span class="nx">http</span><span class="p">.</span><span class="nx">StatusBadRequest</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">v</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">store</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span>
+		<span class="o">...</span>
+		<span class="nx">io</span><span class="p">.</span><span class="nf">WriteString</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nx">b</span><span class="p">))</span>
+	<span class="k">case</span> <span class="s">&#34;POST&#34;</span><span class="p">:</span>
+		<span class="c1">// Read the value from the POST body.
+</span><span class="c1"></span>		<span class="nx">m</span> <span class="o">:=</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">{}</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nf">NewDecoder</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">Body</span><span class="p">).</span><span class="nf">Decode</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">m</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">w</span><span class="p">.</span><span class="nf">WriteHeader</span><span class="p">(</span><span class="nx">http</span><span class="p">.</span><span class="nx">StatusBadRequest</span><span class="p">)</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+		<span class="k">for</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">v</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">m</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">store</span><span class="p">.</span><span class="nf">Set</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">v</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">w</span><span class="p">.</span><span class="nf">WriteHeader</span><span class="p">(</span><span class="nx">http</span><span class="p">.</span><span class="nx">StatusInternalServerError</span><span class="p">)</span>
+				<span class="k">return</span>
+			<span class="p">}</span>
+        <span class="p">}</span>
+    <span class="o">...</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In <code>s.handleKeyRequest</code>, the store method is called according to the request method. This is also defined in the http module.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Store</span> <span class="kd">interface</span> <span class="p">{</span>
+	<span class="nf">Get</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="kt">string</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span>
+	<span class="nf">Set</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">error</span>
+	<span class="nf">Delete</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">error</span>
+	<span class="nf">Join</span><span class="p">(</span><span class="nx">nodeID</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">addr</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">error</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Apart from Join, which looks strange, everything else is the interface of a K/V system, so let&rsquo;s take a look at the implementation of Store&rsquo;s specific methods.</p>
+<h4 id="store">store</h4>
+<p>The writing of this module involves specific concepts in Raft, so we recommend reading the Raft blog by siddontang for a quick overview (the links are listed in the references).</p>
+<p>Here is an example of setting up a Key.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Store</span><span class="p">)</span> <span class="nf">Set</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">raft</span><span class="p">.</span><span class="nf">State</span><span class="p">()</span> <span class="o">!=</span> <span class="nx">raft</span><span class="p">.</span><span class="nx">Leader</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;not leader&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+
+    <span class="c1">// 封装具体执行的动作
+</span><span class="c1"></span>	<span class="nx">c</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">command</span><span class="p">{</span>
+		<span class="nx">Op</span><span class="p">:</span>    <span class="s">&#34;set&#34;</span><span class="p">,</span>
+		<span class="nx">Key</span><span class="p">:</span>   <span class="nx">key</span><span class="p">,</span>
+		<span class="nx">Value</span><span class="p">:</span> <span class="nx">value</span><span class="p">,</span>
+	<span class="p">}</span>
+	<span class="nx">b</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nf">Marshal</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+    <span class="o">...</span>
+    <span class="c1">// 将 command 应用于 FSM
+</span><span class="c1"></span>	<span class="nx">f</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">raft</span><span class="p">.</span><span class="nf">Apply</span><span class="p">(</span><span class="nx">b</span><span class="p">,</span> <span class="nx">raftTimeout</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">f</span><span class="p">.</span><span class="nf">Error</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>View the FSM Apply method implementation.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Apply applies a Raft log entry to the key-value store.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">f</span> <span class="o">*</span><span class="nx">fsm</span><span class="p">)</span> <span class="nf">Apply</span><span class="p">(</span><span class="nx">l</span> <span class="o">*</span><span class="nx">raft</span><span class="p">.</span><span class="nx">Log</span><span class="p">)</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">c</span> <span class="nx">command</span>
+	<span class="c1">// 根据操作动作的不同，执行不同的方法，这里以设置 Key 为例
+</span><span class="c1"></span>	<span class="k">switch</span> <span class="nx">c</span><span class="p">.</span><span class="nx">Op</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="s">&#34;set&#34;</span><span class="p">:</span>
+		<span class="k">return</span> <span class="nx">f</span><span class="p">.</span><span class="nf">applySet</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">Key</span><span class="p">,</span> <span class="nx">c</span><span class="p">.</span><span class="nx">Value</span><span class="p">)</span>
+	<span class="o">...</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">f</span> <span class="o">*</span><span class="nx">fsm</span><span class="p">)</span> <span class="nf">applySet</span><span class="p">(</span><span class="nx">key</span><span class="p">,</span> <span class="nx">value</span> <span class="kt">string</span><span class="p">)</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+    <span class="c1">// 互斥锁
+</span><span class="c1"></span>    <span class="nx">f</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">f</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+    <span class="c1">// 设置 Map 中的 Key/Value
+</span><span class="c1"></span>	<span class="nx">f</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">key</span><span class="p">]</span> <span class="p">=</span> <span class="nx">value</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="raft">raft</h4>
+<p>Having seen the specific actions implemented above, let&rsquo;s take a look at Raft&rsquo;s specific launch.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Store</span><span class="p">)</span> <span class="nf">Open</span><span class="p">(</span><span class="nx">enableSingle</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">localID</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="c1">// 设置 Raft 配置
+</span><span class="c1"></span>	<span class="nx">config</span> <span class="o">:=</span> <span class="nx">raft</span><span class="p">.</span><span class="nf">DefaultConfig</span><span class="p">()</span>
+	<span class="nx">config</span><span class="p">.</span><span class="nx">LocalID</span> <span class="p">=</span> <span class="nx">raft</span><span class="p">.</span><span class="nf">ServerID</span><span class="p">(</span><span class="nx">localID</span><span class="p">)</span>
+    <span class="c1">// 设置 Raft 通信
+</span><span class="c1"></span>	<span class="nx">addr</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">net</span><span class="p">.</span><span class="nf">ResolveTCPAddr</span><span class="p">(</span><span class="s">&#34;tcp&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">RaftBind</span><span class="p">)</span>
+    <span class="o">...</span>
+	<span class="nx">transport</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">raft</span><span class="p">.</span><span class="nf">NewTCPTransport</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">RaftBind</span><span class="p">,</span> <span class="nx">addr</span><span class="p">,</span> <span class="mi">3</span><span class="p">,</span> <span class="mi">10</span><span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">,</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span><span class="p">)</span>
+    <span class="c1">// 设置 Raft 存储对象
+</span><span class="c1"></span>	<span class="nx">snapshots</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">raft</span><span class="p">.</span><span class="nf">NewFileSnapshotStore</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">RaftDir</span><span class="p">,</span> <span class="nx">retainSnapshotCount</span><span class="p">,</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span><span class="p">)</span>
+	<span class="kd">var</span> <span class="nx">logStore</span> <span class="nx">raft</span><span class="p">.</span><span class="nx">LogStore</span>
+	<span class="kd">var</span> <span class="nx">stableStore</span> <span class="nx">raft</span><span class="p">.</span><span class="nx">StableStore</span>
+	<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">inmem</span> <span class="p">{</span>
+		<span class="nx">logStore</span> <span class="p">=</span> <span class="nx">raft</span><span class="p">.</span><span class="nf">NewInmemStore</span><span class="p">()</span>
+		<span class="nx">stableStore</span> <span class="p">=</span> <span class="nx">raft</span><span class="p">.</span><span class="nf">NewInmemStore</span><span class="p">()</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="nx">boltDB</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">raftboltdb</span><span class="p">.</span><span class="nf">NewBoltStore</span><span class="p">(</span><span class="nx">filepath</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">RaftDir</span><span class="p">,</span> <span class="s">&#34;raft.db&#34;</span><span class="p">))</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;new bolt store: %s&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">logStore</span> <span class="p">=</span> <span class="nx">boltDB</span>
+		<span class="nx">stableStore</span> <span class="p">=</span> <span class="nx">boltDB</span>
+	<span class="p">}</span>
+    <span class="c1">// 创建 raft 示例，并使用该 raft 实例启动集群
+</span><span class="c1"></span>	<span class="nx">ra</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">raft</span><span class="p">.</span><span class="nf">NewRaft</span><span class="p">(</span><span class="nx">config</span><span class="p">,</span> <span class="p">(</span><span class="o">*</span><span class="nx">fsm</span><span class="p">)(</span><span class="nx">s</span><span class="p">),</span> <span class="nx">logStore</span><span class="p">,</span> <span class="nx">stableStore</span><span class="p">,</span> <span class="nx">snapshots</span><span class="p">,</span> <span class="nx">transport</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;new raft: %s&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">s</span><span class="p">.</span><span class="nx">raft</span> <span class="p">=</span> <span class="nx">ra</span>
+	<span class="k">if</span> <span class="nx">enableSingle</span> <span class="p">{</span>
+		<span class="o">...</span>
+		<span class="nx">ra</span><span class="p">.</span><span class="nf">BootstrapCluster</span><span class="p">(</span><span class="nx">configuration</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Here you can see that Raft requires the interfaces FSM and Snapshot, the specific implementation is based on the requirements, generally similar to hraftd, roughly understand the use of hashicorp/raft, then let&rsquo;s implement the specific VIP function.</p>
+<h2 id="vip">VIP</h2>
+<h3 id="network">network</h3>
+<p>Since this is IP related, you will need to configure the time for the corresponding network card, in Linux we can do this by using the <code>ip</code> command, in Golang we use <a href="https://github.com/vishvananda/netlink">vishvananda/netlink</a>.</p>
+<p><code>netlink.AddrAdd</code> adds an IP address to the specified network device.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">nc</span> <span class="o">*</span><span class="nx">NetworkConfig</span><span class="p">)</span> <span class="nf">addIP</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">res</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">nc</span><span class="p">.</span><span class="nf">IsSet</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">Wrap</span><span class="p">(</span><span class="nx">err</span><span class="p">,</span> <span class="s">&#34;ip check in AddIP failed&#34;</span><span class="p">)</span>
+
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">res</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">netlink</span><span class="p">.</span><span class="nf">AddrAdd</span><span class="p">(</span><span class="nx">nc</span><span class="p">.</span><span class="nx">link</span><span class="p">,</span> <span class="nx">nc</span><span class="p">.</span><span class="nx">address</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">Wrap</span><span class="p">(</span><span class="nx">err</span><span class="p">,</span> <span class="s">&#34;could not add ip&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>netlink.AddrDel</code> can remove the IP from the specified network device.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">nc</span> <span class="o">*</span><span class="nx">NetworkConfig</span><span class="p">)</span> <span class="nf">delIP</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">res</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">nc</span><span class="p">.</span><span class="nf">IsSet</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">Wrap</span><span class="p">(</span><span class="nx">err</span><span class="p">,</span> <span class="s">&#34;ip check in DelIP failed&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="p">!</span><span class="nx">res</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">netlink</span><span class="p">.</span><span class="nf">AddrDel</span><span class="p">(</span><span class="nx">nc</span><span class="p">.</span><span class="nx">link</span><span class="p">,</span> <span class="nx">nc</span><span class="p">.</span><span class="nx">address</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">Wrap</span><span class="p">(</span><span class="nx">err</span><span class="p">,</span> <span class="s">&#34;could not delete ip&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="raft-1">raft</h3>
+<p>We don&rsquo;t need to provide an HTTP interface, we just write the Raft implementation. Unlike the hraftd implementation, where information needs to be written and read, our VIP only depends on the Raft election leader, so we just need to write the corresponding methods, no additional operations are needed</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">FSM</span> <span class="kd">struct</span> <span class="p">{</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">fsm</span> <span class="nx">FSM</span><span class="p">)</span> <span class="nf">Apply</span><span class="p">(</span><span class="nx">log</span> <span class="o">*</span><span class="nx">raft</span><span class="p">.</span><span class="nx">Log</span><span class="p">)</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">fsm</span> <span class="nx">FSM</span><span class="p">)</span> <span class="nf">Restore</span><span class="p">(</span><span class="nx">snap</span> <span class="nx">io</span><span class="p">.</span><span class="nx">ReadCloser</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">fsm</span> <span class="nx">FSM</span><span class="p">)</span> <span class="nf">Snapshot</span><span class="p">()</span> <span class="p">(</span><span class="nx">raft</span><span class="p">.</span><span class="nx">FSMSnapshot</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">Snapshot</span><span class="p">{},</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">Snapshot</span> <span class="kd">struct</span> <span class="p">{</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">snapshot</span> <span class="nx">Snapshot</span><span class="p">)</span> <span class="nf">Persist</span><span class="p">(</span><span class="nx">sink</span> <span class="nx">raft</span><span class="p">.</span><span class="nx">SnapshotSink</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">snapshot</span> <span class="nx">Snapshot</span><span class="p">)</span> <span class="nf">Release</span><span class="p">()</span> <span class="p">{</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="serve">serve</h3>
+<p>Now that the basic methods have been implemented, the cluster start-up logic is written.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">manager</span> <span class="o">*</span><span class="nx">VIPManager</span><span class="p">)</span> <span class="nf">Start</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="c1">// 初始化 raft 配置、存储对象、通信
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">id</span><span class="p">,</span> <span class="nx">ip</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">manager</span><span class="p">.</span><span class="nx">peers</span> <span class="p">{</span>
+		<span class="nx">configuration</span><span class="p">.</span><span class="nx">Servers</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">configuration</span><span class="p">.</span><span class="nx">Servers</span><span class="p">,</span> <span class="nx">raft</span><span class="p">.</span><span class="nx">Server</span><span class="p">{</span><span class="nx">ID</span><span class="p">:</span> <span class="nx">raft</span><span class="p">.</span><span class="nf">ServerID</span><span class="p">(</span><span class="nx">id</span><span class="p">),</span> <span class="nx">Address</span><span class="p">:</span> <span class="nx">raft</span><span class="p">.</span><span class="nf">ServerAddress</span><span class="p">(</span><span class="nx">ip</span><span class="p">)})</span>
+	<span class="p">}</span>
+
+	<span class="c1">// 启动 Raft 集群，这里与 hraftd 不同，需要注意
+</span><span class="c1"></span>	<span class="k">if</span> <span class="kt">error</span> <span class="o">:=</span> <span class="nx">raft</span><span class="p">.</span><span class="nf">BootstrapCluster</span><span class="p">(</span><span class="nx">config</span><span class="p">,</span> <span class="nx">logStore</span><span class="p">,</span> <span class="nx">stableStore</span><span class="p">,</span> <span class="nx">snapshots</span><span class="p">,</span> <span class="nx">transport</span><span class="p">,</span> <span class="nx">configuration</span><span class="p">);</span> <span class="kt">error</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kt">error</span>
+	<span class="p">}</span>
+
+	<span class="c1">// 创建 raft 实例
+</span><span class="c1"></span>	<span class="nx">raftServer</span><span class="p">,</span> <span class="kt">error</span> <span class="o">:=</span> <span class="nx">raft</span><span class="p">.</span><span class="nf">NewRaft</span><span class="p">(</span><span class="nx">config</span><span class="p">,</span> <span class="nx">manager</span><span class="p">.</span><span class="nx">fsm</span><span class="p">,</span> <span class="nx">logStore</span><span class="p">,</span> <span class="nx">stableStore</span><span class="p">,</span> <span class="nx">snapshots</span><span class="p">,</span> <span class="nx">transport</span><span class="p">)</span>
+    <span class="o">...</span>
+	<span class="nx">ticker</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTicker</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+	<span class="nx">isLeader</span> <span class="o">:=</span> <span class="kc">false</span>
+    <span class="c1">// 服务启动时先删除 VIP，防止集群中同时存在节点都配置了 VIP
+</span><span class="c1"></span>	<span class="nx">manager</span><span class="p">.</span><span class="nf">deleteIP</span><span class="p">(</span><span class="kc">false</span><span class="p">)</span>
+	<span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="p">{</span>
+			<span class="k">select</span> <span class="p">{</span>
+            <span class="c1">// 如果 当前节点是 Leader 节点，则设置 VIP
+</span><span class="c1"></span>			<span class="k">case</span> <span class="nx">leader</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">raftServer</span><span class="p">.</span><span class="nf">LeaderCh</span><span class="p">():</span>
+				<span class="k">if</span> <span class="nx">leader</span> <span class="p">{</span>
+					<span class="nx">isLeader</span> <span class="p">=</span> <span class="kc">true</span>
+					<span class="nx">log</span><span class="p">.</span><span class="nf">Info</span><span class="p">(</span><span class="s">&#34;Leading&#34;</span><span class="p">)</span>
+					<span class="nx">manager</span><span class="p">.</span><span class="nf">addIP</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+
+                <span class="p">}</span>
+            <span class="c1">// 定时检测，如果是 Leader，则检测 VIP 是否正确设置，如果没有就再次配置 VIP
+</span><span class="c1"></span>			<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ticker</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
+				<span class="k">if</span> <span class="nx">isLeader</span> <span class="p">{</span>
+					<span class="nx">result</span><span class="p">,</span> <span class="kt">error</span> <span class="o">:=</span> <span class="nx">manager</span><span class="p">.</span><span class="nx">networkConfigurator</span><span class="p">.</span><span class="nf">IsSet</span><span class="p">()</span>
+					<span class="k">if</span> <span class="kt">error</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+						<span class="nx">log</span><span class="p">.</span><span class="nf">WithFields</span><span class="p">(</span><span class="nx">log</span><span class="p">.</span><span class="nx">Fields</span><span class="p">{</span><span class="s">&#34;error&#34;</span><span class="p">:</span> <span class="kt">error</span><span class="p">,</span> <span class="s">&#34;ip&#34;</span><span class="p">:</span> <span class="nx">manager</span><span class="p">.</span><span class="nx">networkConfigurator</span><span class="p">.</span><span class="nf">IP</span><span class="p">(),</span> <span class="s">&#34;interface&#34;</span><span class="p">:</span> <span class="nx">manager</span><span class="p">.</span><span class="nx">networkConfigurator</span><span class="p">.</span><span class="nf">Interface</span><span class="p">()}).</span><span class="nf">Error</span><span class="p">(</span><span class="s">&#34;Could not check ip&#34;</span><span class="p">)</span>
+					<span class="p">}</span>
+
+					<span class="k">if</span> <span class="nx">result</span> <span class="o">==</span> <span class="kc">false</span> <span class="p">{</span>
+						<span class="nx">log</span><span class="p">.</span><span class="nf">Error</span><span class="p">(</span><span class="s">&#34;Lost IP&#34;</span><span class="p">)</span>
+
+						<span class="nx">manager</span><span class="p">.</span><span class="nf">addIP</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+					<span class="p">}</span>
+				<span class="p">}</span>
+            <span class="o">...</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The advantage of this is that even if there is only one node in the cluster, the first node, then the cluster will work, the disadvantage is that the cluster starts in a fixed order, the first node must be started first and then the other nodes are added to the Raft cluster with a Join request (we ignore the Join reads).</p>
+<p>Think again about our requirements: clustering, high availability, failure. When these words are put together, we know that the hraftd approach is not for us for the following reasons.</p>
+<ol>
+<li>the cluster node boot order requirement</li>
+<li>different node configuration files, some of which require Join parameters</li>
+</ol>
+<p>So we are using <code>raft.BootstrapCluster</code> directly to start the cluster, although only one node cluster does not work properly, but this is tolerable.</p>
+<h3 id="arp">ARP</h3>
+<p>After implementing the above features, I thought I was done and started self-testing, but during the test I found a very strange phenomenon, although we achieved the automatic drift of VIP failures through Raft&rsquo;s own election, but the actual test found that service access was not immediately restored as the VIP was rebuilt, and checking ARP records found that the ARP records of each node in the cluster about the VIP were different, or even completely different.</p>
+<p>Let&rsquo;s revisit the ARP protocol content.</p>
+<blockquote>
+<p>ARP is a network transport protocol that finds data link layer addresses by resolving network layer addresses, and is extremely important in IPv4. . ARP may also refer to a process that manages its associated addresses in most operating systems.</p>
+</blockquote>
+<blockquote>
+<p>In the Ethernet protocol it is specified that in order for a host on the same LAN to communicate directly with another host, the MAC address of the target host must be known. In contrast, in the TCP/IP protocol, the network and transport layers are only concerned with the IP address of the target host. This leads to the fact that when using IP protocols in Ethernet, the Ethernet protocol at the data link layer receives data from the upper IP protocols containing only the IP address of the destination host. A method is then needed to obtain the MAC address of the destination host based on its IP address. This is what the ARP protocol does. Address resolution is the process by which a host converts the destination IP address into the destination MAC address before sending the frame.</p>
+</blockquote>
+<p>If the VIP is different from the MAC address of the real node, it is equivalent to an ARP attack, so after our Leader node has set the VIP, it also needs to send an ARP request broadcast to tell the other nodes in the broadcast domain the correct MAC address of the VIP. The method used is gratuitous ARP (free ARP). Let&rsquo;s look directly at an open source ARP implementation for this requirement.</p>
+<p><a href="https://github.com/google/seesaw">google/seesaw</a> is a load balancer that implements this functionality in.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// ARPSendGratuitous sends a gratuitous ARP message via the specified interface.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">ncc</span> <span class="o">*</span><span class="nx">SeesawNCC</span><span class="p">)</span> <span class="nf">ARPSendGratuitous</span><span class="p">(</span><span class="nx">arp</span> <span class="o">*</span><span class="nx">ncctypes</span><span class="p">.</span><span class="nx">ARPGratuitous</span><span class="p">,</span> <span class="nx">out</span> <span class="o">*</span><span class="kt">int</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">iface</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">net</span><span class="p">.</span><span class="nf">InterfaceByName</span><span class="p">(</span><span class="nx">arp</span><span class="p">.</span><span class="nx">IfaceName</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;failed to get interface %q: %v&#34;</span><span class="p">,</span> <span class="nx">arp</span><span class="p">.</span><span class="nx">IfaceName</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nx">log</span><span class="p">.</span><span class="nf">V</span><span class="p">(</span><span class="mi">2</span><span class="p">).</span><span class="nf">Infof</span><span class="p">(</span><span class="s">&#34;Sending gratuitous ARP for %s (%s) via %s&#34;</span><span class="p">,</span> <span class="nx">arp</span><span class="p">.</span><span class="nx">IP</span><span class="p">,</span> <span class="nx">iface</span><span class="p">.</span><span class="nx">HardwareAddr</span><span class="p">,</span> <span class="nx">iface</span><span class="p">.</span><span class="nx">Name</span><span class="p">)</span>
+	<span class="nx">m</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">gratuitousARPReply</span><span class="p">(</span><span class="nx">arp</span><span class="p">.</span><span class="nx">IP</span><span class="p">,</span> <span class="nx">iface</span><span class="p">.</span><span class="nx">HardwareAddr</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nf">sendARP</span><span class="p">(</span><span class="nx">iface</span><span class="p">,</span> <span class="nx">m</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="summary">Summary</h2>
+<p>Although our company&rsquo;s Slogan is <code>Make IT Simple</code>, we feel more and more that Hashicorp is the faithful embodiment of this statement. Their Terraform, Vault, Consul, Nomad, Vagrant, etc. are all software that make the application and management of infrastructure easier and more convenient, which is still very cool.</p>
+<p>The exact implementation of this article can be seen at <a href="https://github.com/zdyxry/sparrow">sparrow</a>.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          <a href="/tags/raft/">raft</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/linux-kernel-2021-highlights/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Linux kernel 2021: Linus Torvalds most prolific, commit count down to 73.7k</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/k8s-drain/">
+            <span class="next-text nav-default">K8s drain command source code reading</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

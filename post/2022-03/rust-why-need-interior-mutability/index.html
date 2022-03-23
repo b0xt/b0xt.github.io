@@ -1,0 +1,582 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Why Rust Needs Internal Variability - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article refers to rust book ch15 and adds its own understanding, interested parties can first look at the official documentation.
+Rust has two ways to achieve mutability
+ Inheritance variability: for example, if a struct is declared with let mut, then any field of the struct can be modified later. Internal mutability: use Cell RefCell to wrap a variable or field so that it can be modified even if the external variable is read-only  It seems that inheritance mutability is enough, so why do we need the so-called interior mutability internal mutability?" /><meta name="keywords" content="rust, Interior, Mutability" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/rust-why-need-interior-mutability/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Why Rust Needs Internal Variability" />
+<meta property="og:description" content="This article refers to rust book ch15 and adds its own understanding, interested parties can first look at the official documentation.
+Rust has two ways to achieve mutability
+ Inheritance variability: for example, if a struct is declared with let mut, then any field of the struct can be modified later. Internal mutability: use Cell RefCell to wrap a variable or field so that it can be modified even if the external variable is read-only  It seems that inheritance mutability is enough, so why do we need the so-called interior mutability internal mutability?" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/rust-why-need-interior-mutability/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-08T14:50:23+08:00" />
+<meta property="article:modified_time" content="2022-03-08T14:50:23+08:00" />
+
+<meta itemprop="name" content="Why Rust Needs Internal Variability">
+<meta itemprop="description" content="This article refers to rust book ch15 and adds its own understanding, interested parties can first look at the official documentation.
+Rust has two ways to achieve mutability
+ Inheritance variability: for example, if a struct is declared with let mut, then any field of the struct can be modified later. Internal mutability: use Cell RefCell to wrap a variable or field so that it can be modified even if the external variable is read-only  It seems that inheritance mutability is enough, so why do we need the so-called interior mutability internal mutability?"><meta itemprop="datePublished" content="2022-03-08T14:50:23+08:00" />
+<meta itemprop="dateModified" content="2022-03-08T14:50:23+08:00" />
+<meta itemprop="wordCount" content="884">
+<meta itemprop="keywords" content="rust," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Why Rust Needs Internal Variability"/>
+<meta name="twitter:description" content="This article refers to rust book ch15 and adds its own understanding, interested parties can first look at the official documentation.
+Rust has two ways to achieve mutability
+ Inheritance variability: for example, if a struct is declared with let mut, then any field of the struct can be modified later. Internal mutability: use Cell RefCell to wrap a variable or field so that it can be modified even if the external variable is read-only  It seems that inheritance mutability is enough, so why do we need the so-called interior mutability internal mutability?"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Why Rust Needs Internal Variability</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-08 14:50:23 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 884 words </span>
+          <span class="more-meta"> 5 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#fix">Fix</a></li>
+        <li><a href="#cell">Cell</a></li>
+        <li><a href="#refcell">RefCell</a></li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/08/370c6b05f10b421e94b3e942273958f9.png" alt="rust Internal Variability"></p>
+<p>This article refers to <a href="https://doc.rust-lang.org/book/ch15-05-interior-mutability.html">rust book ch15</a> and adds its own understanding, interested parties can first look at the official documentation.</p>
+<p>Rust has two ways to achieve mutability</p>
+<ul>
+<li>Inheritance variability: for example, if a struct is declared with let mut, then any field of the struct can be modified later.</li>
+<li>Internal mutability: use <code>Cell</code> <code>RefCell</code> to wrap a variable or field so that it can be modified even if the external variable is read-only</li>
+</ul>
+<p>It seems that inheritance mutability is enough, so why do we need the so-called <code>interior mutability</code> internal mutability? Let&rsquo;s analyze two examples.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="k">struct</span> <span class="nc">Cache</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="n">x</span>: <span class="kt">i32</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="n">y</span>: <span class="kt">i32</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="n">sum</span>: <span class="nb">Option</span><span class="o">&lt;</span><span class="kt">i32</span><span class="o">&gt;</span><span class="p">,</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="k">impl</span><span class="w"> </span><span class="n">Cache</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="k">fn</span> <span class="nf">sum</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">i32</span> <span class="p">{</span><span class="w">
+</span><span class="w">        </span><span class="k">match</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">sum</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">            </span><span class="nb">None</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="bp">self</span><span class="p">.</span><span class="n">sum</span><span class="o">=</span><span class="nb">Some</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">x</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">y</span><span class="p">);</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">sum</span><span class="p">.</span><span class="n">unwrap</span><span class="p">()},</span><span class="w">
+</span><span class="w">            </span><span class="nb">Some</span><span class="p">(</span><span class="n">sum</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">sum</span><span class="p">,</span><span class="w">
+</span><span class="w">        </span><span class="p">}</span><span class="w">
+</span><span class="w">    </span><span class="p">}</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="k">fn</span> <span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Cache</span><span class="p">{</span><span class="n">x</span>:<span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="n">y</span>:<span class="mi">11</span><span class="p">,</span><span class="w"> </span><span class="n">sum</span>: <span class="nb">None</span><span class="p">};</span><span class="w">
+</span><span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">&#34;sum is {}&#34;</span><span class="p">,</span><span class="w"> </span><span class="n">i</span><span class="p">.</span><span class="n">sum</span><span class="p">());</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>The structure <code>Cache</code> has three fields, <code>x</code> , <code>y</code> , <code>sum</code> , where <code>sum</code> simulates the lazy init lazy loading mode, the above code is not working, the reason is simple, when let initialize the variable i, is immutable.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">17 |     let i = Cache{x:10, y:11, sum: None};
+   |         - help: consider changing this to be mutable: `mut i`
+18 |     println!(&#34;sum is {}&#34;, i.sum());
+   |                           ^ cannot borrow as mutable
+</code></pre></td></tr></table>
+</div>
+</div><p>There are two ways to fix this problem, the let declaration specifies <code>let mut i</code> , but for larger projects the outer variables are likely to be immutable and immutable. This is where internal mutability comes in handy.</p>
+<h2 id="fix">Fix</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="k">use</span><span class="w"> </span><span class="n">std</span>::<span class="n">cell</span>::<span class="n">Cell</span><span class="p">;</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="k">struct</span> <span class="nc">Cache</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="n">x</span>: <span class="kt">i32</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="n">y</span>: <span class="kt">i32</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="n">sum</span>: <span class="nc">Cell</span><span class="o">&lt;</span><span class="nb">Option</span><span class="o">&lt;</span><span class="kt">i32</span><span class="o">&gt;&gt;</span><span class="p">,</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="k">impl</span><span class="w"> </span><span class="n">Cache</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="k">fn</span> <span class="nf">sum</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">i32</span> <span class="p">{</span><span class="w">
+</span><span class="w">        </span><span class="k">match</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">sum</span><span class="p">.</span><span class="n">get</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">            </span><span class="nb">None</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="p">{</span><span class="bp">self</span><span class="p">.</span><span class="n">sum</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="nb">Some</span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">x</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">y</span><span class="p">));</span><span class="w"> </span><span class="bp">self</span><span class="p">.</span><span class="n">sum</span><span class="p">.</span><span class="n">get</span><span class="p">().</span><span class="n">unwrap</span><span class="p">()},</span><span class="w">
+</span><span class="w">            </span><span class="nb">Some</span><span class="p">(</span><span class="n">sum</span><span class="p">)</span><span class="w"> </span><span class="o">=&gt;</span><span class="w"> </span><span class="n">sum</span><span class="p">,</span><span class="w">
+</span><span class="w">        </span><span class="p">}</span><span class="w">
+</span><span class="w">    </span><span class="p">}</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="k">fn</span> <span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">i</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Cache</span><span class="p">{</span><span class="n">x</span>:<span class="mi">10</span><span class="p">,</span><span class="w"> </span><span class="n">y</span>:<span class="mi">11</span><span class="p">,</span><span class="w"> </span><span class="n">sum</span>: <span class="nc">Cell</span>::<span class="n">new</span><span class="p">(</span><span class="nb">None</span><span class="p">)};</span><span class="w">
+</span><span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">&#34;sum is {}&#34;</span><span class="p">,</span><span class="w"> </span><span class="n">i</span><span class="p">.</span><span class="n">sum</span><span class="p">());</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>This is the code after the fix, sum type is <code>Cell&lt;Option&lt;i32&gt;&gt;</code> , beginners are easily confused, what the hell is this ah? Some also nest multiple wrappers, like <code>Rc&lt;Cell&lt;Option&lt;i32&gt;&gt;</code> and so on.</p>
+<p><strong>For example, <code>Rc</code> represents shared ownership, but because the T in <code>Rc&lt;T&gt;</code> is read-only and cannot be modified, we need to use <code>Cell</code> to seal a layer so that ownership is shared, but still mutable, and <code>Option</code> is the common value <code>Some(T)</code> or the null value <code>None</code></strong> , which is still very understandable.</p>
+<p>If you are not writing rust code and just want to read the source code to understand the process, there is no need to delve into these wrappers, focus on the real type of the wrapper can be.</p>
+<p>The example given by the official website is <a href="https://doc.rust-lang.org/book/ch15-05-interior-mutability.html#a-use-case-for-interior-mutability-mock-objects">Mock Objects</a>, the code is longer, but the principle is the same.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="k">struct</span> <span class="nc">MockMessenger</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="n">sent_messages</span>: <span class="nc">RefCell</span><span class="o">&lt;</span><span class="nb">Vec</span><span class="o">&lt;</span><span class="nb">String</span><span class="o">&gt;&gt;</span><span class="p">,</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>Finally, it&rsquo;s all about wrapping the structure fields with <code>RefCell</code>.</p>
+<h2 id="cell">Cell</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="k">use</span><span class="w"> </span><span class="n">std</span>::<span class="n">cell</span>::<span class="n">Cell</span><span class="p">;</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="k">fn</span> <span class="nf">main</span><span class="p">(){</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Cell</span>::<span class="n">new</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;</span><span class="n">a</span><span class="p">;</span><span class="w">
+</span><span class="w">    </span><span class="n">a</span><span class="p">.</span><span class="n">set</span><span class="p">(</span><span class="mi">1234</span><span class="p">);</span><span class="w">
+</span><span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">&#34;b is {}&#34;</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">.</span><span class="n">get</span><span class="p">());</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>This code is very representative, if the variable <code>a</code> is not wrapped with <code>Cell</code>, then it is not allowed to modify <code>a</code> while <code>b</code> read-only borrow exists, as guaranteed by the rust compiler during the compile period: <strong>Given a pair, only N immutable borrowings or one mutable borrowing are allowed to exist in scope (NLL)</strong>.</p>
+<p><code>Cell</code> gets and modifies values via <code>get</code> / <code>set</code>, this function requires that value must implement the <code>Copy</code> trait, if we replace it with another structure, the compile will report an error.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="n">error</span><span class="p">[</span><span class="n">E0599</span><span class="p">]</span>: <span class="nc">the</span><span class="w"> </span><span class="n">method</span><span class="w"> </span><span class="err">`</span><span class="n">get</span><span class="err">`</span><span class="w"> </span><span class="n">exists</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="n">reference</span><span class="w"> </span><span class="err">`</span><span class="o">&amp;</span><span class="n">Cell</span><span class="o">&lt;</span><span class="n">Test</span><span class="o">&gt;</span><span class="err">`</span><span class="p">,</span><span class="w"> </span><span class="n">but</span><span class="w"> </span><span class="n">its</span><span class="w"> </span><span class="k">trait</span><span class="w"> </span><span class="n">bounds</span><span class="w"> </span><span class="n">were</span><span class="w"> </span><span class="n">not</span><span class="w"> </span><span class="n">satisfied</span><span class="w">
+</span><span class="w">  </span><span class="o">-</span>-&gt; <span class="nc">src</span><span class="o">/</span><span class="n">main</span><span class="p">.</span><span class="n">rs</span>:<span class="mi">11</span>:<span class="mi">27</span><span class="w">
+</span><span class="w">   </span><span class="o">|</span><span class="w">
+</span><span class="w"></span><span class="mi">3</span><span class="w">  </span><span class="o">|</span><span class="w"> </span><span class="k">struct</span> <span class="nc">Test</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">   </span><span class="o">|</span><span class="w"> </span><span class="o">-----------</span><span class="w"> </span><span class="n">doesn</span><span class="o">&#39;</span><span class="na">t</span><span class="w"> </span><span class="n">satisfy</span><span class="w"> </span><span class="err">`</span><span class="n">Test</span>: <span class="nb">Copy</span><span class="err">`</span><span class="w">
+</span><span class="w"></span><span class="o">..</span><span class="p">.</span><span class="w">
+</span><span class="w"></span><span class="mi">11</span><span class="w"> </span><span class="o">|</span><span class="w">     </span><span class="fm">println!</span><span class="p">(</span><span class="s">&#34;b is {}&#34;</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">.</span><span class="n">get</span><span class="p">().</span><span class="n">a</span><span class="p">);</span><span class="w">
+</span><span class="w">   </span><span class="o">|</span><span class="w">                           </span><span class="o">^^^</span><span class="w">
+</span><span class="w">   </span><span class="o">|</span><span class="w">
+</span><span class="w">   </span><span class="o">=</span><span class="w"> </span><span class="n">note</span>: <span class="nc">the</span><span class="w"> </span><span class="n">following</span><span class="w"> </span><span class="k">trait</span><span class="w"> </span><span class="n">bounds</span><span class="w"> </span><span class="n">were</span><span class="w"> </span><span class="n">not</span><span class="w"> </span><span class="n">satisfied</span>:
+           <span class="err">`</span><span class="n">Test</span>: <span class="nb">Copy</span><span class="err">`</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>From the above, we can see that <code>struct Test</code> does not implement <code>Copy</code> by default, so <code>get</code> is not allowed. Is there any way to get the underlying struct? You can use <code>get_mut</code> to return a reference to the underlying data, but this requires the entire variable to be a <code>let mut</code>, so it is not consistent with the original intent of using <code>Cell</code>.</p>
+<h2 id="refcell">RefCell</h2>
+<p>Unlike <code>Cell</code>, we use <code>RefCell</code> to get either immutable borrowing via <code>borrow</code> or mutable borrowing of the underlying data via <code>borrow_mut</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="k">use</span><span class="w"> </span><span class="n">std</span>::<span class="n">cell</span>::<span class="p">{</span><span class="n">RefCell</span><span class="p">};</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="k">fn</span> <span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">cell</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">RefCell</span>::<span class="n">new</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span><span class="w">
+</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">cell_ref_1</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cell</span><span class="p">.</span><span class="n">borrow_mut</span><span class="p">();</span><span class="w"> </span><span class="c1">// Mutably borrow the underlying data
+</span><span class="c1"></span><span class="w">    </span><span class="o">*</span><span class="n">cell_ref_1</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">
+</span><span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">&#34;RefCell value: {:?}&#34;</span><span class="p">,</span><span class="w"> </span><span class="n">cell_ref_1</span><span class="p">);</span><span class="w">
+</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="k">mut</span><span class="w"> </span><span class="n">cell_ref_2</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">cell</span><span class="p">.</span><span class="n">borrow_mut</span><span class="p">();</span><span class="w"> </span><span class="c1">// Mutably borrow the data again (cell_ref_1 is still in scope though...)
+</span><span class="c1"></span><span class="w">    </span><span class="o">*</span><span class="n">cell_ref_2</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">1</span><span class="p">;</span><span class="w">
+</span><span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">&#34;RefCell value: {:?}&#34;</span><span class="p">,</span><span class="w"> </span><span class="n">cell_ref_2</span><span class="p">);</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>Code from <a href="https://badboi.dev/rust/2020/07/17/cell-refcell.html">badboi.dev</a>, compiled successfully, but failed to run.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"># cargo build
+    Finished dev [unoptimized + debuginfo] target(s) in 0.03s
+#
+# cargo run
+    Finished dev [unoptimized + debuginfo] target(s) in 0.03s
+     Running `target/debug/hello_cargo`
+RefCell value: 2
+thread &#39;main&#39; panicked at &#39;already borrowed: BorrowMutError&#39;, src/main.rs:10:31
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+</code></pre></td></tr></table>
+</div>
+</div><p><code>cell_ref_1</code> calls <code>borrow_mut</code> to get a variable borrow, and while it is still in scope, <code>cell_ref_2</code> also tries to get a variable borrow, at which point the runtime check reports an error and panic directly.</p>
+<p>That means <strong><code>RefCell</code> moves the borrow rule from compile-time compile to runtime</strong> , with some runtime overhead.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="cp">#[derive(Debug)]</span><span class="w">
+</span><span class="w"></span><span class="k">enum</span> <span class="nc">List</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="n">Cons</span><span class="p">(</span><span class="n">Rc</span><span class="o">&lt;</span><span class="n">RefCell</span><span class="o">&lt;</span><span class="kt">i32</span><span class="o">&gt;&gt;</span><span class="p">,</span><span class="w"> </span><span class="n">Rc</span><span class="o">&lt;</span><span class="n">List</span><span class="o">&gt;</span><span class="p">),</span><span class="w">
+</span><span class="w">    </span><span class="n">Nil</span><span class="p">,</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="k">use</span><span class="w"> </span><span class="k">crate</span>::<span class="n">List</span>::<span class="p">{</span><span class="n">Cons</span><span class="p">,</span><span class="w"> </span><span class="n">Nil</span><span class="p">};</span><span class="w">
+</span><span class="w"></span><span class="k">use</span><span class="w"> </span><span class="n">std</span>::<span class="n">cell</span>::<span class="n">RefCell</span><span class="p">;</span><span class="w">
+</span><span class="w"></span><span class="k">use</span><span class="w"> </span><span class="n">std</span>::<span class="n">rc</span>::<span class="n">Rc</span><span class="p">;</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="k">fn</span> <span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Rc</span>::<span class="n">new</span><span class="p">(</span><span class="n">RefCell</span>::<span class="n">new</span><span class="p">(</span><span class="mi">5</span><span class="p">));</span><span class="w">
+</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">a</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Rc</span>::<span class="n">new</span><span class="p">(</span><span class="n">Cons</span><span class="p">(</span><span class="n">Rc</span>::<span class="n">clone</span><span class="p">(</span><span class="o">&amp;</span><span class="n">value</span><span class="p">),</span><span class="w"> </span><span class="n">Rc</span>::<span class="n">new</span><span class="p">(</span><span class="n">Nil</span><span class="p">)));</span><span class="w">
+</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">b</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Cons</span><span class="p">(</span><span class="n">Rc</span>::<span class="n">new</span><span class="p">(</span><span class="n">RefCell</span>::<span class="n">new</span><span class="p">(</span><span class="mi">3</span><span class="p">)),</span><span class="w"> </span><span class="n">Rc</span>::<span class="n">clone</span><span class="p">(</span><span class="o">&amp;</span><span class="n">a</span><span class="p">));</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">c</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Cons</span><span class="p">(</span><span class="n">Rc</span>::<span class="n">new</span><span class="p">(</span><span class="n">RefCell</span>::<span class="n">new</span><span class="p">(</span><span class="mi">4</span><span class="p">)),</span><span class="w"> </span><span class="n">Rc</span>::<span class="n">clone</span><span class="p">(</span><span class="o">&amp;</span><span class="n">a</span><span class="p">));</span><span class="w">
+</span><span class="w">
+</span><span class="w">    </span><span class="o">*</span><span class="n">value</span><span class="p">.</span><span class="n">borrow_mut</span><span class="p">()</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="mi">10</span><span class="p">;</span><span class="w">
+</span><span class="w">
+</span><span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">&#34;a after = {:?}&#34;</span><span class="p">,</span><span class="w"> </span><span class="n">a</span><span class="p">);</span><span class="w">
+</span><span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">&#34;b after = {:?}&#34;</span><span class="p">,</span><span class="w"> </span><span class="n">b</span><span class="p">);</span><span class="w">
+</span><span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">&#34;c after = {:?}&#34;</span><span class="p">,</span><span class="w"> </span><span class="n">c</span><span class="p">);</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>This is the <a href="https://doc.rust-lang.org/book/ch15-05-interior-mutability.html#having-multiple-owners-of-mutable-data-by-combining-rct-and-refcellt">official</a> example, used in combination with <code>Rc</code> , <code>RefCell</code> to share ownership while modifying List node values.</p>
+<h2 id="summary">Summary</h2>
+<p>Internal mutability provides great flexibility, but filtered to runtime overhead, still can not be abused, performance problems are not significant, the focus is the lack of compile-time static checks, will cover up many errors.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/rust/">rust</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/smart-pointer-rc-weak-arc/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Dissecting Smart Pointers Rc Weak and Arc</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/go-ctx-best-practice/">
+            <span class="next-text nav-default">Go Context Best Practices</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

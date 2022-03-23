@@ -1,0 +1,665 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Kubernetes Service Discovery - coreDNS - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Service discovery is an important feature of K8s, and there are two ways to do this: either by injecting the svc ClusterIP into the pod as an environment variable, or by using DNS, which has replaced kube dns as the built-in DNS server since version 1.13. In this article, we will briefly analyze coreDNS.
+K8s DNS Policies There are four types of DNS policies for Pods in Kubernetes.
+ Default: Pod inherits the DNS configuration on the host where it resides." /><meta name="keywords" content="kubernetes, Coredns, Service Discovery" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/kubernetes-coredns/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Kubernetes Service Discovery - coreDNS" />
+<meta property="og:description" content="Service discovery is an important feature of K8s, and there are two ways to do this: either by injecting the svc ClusterIP into the pod as an environment variable, or by using DNS, which has replaced kube dns as the built-in DNS server since version 1.13. In this article, we will briefly analyze coreDNS.
+K8s DNS Policies There are four types of DNS policies for Pods in Kubernetes.
+ Default: Pod inherits the DNS configuration on the host where it resides." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/kubernetes-coredns/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-11T09:48:21+08:00" />
+<meta property="article:modified_time" content="2022-03-11T09:48:21+08:00" />
+
+<meta itemprop="name" content="Kubernetes Service Discovery - coreDNS">
+<meta itemprop="description" content="Service discovery is an important feature of K8s, and there are two ways to do this: either by injecting the svc ClusterIP into the pod as an environment variable, or by using DNS, which has replaced kube dns as the built-in DNS server since version 1.13. In this article, we will briefly analyze coreDNS.
+K8s DNS Policies There are four types of DNS policies for Pods in Kubernetes.
+ Default: Pod inherits the DNS configuration on the host where it resides."><meta itemprop="datePublished" content="2022-03-11T09:48:21+08:00" />
+<meta itemprop="dateModified" content="2022-03-11T09:48:21+08:00" />
+<meta itemprop="wordCount" content="1468">
+<meta itemprop="keywords" content="kubernetes," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Kubernetes Service Discovery - coreDNS"/>
+<meta name="twitter:description" content="Service discovery is an important feature of K8s, and there are two ways to do this: either by injecting the svc ClusterIP into the pod as an environment variable, or by using DNS, which has replaced kube dns as the built-in DNS server since version 1.13. In this article, we will briefly analyze coreDNS.
+K8s DNS Policies There are four types of DNS policies for Pods in Kubernetes.
+ Default: Pod inherits the DNS configuration on the host where it resides."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Kubernetes Service Discovery - coreDNS</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-11 09:48:21 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1468 words </span>
+          <span class="more-meta"> 7 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#k8s-dns-policies">K8s DNS Policies</a></li>
+        <li><a href="#resolvconf-file-analysis">resolv.conf file analysis</a>
+          <ul>
+            <li><a href="#the-process-of-domain-name-resolution">The process of domain name resolution</a></li>
+            <li><a href="#communication-between-pods">Communication between pods</a></li>
+          </ul>
+        </li>
+        <li><a href="#coredns-corefile-file">coreDNS Corefile file</a>
+          <ul>
+            <li><a href="#corefile-file-analysis">Corefile file analysis</a></li>
+            <li><a href="#specifying-hosts">Specifying hosts</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Service discovery is an important feature of K8s, and there are two ways to do this: either by injecting the svc ClusterIP into the pod as an environment variable, or by using DNS, which has replaced kube dns as the built-in DNS server since version 1.13. In this article, we will briefly analyze coreDNS.</p>
+<h2 id="k8s-dns-policies">K8s DNS Policies</h2>
+<p>There are four types of DNS policies for Pods in Kubernetes.</p>
+<ol>
+<li>Default: Pod inherits the DNS configuration on the host where it resides.</li>
+<li>ClusterFirst: the default setting for K8s; first query in the coreDNS of K8s cluster configuration, and then query in the upstream nameserver of the inherited host if you can&rsquo;t find it.</li>
+<li>ClusterFirstWithHostNet: for Pods with network configuration as hostNetwork, the DNS configuration rules are the same as ClusterFirst.</li>
+<li>None: Ignore the DNS configuration of the K8s environment and only recognize the Pod&rsquo;s dnsConfig settings.</li>
+</ol>
+<p>Here&rsquo;s a quick overview of how coreDNS resolves domain names.</p>
+<h2 id="resolvconf-file-analysis">resolv.conf file analysis</h2>
+<p>When deploying a pod, if it uses the DNS of the K8s cluster, the kubelet will initialize its DNS resolution configuration to that of the cluster when it starts the pause container.</p>
+<p>For example, if I create a deployment called <code>my-nginx</code>, the <code>resolv.conf</code> file in the pod is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="o">[</span>root@localhost ~<span class="o">]</span><span class="c1"># kubectl exec -it my-nginx-b67c7f44-hsnpv cat /etc/resolv.conf</span>
+nameserver 10.96.0.10
+search default.svc.cluster.local svc.cluster.local cluster.local
+options ndots:5
+</code></pre></td></tr></table>
+</div>
+</div><p>When pods in the cluster access each other with svc name, the domain name is resolved according to the DNS configuration in the <code>resolv.conf</code> file, and the following is a breakdown of the process.</p>
+<h3 id="the-process-of-domain-name-resolution">The process of domain name resolution</h3>
+<p>The pod resolv.conf file has three main sections, nameserver, search and option, which can be specified by K8s or customized by the pod.spec.dnsConfig field.</p>
+<h4 id="nameserver">nameserver</h4>
+<p>The first line of the <code>resolv.conf</code> file, nameserver, specifies the IP of the DNS service, in this case the clusterIP of coreDNS.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="o">[</span>root@localhost ~<span class="o">]</span><span class="c1"># kubectl -n kube-system get svc |grep dns</span>
+kube-dns   ClusterIP   10.96.0.10   &lt;none&gt;        53/UDP,53/TCP,9153/TCP   32d
+</code></pre></td></tr></table>
+</div>
+</div><p>This means that all domain names resolve through the virtual IP <code>10.96.0.10</code> of coreDNS, whether they are internal to Kubernetes or external to it.</p>
+<h4 id="search-domain">search domain</h4>
+<p>The second line of the <code>resolv.conf</code> file specifies the DNS search domain. When resolving a domain name, the domain names to be accessed are brought into the search domain in order to perform a DNS lookup.</p>
+<p>For example, if I want to access a service with the domain name <code>your-nginx</code> in the pod, the order of the DNS lookups will be as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">your-nginx.default.svc.cluster.local. -&gt; your-nginx.svc.cluster.local. -&gt; your-nginx.cluster.local.    
+</code></pre></td></tr></table>
+</div>
+</div><p>until it is checked.</p>
+<h4 id="options">options</h4>
+<p>The third line of the <code>resolv.conf</code> file specifies additional items, most often <code>dnots</code>. <code>dnots</code> means that if the query domain contains a dot &ldquo;.&rdquo; The default configuration in K8s is 5.</p>
+<p>In other words, if I visit <code>a.b.c.e.f.g</code>, then the domain name lookup order is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">a.b.c.e.f.g. -&gt; a.b.c.e.f.g.default.svc.cluster.local. -&gt; a.b.c.e.f.g.svc.cluster.local. -&gt; a.b.c.e.f.g.cluster.local.
+</code></pre></td></tr></table>
+</div>
+</div><p>If I visit <code>a.b.c.e</code>, then the domain lookup order is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">a.b.c.e.default.svc.cluster.local. -&gt; a.b.c.e.svc.cluster.local. -&gt; a.b.c.e.cluster.local. -&gt; a.b.c.e.
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="communication-between-pods">Communication between pods</h3>
+<p>After understanding the domain resolution process, let&rsquo;s take a look at the communication between pods.</p>
+<h4 id="access-via-svc">Access via svc</h4>
+<p>As we all know, in K8s, when pods access each other via svc, they go through DNS domain name resolution and then get the ip communication. The full name of K8s domain is <code>&quot;&lt;service-name&gt;. &lt;namespace&gt;.svc.cluster.local&quot;</code>, and we usually just use svc name as the domain name to access the pod, which is not hard to understand by the domain name resolution process above.</p>
+<p>Let&rsquo;s look at an example. There are two deployments, one called <code>busybox</code> under the namespace <code>default</code>, and one called <code>your-nginx</code> under the namespace <code>hdls</code>, with the same svc name. We try to access <code>your-nginx</code> in <code>busybox</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">[root@localhost ~]# kubectl get po
+NAME                           READY   STATUS    RESTARTS   AGE
+busybox-5bbb5d7ff7-dh68j       1/1     Running   0          8m35s
+[root@localhost ~]#
+[root@localhost ~]# kubectl exec -it busybox-5bbb5d7ff7-dh68j sh
+/ # wget your-nginx
+wget: bad address &#39;your-nginx&#39;
+/ #
+/ # wget your-nginx.hdls
+Connecting to your-nginx.hdls (10.100.3.148:80)
+saving to &#39;index.html&#39;
+index.html           100% |*****************************************************|   612  0:00:00 ETA
+&#39;index.html&#39; saved
+/ #
+[root@localhost ~]# kubectl -n hdls get svc
+NAME         TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)   AGE
+your-nginx   ClusterIP   10.100.3.148   &lt;none&gt;        80/TCP    14m
+</code></pre></td></tr></table>
+</div>
+</div><p>As you can see, when accessing directly with <code>your-nginx</code>, it prompts <code>bad address</code>, which means that the domain name is wrong, because all the search domains under different namespace have been searched and still cannot be found; when accessing with <code>your-nginx.hdls</code>, it resolves to <code>10.100.3.148</code>, which is the ClusterIP of <code>your-nginx</code>.</p>
+<p>So, when pods under different namespace are accessed via svc, you need to add <code>. &lt;namespace&gt;</code>.</p>
+<h4 id="hostname-and-subdomain-of-pod">Hostname and subdomain of pod</h4>
+<p>In K8s, if you don&rsquo;t specify the hostname of a pod, it defaults to pod.metadata.name, which can be customized via the spec.hostname field; you can also set the subdomain of a pod via the spec.subdomain field. For example, the following example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Pod</span><span class="w">
+</span><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">nginx</span><span class="w">
+</span><span class="w">  </span><span class="nt">labels</span><span class="p">:</span><span class="w">
+</span><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">nginx</span><span class="w">
+</span><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span><span class="nt">hostname</span><span class="p">:</span><span class="w"> </span><span class="l">domain-test</span><span class="w">
+</span><span class="w">  </span><span class="nt">subdomain</span><span class="p">:</span><span class="w"> </span><span class="l">subdomain-test</span><span class="w">
+</span><span class="w">  </span><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span>- <span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">nginx</span><span class="w">
+</span><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">nginx</span><span class="w">
+</span><span class="w"></span><span class="nn">---</span><span class="w">
+</span><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Service</span><span class="w">
+</span><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">subdomain-test</span><span class="w">
+</span><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span><span class="nt">selector</span><span class="p">:</span><span class="w">
+</span><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">nginx</span><span class="w">
+</span><span class="w">  </span><span class="nt">ports</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span>- <span class="nt">port</span><span class="p">:</span><span class="w"> </span><span class="m">80</span><span class="w">
+</span><span class="w">    </span><span class="nt">targetPort</span><span class="p">:</span><span class="w"> </span><span class="m">80</span><span class="w">
+</span><span class="w">    </span><span class="nt">protocol</span><span class="p">:</span><span class="w"> </span><span class="l">TCP</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>You can check the hostname and hosts file of this pod.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="o">[</span>root@localhost ~<span class="o">]</span><span class="c1"># kubectl get po -owide</span>
+NAME                           READY   STATUS    RESTARTS   AGE     IP             NODE           NOMINATED NODE   READINESS GATES
+busybox-5bbb5d7ff7-dh68j       1/1     Running   <span class="m">0</span>          112m    10.244.1.246   172-16-105-2   &lt;none&gt;           &lt;none&gt;
+nginx                          1/1     Running   <span class="m">0</span>          2m      10.244.1.253   172-16-105-2   &lt;none&gt;           &lt;none&gt;
+<span class="o">[</span>root@localhost ~<span class="o">]</span><span class="c1"># kubectl exec -it nginx bash</span>
+root@domain-test:/# cat /etc/hosts
+<span class="c1"># Kubernetes-managed hosts file.</span>
+127.0.0.1	localhost
+::1	localhost ip6-localhost ip6-loopback
+fe00::0	ip6-localnet
+fe00::0	ip6-mcastprefix
+fe00::1	ip6-allnodes
+fe00::2	ip6-allrouters
+10.244.1.253	domain-test.subdomain-test.default.svc.cluster.local	domain-test
+root@domain-test:/#
+</code></pre></td></tr></table>
+</div>
+</div><p>Access this pod in the busybox container.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="o">[</span>root@localhost ~<span class="o">]</span><span class="c1"># kubectl exec -it busybox-5bbb5d7ff7-dh68j sh</span>
+/ <span class="c1"># wget domain-test.subdomain-test</span>
+Connecting to domain-test.subdomain-test <span class="o">(</span>10.244.1.253:80<span class="o">)</span>
+saving to <span class="s1">&#39;index.html&#39;</span>
+index.html           100% <span class="p">|</span>*****************************************************<span class="p">|</span>   <span class="m">612</span>  0:00:00 ETA
+<span class="s1">&#39;index.html&#39;</span> saved
+/ <span class="c1">#</span>
+/ <span class="c1"># wget subdomain-test</span>
+Connecting to subdomain-test <span class="o">(</span>10.108.213.70:80<span class="o">)</span>
+wget: can<span class="s1">&#39;t open &#39;</span>index.html<span class="err">&#39;</span>: File exists
+/ <span class="c1">#</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As you can see, when accessing <code>domain-test.subdomain-test</code>, it resolves to <code>10.244.1.253</code>, which is the pod ip of nginx, not the clusterIP; while when accessing <code>subdomain-test</code>, it resolves to <code>10.108.213.70</code>, which is the clusterIP, which is the normal svc name route.</p>
+<h2 id="coredns-corefile-file">coreDNS Corefile file</h2>
+<p>CoreDNS implements application plugging, allowing users to select the required plugins to compile into an executable; the CoreDNS configuration file is in the form of a Corefile, here is an example of a coreDNS configMap.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="p">[</span><span class="l">root@localhost ~]# kubectl -n kube-system get cm coredns -oyaml</span><span class="w">
+</span><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">v1</span><span class="w">
+</span><span class="w"></span><span class="nt">data</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span><span class="nt">Corefile</span><span class="p">:</span><span class="w"> </span><span class="p">|</span><span class="sd">
+</span><span class="sd">    .:53 {
+</span><span class="sd">        errors
+</span><span class="sd">        health
+</span><span class="sd">        kubernetes cluster.local in-addr.arpa ip6.arpa {
+</span><span class="sd">           pods insecure
+</span><span class="sd">           upstream
+</span><span class="sd">           fallthrough in-addr.arpa ip6.arpa
+</span><span class="sd">        }
+</span><span class="sd">        prometheus :9153
+</span><span class="sd">        forward . /etc/resolv.conf
+</span><span class="sd">        cache 30
+</span><span class="sd">        loop
+</span><span class="sd">        reload
+</span><span class="sd">        loadbalance
+</span><span class="sd">    }</span><span class="w">    
+</span><span class="w"></span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">ConfigMap</span><span class="w">
+</span><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span><span class="nt">creationTimestamp</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2019-06-10T03:19:01Z&#34;</span><span class="w">
+</span><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">coredns</span><span class="w">
+</span><span class="w">  </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span><span class="l">kube-system</span><span class="w">
+</span><span class="w">  </span><span class="nt">resourceVersion</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;3380134&#34;</span><span class="w">
+</span><span class="w">  </span><span class="nt">selfLink</span><span class="p">:</span><span class="w"> </span><span class="l">/api/v1/namespaces/kube-system/configmaps/coredns</span><span class="w">
+</span><span class="w">  </span><span class="nt">uid</span><span class="p">:</span><span class="w"> </span><span class="l">7e845ca2-8b2e-11e9-b4eb-005056b40224</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><h3 id="corefile-file-analysis">Corefile file analysis</h3>
+<p>Part 1.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">kubernetes cluster.local in-addr.arpa ip6.arpa <span class="o">{</span>
+   pods insecure
+   upstream
+   fallthrough in-addr.arpa ip6.arpa
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The domain names that specify the cluster.local suffix are all internal kubernetes domains. coredns listens to service changes to maintain domain relationships, so the cluster.local related domains are resolved here.</p>
+<p>Part 2.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">proxy . /etc/resolv.conf
+</code></pre></td></tr></table>
+</div>
+</div><p>proxy means no record found in coredns, then it goes to the nameserver in /etc/resolv.conf to request resolution, while /etc/resolv.conf in the coredns container is inherited from the host.
+The practical effect is that if the domain name is not internal to k8s, it will go to the default dns server to request resolution and return it to the coredns requester.</p>
+<p>Third part.</p>
+<p><code>prometheus</code> : CoreDNS is monitored at: <code>http://localhost:9153/metrics</code>, satisfying the Prometheus format.</p>
+<p><code>cache</code> : allows caching</p>
+<p><code>loop</code> : detects a simple forwarding loop and stops the CoreDNS process if a loop is found.</p>
+<p><code>reload</code> : allows the Corefile configuration to be updated automatically. The changes take effect two minutes after the ConfigMap is changed</p>
+<p><code>loadbalance</code> : This is a cyclic DNS load balancer that randomizes the order of A, AAAA and MX records in the answer.</p>
+<h3 id="specifying-hosts">Specifying hosts</h3>
+<p>Sometimes the service of a domain is outside the cluster and I want to access it inside the cluster, we can specify the hosts in the corefile to achieve this. This is done by adding the domain name and the corresponding ip to the corefile as a hosts plugin, as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">hosts <span class="o">{</span>
+    10.244.1.245 other-company.com
+    fallthrough
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Where <code>10.244.1.245</code> is the pod ip of <code>your-nginx</code>, and then the service <code>other-company.com</code> is accessed from the busybox pod above, as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="o">[</span>root@localhost ~<span class="o">]</span><span class="c1"># kubectl exec -it busybox-5bbb5d7ff7-dh68j sh</span>
+/ <span class="c1"># wget other-company.com</span>
+Connecting to other-company.com <span class="o">(</span>10.244.1.245:80<span class="o">)</span>
+saving to <span class="s1">&#39;index.html&#39;</span>
+index.html           100% <span class="p">|</span>*****************************************************<span class="p">|</span>   <span class="m">612</span>  0:00:00 ETA
+<span class="s1">&#39;index.html&#39;</span> saved
+/ <span class="c1">#</span>
+</code></pre></td></tr></table>
+</div>
+</div>
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/kubernetes/">kubernetes</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/kubernetes-oidc/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">The OIDC protocol and its use in Kubernetes</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/kubernetes-keycloak/">
+            <span class="next-text nav-default">Unified User Management for Kubernetes with KeyCloak</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

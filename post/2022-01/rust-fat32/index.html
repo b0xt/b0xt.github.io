@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Implementing the FAT32 file system with Rust - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="FAT file system knowledge overview A file is, in fact, data. Data is represented in the computer as 0/1, and the most basic unit is the bit. 8 bit = 1 Byte, 1024 Byte = 1 KB, 1024 KB = 1 MB, and so on. The content of a file is also a combination of several 01 strings. When reading/writing a file, we call the functions read()/write() in the kernel," /><meta name="keywords" content="Rust, Fat32" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/rust-fat32/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Implementing the FAT32 file system with Rust" />
+<meta property="og:description" content="FAT file system knowledge overview A file is, in fact, data. Data is represented in the computer as 0/1, and the most basic unit is the bit. 8 bit = 1 Byte, 1024 Byte = 1 KB, 1024 KB = 1 MB, and so on. The content of a file is also a combination of several 01 strings. When reading/writing a file, we call the functions read()/write() in the kernel," />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/rust-fat32/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-09T10:37:17+08:00" />
+<meta property="article:modified_time" content="2022-01-09T10:37:17+08:00" />
+
+<meta itemprop="name" content="Implementing the FAT32 file system with Rust">
+<meta itemprop="description" content="FAT file system knowledge overview A file is, in fact, data. Data is represented in the computer as 0/1, and the most basic unit is the bit. 8 bit = 1 Byte, 1024 Byte = 1 KB, 1024 KB = 1 MB, and so on. The content of a file is also a combination of several 01 strings. When reading/writing a file, we call the functions read()/write() in the kernel,"><meta itemprop="datePublished" content="2022-01-09T10:37:17+08:00" />
+<meta itemprop="dateModified" content="2022-01-09T10:37:17+08:00" />
+<meta itemprop="wordCount" content="3686">
+<meta itemprop="keywords" content="rust,fat32," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Implementing the FAT32 file system with Rust"/>
+<meta name="twitter:description" content="FAT file system knowledge overview A file is, in fact, data. Data is represented in the computer as 0/1, and the most basic unit is the bit. 8 bit = 1 Byte, 1024 Byte = 1 KB, 1024 KB = 1 MB, and so on. The content of a file is also a combination of several 01 strings. When reading/writing a file, we call the functions read()/write() in the kernel,"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Implementing the FAT32 file system with Rust</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-09 10:37:17 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 3686 words </span>
+          <span class="more-meta"> 8 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#fat-file-system-knowledge-overview">FAT file system knowledge overview</a></li>
+        <li><a href="#what-is-a-disk">What is a disk</a></li>
+        <li><a href="#fat32-file-storage">FAT32 file storage</a></li>
+        <li><a href="#bpb-bios-paramter-block">BPB (BIOS Paramter Block)</a></li>
+        <li><a href="#root-directory">Root Directory</a></li>
+        <li><a href="#fat-and-cluster">FAT and Cluster</a></li>
+        <li><a href="#fat-volume-initialization">FAT Volume Initialization</a></li>
+        <li><a href="#fat-directory-structure">FAT Directory Structure</a></li>
+        <li><a href="#fat-long-directory-entries">FAT Long Directory Entries</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="fat-file-system-knowledge-overview">FAT file system knowledge overview</h2>
+<p>A file is, in fact, data. Data is represented in the computer as 0/1, and the most basic unit is the bit. 8 bit = 1 Byte, 1024 Byte = 1 KB, 1024 KB = 1 MB, and so on. The content of a file is also a combination of several 01 strings. When reading/writing a file, we call the functions read()/write() in the kernel, which take the descriptor of the file and then read/write the data of the specified length. All data is also in the form of 0/1, but when we apply these functions, the data is converted to a more advanced representation, such as char, int or other types.</p>
+<h2 id="what-is-a-disk">What is a disk</h2>
+<p>Now that hard disks have reached terabytes of capacity, what is their physical implementation and how do they work? I&rsquo;ll briefly take a look at the details at <a href="http://www.explainthatstuff.com/harddrive.html">How a hard disk work?</a>, which explains very succinctly how it works.</p>
+<p>The most important thing about a disk is the sector, which has a ring of magnetic tracks on it, and these tracks store information. How to read and write it? At the physical level, this is achieved by changing the polarity of each storage unit in the track with a magnetic head.</p>
+<p>The physical storage unit in a disk is called a sector, and a storage unit in a file system is called a block (cluster in FAT systems), with each cluster corresponding to one or more sectors. A more detailed explanation is available on the wiki <a href="https://en.wikipedia.org/wiki/Disk_sector">Disk Sector</a></p>
+<h2 id="fat32-file-storage">FAT32 file storage</h2>
+<p>When you normally manipulate files, for example, you open a doc file, add some content and then save it, or delete a file to the recycle bin, how are they implemented internally? Different file systems have different ways of implementing them. But all operations cannot be performed without storage as a basis. The question arises: how to design a file system that can both read and write files efficiently and locate them quickly?</p>
+<p>Let&rsquo;s look at the most primitive idea: direct sequential addition, that is, adding files one by one to the storage space (hard disk). However, such an implementation is not conducive to either finding or deleting, adding and modifying. Think about it, if some files are deleted, gaps will be created and when files are added again, the separate gaps may not be enough to accommodate the new files, thus creating waste. And whenever you look for a particular file, you need to traverse all the file structures, and this is going to take quite a long time.</p>
+<p>Let&rsquo;s look at the way FAT32 is implemented: it divides the storage space into small blocks (clusters), and when storing files, they are cut into small blocks of corresponding length and then filled into the hard disk.</p>
+<p>This way, we don&rsquo;t have to worry about files that are too big to fit in the gaps, because we can put some of the chunks in one gap and others in another, which makes efficient use of disk space.</p>
+<p>The second concept is that FAT32 uses a linked table data structure. In other words, each cluster on the disk is a node in a chain table, and they record the location of the next cluster (next pointer). In FAT32, only the cluster where each file starts is recorded, so we need to use a chain table to access the entire file.</p>
+<p>The table used to store the information in this chain is called FAT ( FILE ALLOCATE TABLE ), the real place where the data is stored is separate from the FAT, the role of the FAT is to facilitate the search.</p>
+<p>Next, let&rsquo;s look at the delete operation. This will lead to another proprietary structure: FILE ENTRY</p>
+<p>First of all, let&rsquo;s think about deleting a file or writing a new file (e.g. copy and paste). Deleting. It&rsquo;s almost an inverse process, so why the difference in time? Actually, when you delete a file, the file system doesn&rsquo;t actually wipe the data off the disk (which is why we can hopefully recover the deleted file), but only modifies its FILE ENTRY information.</p>
+<p>What is FILE ENTRY? In simple terms, it is a small structure that records the attributes of a file. They are stored uniformly in ROOT DIRECTORY. Let&rsquo;s take a look at the overall appearance of a FAT32 disk</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/09/1b14c07df5144b10ae5acc364dd20fa2.png" alt="image"></p>
+<p>Let&rsquo;s ignore the first few sectors and start with the FAT. A FAT system has several FAT structures (the number of nodes needed for the chain table varies depending on the size of the disk), next to the FAT sector is ROOT DIRECTORY, which is the directory structure of the entire disk, and what is stored in it is what we call FILE ENTRY, that is, the attributes of each file. DATA FIELD, which is used to store the real file content.</p>
+<p>When we view information about a file instead of opening it, we don&rsquo;t need to access the file&rsquo;s data directly. The file system will find the corresponding FILE ENTRY in the ROOT DIRECTORY and display the relevant information. This includes: file name, creation and modification time, file size, location of the first cluster of the file, read-only/hidden, etc. Note that folders are also represented as a file in the file system and also have a corresponding FILE ENTRY, only they store a batch of files ( there is a corresponding flag in the FILE ENTRY indicating whether it is a folder or not).</p>
+<p>Back to our topic of deleting files, when a file is deleted, the system will find the corresponding FILE ENTRY and change the first character of the file name to 0xE5 - done. It is that simple, just the file attributes are changed, no internal data is changed at all. At this time if we add another file into it, since the system will determine the available space by looking for ROOT DIRECTORY, so if some FILE ENTRY file name is found to be unallocated or deleted flag, then the corresponding cluster will be occupied. But until they are overwritten, these deleted files are still on your hard drive (you just lose access to their information). This is why deletion is faster.</p>
+<h2 id="bpb-bios-paramter-block">BPB (BIOS Paramter Block)</h2>
+<p>One of the most important data structures in the FAT file system is the BPB (BIOS Parameter Block), which stores important configuration parameters for the FAT file volume. Private Boot Record), but it is only the first sector of the reserved area and data volume.</p>
+<p>We use the following structure to describe the structure of the BPB.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="k">pub</span><span class="w"> </span><span class="k">struct</span> <span class="nc">BiosParameterBlock</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">bytes_per_sector</span>: <span class="kt">u16</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">sectors_per_cluster</span>: <span class="kt">u16</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">reversed_sector</span>: <span class="kt">u16</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">fats</span>: <span class="kt">u8</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">root_entries</span>: <span class="kt">u16</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">total_sectors_16</span>: <span class="kt">u16</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">media</span>: <span class="kt">u8</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">sectors_per_fat_16</span>: <span class="kt">u16</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">sectors_per_track</span>: <span class="kt">u16</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">heads</span>: <span class="kt">u16</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">hidden_sectors</span>: <span class="kt">u32</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">total_sectors_32</span>: <span class="kt">u32</span><span class="p">,</span><span class="w">
+</span><span class="w">
+</span><span class="w">    </span><span class="c1">// Extended BIOS Paramter Block
+</span><span class="c1"></span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">sectors_per_fat_32</span>: <span class="kt">u32</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">extended_flags</span>: <span class="kt">u16</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">fs_version</span>: <span class="kt">u16</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">root_dir_first_cluster</span>: <span class="kt">u32</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">fs_info_sector</span>: <span class="kt">u16</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">backup_boot_sector</span>: <span class="kt">u16</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">reserved_0</span>: <span class="p">[</span><span class="kt">u8</span><span class="p">;</span><span class="mi">12</span><span class="p">],</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">drive_num</span>: <span class="kt">u8</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">ext_sig</span>: <span class="kt">u8</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">volume_id</span>: <span class="kt">u32</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">volume_label</span>: <span class="p">[</span><span class="kt">u8</span><span class="p">;</span><span class="mi">11</span><span class="p">],</span><span class="w">
+</span><span class="w">    </span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="n">fs_type_label</span>: <span class="p">[</span><span class="kt">u8</span><span class="p">;</span><span class="mi">8</span><span class="p">]</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>Since the boot sector is located in cluster 0 of the data volume, we can simply read it out and read the corresponding field according to the memory layout, without passing in the corresponding location.</p>
+<p><strong>BIOSParameterBlock Description of some fields:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bytes_per_sector</td>
+<td>the number of bytes per sector, only the following values apply: 512/1024/2048/4096</td>
+</tr>
+<tr>
+<td>sectors_per_cluster</td>
+<td>The number of sectors in each cluster, this value must be a power of 2, legal values are 2/4/8/16/32/64/128, not another byte per cluster greater than 32K</td>
+</tr>
+<tr>
+<td>reserved_sector</td>
+<td>the number of reserved sectors in the voulme reserved area starting from the first sector of the volume, this field must not be 0, for FAT32, this value is usually 32.</td>
+</tr>
+<tr>
+<td>fat_nums</td>
+<td>The number of FAT32 sectors on the volume, in theory any value greater than or equal to 1 is valid, but a value of 2 is recommended</td>
+</tr>
+<tr>
+<td>root_entry_cnt</td>
+<td>This value should be set to 0 for FAT32</td>
+</tr>
+<tr>
+<td>fat_size</td>
+<td>for FAT32 this value should be 32 (each FAT entry has 32 bits)</td>
+</tr>
+<tr>
+<td>root_cluster</td>
+<td>The cluster number of the root cluster, which exists only on FAT32 filesystems and is usually set to 2, but is not mandatory</td>
+</tr>
+<tr>
+<td>root_dir_sector</td>
+<td>0</td>
+</tr>
+<tr>
+<td>volume_id</td>
+<td>The volume id, which, along with volume_label, supports volume tracking on removable media. These values allow FAT file system drivers to detect erroneous disk insertions into removable drives, and this ID is typically generated by simply combining the current period and time into a 32-bit value</td>
+</tr>
+<tr>
+<td>volume_label</td>
+<td>This field matches the 11-byte volume label in the root directory. the FAT file system driver should ensure that this field is updated when the volume label in the root directory changes or its name is created. When there is no volume label, the setting for this field is the string &ldquo;No Name&rdquo;</td>
+</tr>
+</tbody>
+</table>
+<h2 id="root-directory">Root Directory</h2>
+<p>After getting the information about the boot sector, we can read the structure of the Root Directory. Since the boot sector already has information about the total number of FAT-occupied clusters and the total number of reserved clusters, we can go beyond the previous clusters to find the Root Directory, so the following method is defined in our implementation.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="sd">/// Get the first sector offset bytes of the cluster from the cluster number
+</span><span class="sd"></span><span class="k">pub</span><span class="p">(</span><span class="k">crate</span><span class="p">)</span><span class="w"> </span><span class="k">fn</span> <span class="nf">offset</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">,</span><span class="w"> </span><span class="n">cluster</span>: <span class="kt">u32</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kt">usize</span> <span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="p">((</span><span class="bp">self</span><span class="p">.</span><span class="n">reversed_sector</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w">
+</span><span class="w">    </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">fats</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">sectors_per_fat_32</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w">
+</span><span class="w">    </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">cluster</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">2</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">sectors_per_cluster</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="p">))</span><span class="w">
+</span><span class="w">    </span><span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="bp">self</span><span class="p">.</span><span class="n">bytes_per_sector</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="kt">usize</span><span class="p">)</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><h2 id="fat-and-cluster">FAT and Cluster</h2>
+<p>The FAT (File Allocate Table) is another important component, which describes the extension information of a file using a chain table. The purpose of this structure is to define a chain of file ranges (cluster chains). Note that both directroy and file are contained in the file and are not different on the FAT. A directory is actually a file with special attributes indicating that its contents are a directory table.</p>
+<p>The data area is divided into a certain number of sector blocks called clusters, and the data area is managed in this unit. Each item of the FAT is associated with each cluster in the data area, and the FAT value indicates the status of the corresponding cluster. However, the first two FAT entries, FAT[0] and FAT[1], are reserved and are not associated with any clusters. The third FAT entry, FAT[2], is the entry associated with the first cluster in the data area, with a valid cluster number starting at 2.</p>
+<p>FATs are typically replicated for redundancy purposes, as corruption of any FAT sector can result in severe data loss. BPB_NumFATs indicates the number of FAT copies and the size of FAT sectors becomes <code>fat_nums * sectors_per_fat_32</code>. The FAT driver usually references only the first FAT copy, and any updates to FAT entries are reflected in each FAT copy.</p>
+<p>The files on a FAT volume are managed by directories, which are arrays of 32-byte directory entry structures. Details of the directory entries are described below. A directory entry has the file name, file size, timestamp, and first cluster number of the file data. The cluster number is the entry point for following a chain of clusters of file data. If the file size is zero, the first cluster number is set to zero and no data clusters are assigned to the file.</p>
+<p>As mentioned above, cluster numbers 0 and 1 are reserved, and valid cluster numbers start at 2. Cluster number 2 corresponds to the first cluster in the data area. Therefore, in a volume with N clusters, the valid cluster numbers are from 2 to N+1 and the number of FAT entries is N+2. The location of data cluster N is calculated as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="n">FirstSectorofCluster</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DataStartSector</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">N</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="mi">2</span><span class="p">)</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">BPB_SecPerClus</span><span class="p">;</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>If the file size is larger than the sector size, the file data spans multiple sectors in the cluster. If the file size is larger than the cluster size, the file data spans multiple clusters in the cluster chain. The value of the FAT entry indicates the backward cluster number (if present) so that any byte offsets in the file can be reached by following the cluster chain. Cluster chains cannot be tracked backwards. The FAT entry with the last link in the cluster chain has a special value (end-of-chain, EOC, flag) that never matches any valid cluster number. The EOC flags for each FAT type are as follows.</p>
+<ul>
+<li>FAT12: 0xFF8 - 0xFFF (usually 0xFFF)</li>
+<li>FAT16: 0xFFF8 - 0xFFFF (usually 0xFFFF)</li>
+<li>FAT32: 0x0FFFFFF8 - 0x0FFFFFFF (usually 0xFFFFFFF)</li>
+</ul>
+<p>There is also a special value, the bad cluster flag. The bad cluster flag indicates that there are defective sectors in the cluster that cannot be used. Bad clusters found during formatting, surface inspection or disk repair are recorded in the FAT as bad cluster flags. The value of the bad cluster flag is 0xFF7 for FAT12, 0xFFF7 for FAT16, and 0x0FFFFFF7 for FAT32.</p>
+<p>The value of the bad cluster tag will never equal any valid cluster number on a FAT12/16 volume. However, it can equal any number of allocatable clusters, since the maximum number of clusters is not defined in FAT32. Such FAT32 volumes may confuse disk utilities, so you should avoid creating such FAT32 volumes. Therefore, the maximum number of clusters for a FAT32 volume is actually 268435445 (about 256 M clusters).</p>
+<p>For implementation reasons, some systems have limits on the maximum number of clusters. For example, Windows 9X/Me supports a maximum FAT size of 16 MB, and it limits the number of clusters to a maximum of approximately 4 M clusters.</p>
+<p>Each allocatable FAT entry FAT[2] and the initial value after it is zero, which means that the cluster is not in use and is available for new allocations. If the value is not zero, the cluster is in use or is corrupted. Idle cluster counts are not recorded anywhere in the FAT12/16 volumes and a full FAT scan is required to obtain this information. FAT32 supports FSInfo to store the idle cluster count to avoid a full FAT scan due to its very large FAT structure.</p>
+<p>The first two FAT entries, FAT[0] and FAT[1], are reserved and are not associated with any clusters. These FAT entries are initialized when the volume is created, as follows.</p>
+<ul>
+<li>FAT12: FAT[0] = 0xF?? ; FAT[1] = 0xFFF</li>
+<li>FAT16: FAT[0] = 0xFF? ; FAT[1] = 0xFFFF</li>
+<li>FAT32: FAT[0] = 0xFFFFFF? ; FAT[1] = 0xFFFFFFFF</li>
+</ul>
+<p>?? The value of FAT[0] is the same as the value of BPB_Media, but this entry does not have any function. Some bits in FAT[1] record the error history.</p>
+<p>Volume dirty flag: (FAT16: bit15, FAT32: bit31): cleared at boot and restored at clean shutdown. Cleared at boot indicates a dirty shutdown and possible logical errors in the volume.
+Hard error flags: (FAT16: bit14, FAT32: bit30): cleared on unrecoverable read/write errors, indicating a surface check is required.
+These flags indicate the possibility of errors on the volume. Some operating systems that support this feature check for these flags at boot time and automatically launch the disk checker tool. The Windows 9X series uses these flags. The Windows NT series does not use these flags, but uses the alternatives in the BPB.</p>
+<p>There are two more important things to know about FAT regions. One is that the last sector of the FAT may not be fully used. In most cases, the FAT ends in the middle of the sector. The FAT driver should not have any assumptions about unused areas. It should be filled with zeros when the volume is formatted and should not be changed afterwards. Another one is that BPB_FATSz16/32 can indicate a value larger than the volume requirement. In other wards, unused sectors can follow each FAT. This may be the result of data sector alignment or other reasons. In addition, these sectors are padded with zeros when formatted.</p>
+<p>The following table shows the range of FAT values and the meaning of each FAT type:</p>
+<table>
+<thead>
+<tr>
+<th>FAT12</th>
+<th>FAT16</th>
+<th>FAT32</th>
+<th>Sense</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>0x000</td>
+<td>0x000</td>
+<td>0x00000000</td>
+<td>free</td>
+</tr>
+<tr>
+<td>0x001</td>
+<td>0x0001</td>
+<td>0x00000001</td>
+<td>Reserve</td>
+</tr>
+<tr>
+<td>0x002 - 0xFF6</td>
+<td>0x0002 - 0xFFF6</td>
+<td>0x00000002 - 0x0FFFFFF6</td>
+<td>In Use (next linked value)</td>
+</tr>
+<tr>
+<td>0xFF7</td>
+<td>0xFFF7</td>
+<td>0x0FFFFFF7</td>
+<td>bad cluster</td>
+</tr>
+<tr>
+<td>0xFF8 - 0xFFF</td>
+<td>0xFFF8 - 0xFFFF</td>
+<td>0x0FFFFFF8 - 0x0FFFFFF</td>
+<td>in use (end of chain)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Note:</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="n">data_sectors</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">total_sectors</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="p">(</span><span class="n">reserved_sectors_cnt</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">fat_nums</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="n">fat_size</span><span class="p">))</span><span class="w"> </span><span class="o">-</span><span class="mi">2</span><span class="w"> </span><span class="o">?</span><span class="w">
+</span><span class="w"></span><span class="n">count_of_clusters</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">data_sectors</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">sectors_per_clusters</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="n">fat_offset</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">N</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mi">4</span><span class="p">(</span><span class="n">N为簇号</span><span class="p">)</span><span class="w">
+</span><span class="w"></span><span class="n">fat_sectors_offset</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">reserved_sectors_count</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="p">(</span><span class="n">fat_offset</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">bytes_per_sectors</span><span class="p">)</span><span class="w">
+</span><span class="w"></span><span class="n">fat_entry_offset</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">fat_offset</span><span class="w"> </span><span class="o">%</span><span class="w"> </span><span class="n">bytes_per_sectors</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>The upper 4 bits of the FAT32 Entry are not used.</p>
+<p>We know that the first two clusters of the FAT32 file system data clusters are set as reserved clusters, so what should the first two entries of the FAT be set to? For a FAT32 file system, FAT[0] = 0x0FFFFFF8, the second reserved cluster FAT[1] is set by FORMAT as the EOC flag, and for FAT32, the file system driver can use the higher two bits of the FAT[1] entry as the dirty volume flag (all other bits are always set to 1).</p>
+<p>clean_shut_bit_mask = 0x080000000;</p>
+<ul>
+<li>a bit of 1 indicates clean</li>
+<li>a bit of 0 indicates dirty</li>
+</ul>
+<p>hard_err_bit_mask = 0x04000000.</p>
+<ul>
+<li>a bit of 1 indicates no disk IO error</li>
+<li>a bit of 0 indicates a disk IO error has occurred</li>
+</ul>
+<h2 id="fat-volume-initialization">FAT Volume Initialization</h2>
+<h2 id="fat-directory-structure">FAT Directory Structure</h2>
+<p>A FAT directory is a file that consists of a linear table of 32 bytes. The root directory is a special case.</p>
+<p>For FAT32, the root directory is variable in size and is a chain of clusters, just like any other directory entry. The first cluster of the FAT32 volume root directory is stored in the root_cluster, and the root directory itself on any FAT type does not have any date or time stamp, does not have a file name (except for the implied file name &ldquo;/&quot;), and does not include the &ldquo;.&rdquo; and &ldquo;&hellip;&rdquo; and &ldquo;&hellip;&rdquo;. A special feature of the root directory is that its files are set with the flag bit of the volume_id_attr attribute.</p>
+<table>
+<thead>
+<tr>
+<th>domain</th>
+<th>offset</th>
+<th>size</th>
+<th>description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>name</td>
+<td>0</td>
+<td>11</td>
+<td></td>
+</tr>
+<tr>
+<td>attribute</td>
+<td>11</td>
+<td>1</td>
+<td></td>
+</tr>
+<tr>
+<td>NT_reverse</td>
+<td>12</td>
+<td>1</td>
+<td></td>
+</tr>
+<tr>
+<td>creation_time_tenth</td>
+<td>13</td>
+<td>1</td>
+<td></td>
+</tr>
+<tr>
+<td>creation_time</td>
+<td>14</td>
+<td>2</td>
+<td></td>
+</tr>
+<tr>
+<td>creation_date</td>
+<td>16</td>
+<td>2</td>
+<td></td>
+</tr>
+<tr>
+<td>last_access_date</td>
+<td>18</td>
+<td>2</td>
+<td></td>
+</tr>
+<tr>
+<td>first_cluster_high</td>
+<td>20</td>
+<td>2</td>
+<td></td>
+</tr>
+<tr>
+<td>write_time</td>
+<td>22</td>
+<td>2</td>
+<td></td>
+</tr>
+<tr>
+<td>write_date</td>
+<td>24</td>
+<td>2</td>
+<td></td>
+</tr>
+<tr>
+<td>first_cluster_low</td>
+<td>26</td>
+<td>2</td>
+<td></td>
+</tr>
+<tr>
+<td>file_size</td>
+<td>28</td>
+<td>4</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Note</strong></p>
+<p>name[0] = 0xE5, indicating that the directory entry is empty</p>
+<p>name[0] = 0x00, again indicating that the directory entry is empty, and that the remainder of the directory entry is empty</p>
+<p>name[0] = 0x05, indicating that the directory entry is the 0xE5 character</p>
+<p>The following characters are not valid in dir_name.</p>
+<ul>
+<li>less than 0x20 except 0x05</li>
+<li>-0x22, 0x2A, 0x2B, 0x2C, 0x2E, 0x2F, 0x3A, 0x3B, 0x3C, 0x3D, 0x3E, 0x3F, 0x5B, 0x5C, 0x5D, a and 0x7C.</li>
+</ul>
+<p>When the attribute field is ATTR_DIRECTORY indicating that the entry is a directory (0x10), the file_size attribute should be set to 0 indicating that the file_size is not used by following its cluster until the EOC flag is found.</p>
+<p>A cluster is assigned to that directory, then first_cluster_low and first_cluster_high are set to that cluster number, and an EOC flag is placed on that cluster entry in the FAT. Next, initialize all bytes of that cluster to 0. If the directory is not the root directory, you need to create two special entries in the first 32 bytes of the Directory Entry of that directory (i.e. the first 2 32 byte areas of the data area of the cluster you just assigned) if the directory is not the root directory.</p>
+<p>These two directory entries are &lsquo;.&rsquo; and &lsquo;&hellip;&rsquo;.</p>
+<h2 id="fat-long-directory-entries">FAT Long Directory Entries</h2>
+<p>Each long directory entry must be used in conjunction with a short directory entry</p>
+<table>
+<thead>
+<tr>
+<th>domain</th>
+<th>offset</th>
+<th>size</th>
+<th>description</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>dir_order</td>
+<td>0</td>
+<td>1</td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td>dir_name1</td>
+<td>1</td>
+<td>10</td>
+<td>first to fifth character of long directory item name</td>
+<td></td>
+</tr>
+<tr>
+<td>dir_attr</td>
+<td>11</td>
+<td>1</td>
+<td>Must be Attr_Long_Name</td>
+<td></td>
+</tr>
+<tr>
+<td>dir_type</td>
+<td>12</td>
+<td>1</td>
+<td>If 0, the directory entry is a subcomponent of the directory entry</td>
+<td></td>
+</tr>
+<tr>
+<td>dir_checksum</td>
+<td>13</td>
+<td>1</td>
+<td>The checksum of the name of the short directory entry at the end of the long directory</td>
+<td></td>
+</tr>
+<tr>
+<td>dir_name2</td>
+<td>14</td>
+<td>12</td>
+<td>6-11 characters</td>
+<td></td>
+</tr>
+<tr>
+<td>first_cluster_low</td>
+<td>26</td>
+<td>2</td>
+<td>must be 0</td>
+<td></td>
+</tr>
+<tr>
+<td>dir_name3</td>
+<td>28</td>
+<td>4</td>
+<td>12-13 characters</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>For a compatible design, long directory entries and short directory entries must appear in pairs and be physically preceded by and contiguous with short directory entries.</p>
+<p>First, each member of a set of long directory entries is uniquely numbered, and the last member of the set is dir_ord with a flag indicating that it is the last member of the set. dir_ord field is used for this determination, with the value of dir_ord set to 1 for one member of the set and n or LAST_LONG_ENTRY for the nth. The file system always uses these to indicate the last directory entry of a &ldquo;free&rdquo; directory.</p>
+<p>In addition, the 8-bit checksum is calculated for the name included in the short directory entry when creating the segment and long directory entries. all 11 characters in the segment name are used to calculate the checksum.</p>
+<p>Checksum calculation algorithm.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="c1">//-----------------------------------------------------------------------------
+</span><span class="c1">//	ChkSum()
+</span><span class="c1">//	Returns an unsigned byte checksum computed on an unsigned byte
+</span><span class="c1">//	array.  The array must be 11 bytes long and is assumed to contain
+</span><span class="c1">//	a name stored in the format of a MS-DOS directory entry.
+</span><span class="c1">//	Passed:	 pFcbName    Pointer to an unsigned byte array assumed to be
+</span><span class="c1">//                          11 bytes long.
+</span><span class="c1">//	Returns: Sum         An 8-bit unsigned checksum of the array pointed
+</span><span class="c1">//                           to by pFcbName.
+</span><span class="c1">//------------------------------------------------------------------------------
+</span><span class="c1"></span><span class="kt">unsigned</span> <span class="kt">char</span> <span class="nf">ChkSum</span> <span class="p">(</span><span class="kt">unsigned</span> <span class="kt">char</span> <span class="o">*</span><span class="n">pFcbName</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="kt">short</span> <span class="n">FcbNameLen</span><span class="p">;</span>
+    <span class="kt">unsigned</span> <span class="kt">char</span> <span class="n">Sum</span><span class="p">;</span>
+
+    <span class="n">Sum</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">FcbNameLen</span><span class="o">=</span><span class="mi">11</span><span class="p">;</span> <span class="n">FcbNameLen</span><span class="o">!=</span><span class="mi">0</span><span class="p">;</span> <span class="n">FcbNameLen</span><span class="o">--</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// NOTE: The operation is an unsigned char rotate right
+</span><span class="c1"></span>        <span class="n">Sum</span> <span class="o">=</span> <span class="p">((</span><span class="n">Sum</span> <span class="o">&amp;</span> <span class="mi">1</span><span class="p">)</span> <span class="o">?</span> <span class="mh">0x80</span> <span class="o">:</span> <span class="mi">0</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span><span class="n">Sum</span> <span class="o">&gt;&gt;</span> <span class="mi">1</span><span class="p">)</span> <span class="o">+</span> <span class="o">*</span><span class="n">pFcbName</span><span class="o">++</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="p">(</span><span class="n">Sum</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div>
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/rust/">rust</a>
+          <a href="/tags/fat32/">fat32</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/compile_install_latest_gcc/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Compile and install GCC12</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/io-uring/">
+            <span class="next-text nav-default">io_uring Reading Notes</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

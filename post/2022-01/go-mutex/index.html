@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Detailed analysis of the source code of Go sync.Mutex - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Introduction to Mutex The Mutex structure contains two fields. Field state: indicates the current state of the mutex lock. Field sema: is a semaphore variable to control blocking hibernation and wake-up of waiting goroutines. 1 2 3 4 type Mutex struct { state int32 sema uint32 } In version 1.9 of Go, in order to solve the waiting goroutine may have been unable to obtain the lock, the hunger mode" /><meta name="keywords" content="golang, Mutex" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/go-mutex/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Detailed analysis of the source code of Go sync.Mutex" />
+<meta property="og:description" content="Introduction to Mutex The Mutex structure contains two fields. Field state: indicates the current state of the mutex lock. Field sema: is a semaphore variable to control blocking hibernation and wake-up of waiting goroutines. 1 2 3 4 type Mutex struct { state int32 sema uint32 } In version 1.9 of Go, in order to solve the waiting goroutine may have been unable to obtain the lock, the hunger mode" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/go-mutex/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-26T10:44:45+08:00" />
+<meta property="article:modified_time" content="2022-01-26T10:44:45+08:00" />
+
+<meta itemprop="name" content="Detailed analysis of the source code of Go sync.Mutex">
+<meta itemprop="description" content="Introduction to Mutex The Mutex structure contains two fields. Field state: indicates the current state of the mutex lock. Field sema: is a semaphore variable to control blocking hibernation and wake-up of waiting goroutines. 1 2 3 4 type Mutex struct { state int32 sema uint32 } In version 1.9 of Go, in order to solve the waiting goroutine may have been unable to obtain the lock, the hunger mode"><meta itemprop="datePublished" content="2022-01-26T10:44:45+08:00" />
+<meta itemprop="dateModified" content="2022-01-26T10:44:45+08:00" />
+<meta itemprop="wordCount" content="2413">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Detailed analysis of the source code of Go sync.Mutex"/>
+<meta name="twitter:description" content="Introduction to Mutex The Mutex structure contains two fields. Field state: indicates the current state of the mutex lock. Field sema: is a semaphore variable to control blocking hibernation and wake-up of waiting goroutines. 1 2 3 4 type Mutex struct { state int32 sema uint32 } In version 1.9 of Go, in order to solve the waiting goroutine may have been unable to obtain the lock, the hunger mode"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Detailed analysis of the source code of Go sync.Mutex</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-26 10:44:45 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2413 words </span>
+          <span class="more-meta"> 5 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#introduction-to-mutex">Introduction to Mutex</a></li>
+        <li><a href="#locking-process">locking process</a>
+          <ul>
+            <li><a href="#fast-path">fast path</a></li>
+            <li><a href="#lockslow">lockSlow</a></li>
+          </ul>
+        </li>
+        <li><a href="#unlocking-process">unlocking process</a>
+          <ul>
+            <li><a href="#fast-path-1">fast path</a></li>
+            <li><a href="#unlockslow">unlockSlow</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="introduction-to-mutex">Introduction to Mutex</h2>
+<p>The Mutex structure contains two fields.</p>
+<ul>
+<li>Field state: indicates the current state of the mutex lock.</li>
+<li>Field sema: is a semaphore variable to control blocking hibernation and wake-up of waiting goroutines.</li>
+</ul>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Mutex</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">state</span> <span class="kt">int32</span>
+    <span class="nx">sema</span>  <span class="kt">uint32</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In version 1.9 of Go, in order to solve the waiting goroutine may have been unable to obtain the lock, the hunger mode was added to make the lock more fair, and the unfair waiting time is limited to 1 millisecond.</p>
+<p>The meaning of the state field is more complex, as shown below, the lowest three indicate mutexLocked, mutexWoken, mutexStarving, state is a total of 32 bits in length, so the remaining position, used to indicate that there can be 1&laquo;(32-3) goroutine waiting for the release of the mutual exclusion lock.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/26/6c518b4b233747b9bb048608c6b1173b.png" alt="sobyte"></p>
+<p>The code representation is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="p">(</span>
+    <span class="nx">mutexLocked</span> <span class="p">=</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="kc">iota</span> <span class="c1">// mutex is locked
+</span><span class="c1"></span>    <span class="nx">mutexWoken</span>
+    <span class="nx">mutexStarving</span>
+<span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="locking-process">locking process</h2>
+<h3 id="fast-path">fast path</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Mutex</span><span class="p">)</span> <span class="nf">Lock</span><span class="p">()</span> <span class="p">{</span> 
+    <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">m</span><span class="p">.</span><span class="nx">state</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">mutexLocked</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">race</span><span class="p">.</span><span class="nx">Enabled</span> <span class="p">{</span>
+            <span class="nx">race</span><span class="p">.</span><span class="nf">Acquire</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">m</span><span class="p">))</span>
+        <span class="p">}</span>
+        <span class="k">return</span>
+    <span class="p">}</span> 
+    <span class="nx">m</span><span class="p">.</span><span class="nf">lockSlow</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When adding a lock, at first it will see if it can get the lock directly through CAS, and if it can, then it will get the lock directly successfully.</p>
+<h3 id="lockslow">lockSlow</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 等待时间
+</span><span class="c1"></span><span class="kd">var</span> <span class="nx">waitStartTime</span> <span class="kt">int64</span>
+<span class="c1">// 饥饿标记
+</span><span class="c1"></span><span class="nx">starving</span> <span class="o">:=</span> <span class="kc">false</span>
+<span class="c1">// 唤醒标记
+</span><span class="c1"></span><span class="nx">awoke</span> <span class="o">:=</span> <span class="kc">false</span>
+<span class="c1">// 自旋次数
+</span><span class="c1"></span><span class="nx">iter</span> <span class="o">:=</span> <span class="mi">0</span>
+<span class="c1">// 当前的锁的状态
+</span><span class="c1"></span><span class="nx">old</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">state</span>
+<span class="k">for</span> <span class="p">{</span> 
+    <span class="c1">// 锁是非饥饿状态，锁还没被释放，尝试自旋
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">old</span><span class="o">&amp;</span><span class="p">(</span><span class="nx">mutexLocked</span><span class="p">|</span><span class="nx">mutexStarving</span><span class="p">)</span> <span class="o">==</span> <span class="nx">mutexLocked</span> <span class="o">&amp;&amp;</span> <span class="nf">runtime_canSpin</span><span class="p">(</span><span class="nx">iter</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">!</span><span class="nx">awoke</span> <span class="o">&amp;&amp;</span> <span class="nx">old</span><span class="o">&amp;</span><span class="nx">mutexWoken</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">old</span><span class="o">&gt;&gt;</span><span class="nx">mutexWaiterShift</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span>
+            <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">m</span><span class="p">.</span><span class="nx">state</span><span class="p">,</span> <span class="nx">old</span><span class="p">,</span> <span class="nx">old</span><span class="p">|</span><span class="nx">mutexWoken</span><span class="p">)</span> <span class="p">{</span>
+            <span class="nx">awoke</span> <span class="p">=</span> <span class="kc">true</span>
+        <span class="p">}</span>
+        <span class="c1">// 自旋
+</span><span class="c1"></span>        <span class="nf">runtime_doSpin</span><span class="p">()</span>
+        <span class="c1">// 自旋次数加1
+</span><span class="c1"></span>        <span class="nx">iter</span><span class="o">++</span>
+        <span class="c1">// 设置当前锁的状态
+</span><span class="c1"></span>        <span class="nx">old</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">state</span>
+        <span class="k">continue</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>After entering the lockSlow method, the first step is to determine whether the following can spin up, based on the following calculation.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">old</span><span class="o">&amp;</span><span class="p">(</span><span class="nx">mutexLocked</span><span class="p">|</span><span class="nx">mutexStarving</span><span class="p">)</span> <span class="o">==</span> <span class="nx">mutexLocked</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>You can know that the current lock state must be locked and cannot be in a hungry state for this judgment to be true, and then see if iter satisfies the limit on the number of times, and if both are true, then continue down the line.</p>
+<p>The inner if contains four judgments.</p>
+<ul>
+<li>first determines whether awoke is a wake state.</li>
+<li><code>old&amp;mutexWoken == 0</code> is true to indicate that there are no other nodes that are waking up.</li>
+<li><code>old&gt;&gt;mutexWaiterShift ! = 0</code> indicates that there is currently a waiting goroutine.</li>
+<li>CAS sets the state&rsquo;s mutexWoken status bit to <code>old|mutexWoken</code>, which is whether 1 is successful.</li>
+</ul>
+<p>If both are satisfied, then set the awoke state to true, then add one to the spin count, and reset the state.</p>
+<p>Continue to the next page.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">new</span> <span class="o">:=</span> <span class="nx">old</span>
+<span class="k">if</span> <span class="nx">old</span><span class="o">&amp;</span><span class="nx">mutexStarving</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+    <span class="c1">// 如果当前不是饥饿模式，那么将mutexLocked状态位设置1，表示加锁
+</span><span class="c1"></span>    <span class="nx">new</span> <span class="o">|=</span> <span class="nx">mutexLocked</span>
+<span class="p">}</span>
+<span class="k">if</span> <span class="nx">old</span><span class="o">&amp;</span><span class="p">(</span><span class="nx">mutexLocked</span><span class="p">|</span><span class="nx">mutexStarving</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+    <span class="c1">// 如果当前被锁定或者处于饥饿模式，则waiter加一，表示等待一个等待计数
+</span><span class="c1"></span>    <span class="nx">new</span> <span class="o">+=</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="nx">mutexWaiterShift</span>
+<span class="p">}</span>
+<span class="c1">// 如果是饥饿状态，并且已经上锁了，那么mutexStarving状态位设置为1，设置为饥饿状态
+</span><span class="c1"></span><span class="k">if</span> <span class="nx">starving</span> <span class="o">&amp;&amp;</span> <span class="nx">old</span><span class="o">&amp;</span><span class="nx">mutexLocked</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+    <span class="nx">new</span> <span class="o">|=</span> <span class="nx">mutexStarving</span>
+<span class="p">}</span>
+<span class="c1">// awoke为true则表明当前线程在上面自旋的时候，修改mutexWoken状态成功
+</span><span class="c1"></span><span class="k">if</span> <span class="nx">awoke</span> <span class="p">{</span> 
+    <span class="k">if</span> <span class="nx">new</span><span class="o">&amp;</span><span class="nx">mutexWoken</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;sync: inconsistent mutex state&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// 清除唤醒标志位
+</span><span class="c1"></span>    <span class="nx">new</span> <span class="o">&amp;^=</span> <span class="nx">mutexWoken</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>There are two cases to go here: 1. the spin exceeds the number of times; 2. the lock is not currently held.</p>
+<p>So the first judgment, if the lock is currently added, but not in a hungry state, will also repeat the setting <code>new |= mutexLocked</code>, that is, the mutexLocked state is set to 1.</p>
+<p>If old is already hungry or has been locked, then it is necessary to set Waiter plus one, indicating that this goroutine will not acquire a lock below and will wait.</p>
+<p>If starving is true, which means the current goroutine is hungry and old is already locked, then set <code>new |= mutexStarving</code>, which means the mutexStarving status bit is set to 1.</p>
+<p>awoke if set successfully at spin time, then <code>new &amp;^= mutexWoken</code> here to eliminate the mutexWoken flag bit. Because the subsequent process is likely to hang the current thread, it needs to wait for other goroutine to release the lock to wake up, if the unlock time found the mutexWoken position is not 0, then it will not go to wake up, then the thread can not wake up again to add locks.</p>
+<p>Continuing on.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">m</span><span class="p">.</span><span class="nx">state</span><span class="p">,</span> <span class="nx">old</span><span class="p">,</span> <span class="nx">new</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 1.如果原来状态没有上锁，也没有饥饿，那么直接返回，表示获取到锁
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">old</span><span class="o">&amp;</span><span class="p">(</span><span class="nx">mutexLocked</span><span class="p">|</span><span class="nx">mutexStarving</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="k">break</span> <span class="c1">// locked the mutex with CAS
+</span><span class="c1"></span>    <span class="p">}</span>
+    <span class="c1">// 2.到这里是没有获取到锁，判断一下等待时长是否不为0
+</span><span class="c1"></span>    <span class="c1">// 如果不为0，那么加入到队列头部
+</span><span class="c1"></span>    <span class="nx">queueLifo</span> <span class="o">:=</span> <span class="nx">waitStartTime</span> <span class="o">!=</span> <span class="mi">0</span>
+    <span class="c1">// 3.如果等待时间为0，那么初始化等待时间
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">waitStartTime</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nx">waitStartTime</span> <span class="p">=</span> <span class="nf">runtime_nanotime</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="c1">// 4.阻塞等待
+</span><span class="c1"></span>    <span class="nf">runtime_SemacquireMutex</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">m</span><span class="p">.</span><span class="nx">sema</span><span class="p">,</span> <span class="nx">queueLifo</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="c1">// 5.唤醒之后检查锁是否应该处于饥饿状态
+</span><span class="c1"></span>    <span class="nx">starving</span> <span class="p">=</span> <span class="nx">starving</span> <span class="o">||</span> <span class="nf">runtime_nanotime</span><span class="p">()</span><span class="o">-</span><span class="nx">waitStartTime</span> <span class="p">&gt;</span> <span class="nx">starvationThresholdNs</span>
+    <span class="nx">old</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">state</span>
+    <span class="c1">// 6.判断是否已经处于饥饿状态
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">old</span><span class="o">&amp;</span><span class="nx">mutexStarving</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span> 
+        <span class="k">if</span> <span class="nx">old</span><span class="o">&amp;</span><span class="p">(</span><span class="nx">mutexLocked</span><span class="p">|</span><span class="nx">mutexWoken</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">old</span><span class="o">&gt;&gt;</span><span class="nx">mutexWaiterShift</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+            <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;sync: inconsistent mutex state&#34;</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="c1">// 7.加锁并且将waiter数减1
+</span><span class="c1"></span>        <span class="nx">delta</span> <span class="o">:=</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">mutexLocked</span> <span class="o">-</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="nx">mutexWaiterShift</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">!</span><span class="nx">starving</span> <span class="o">||</span> <span class="nx">old</span><span class="o">&gt;&gt;</span><span class="nx">mutexWaiterShift</span> <span class="o">==</span> <span class="mi">1</span> <span class="p">{</span> 
+            <span class="c1">// 8.如果当前goroutine不是饥饿状态，就从饥饿模式切换会正常模式
+</span><span class="c1"></span>            <span class="nx">delta</span> <span class="o">-=</span> <span class="nx">mutexStarving</span>
+        <span class="p">}</span>
+        <span class="c1">// 9.设置状态
+</span><span class="c1"></span>        <span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">m</span><span class="p">.</span><span class="nx">state</span><span class="p">,</span> <span class="nx">delta</span><span class="p">)</span>
+        <span class="k">break</span>
+    <span class="p">}</span>
+    <span class="nx">awoke</span> <span class="p">=</span> <span class="kc">true</span>
+    <span class="nx">iter</span> <span class="p">=</span> <span class="mi">0</span>
+<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+    <span class="nx">old</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">state</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>To here, first will CAS set the new state, if set successfully then go down, otherwise return to set the state in a loop afterwards. After successful setting.</p>
+<ol>
+<li>first will determine the old state, if there is no hunger, and did not get the lock, then return directly, because this case before entering this code will set the new state to mutexLocked, that has acquired the lock. Here also determine the old state can not be hungry state, otherwise also can not obtain the lock.</li>
+<li>determine whether waitStartTime has been initialized, if a new goroutine to seize the lock, then queueLifo will return false; if not a new goroutine to seize the lock, then added to the head of the waiting queue, so that the goroutine waiting the longest priority to obtain the lock.</li>
+<li>if the wait time is 0, then initialize the wait time.</li>
+<li>blocking the wait and the current goroutine is put to sleep.</li>
+<li>check if the lock should be hungry after waking up and set the starving variable value.</li>
+<li>determine whether it is already in the hungry state, if not, then it goes directly to the next for loop to get the lock.</li>
+<li>lock and the number of waiters minus one, here I looked for a while, did not understand what it means, in fact, you need to understand in two steps, equivalent to state + mutexLocked, and then the state and then the number of waiters part minus one.</li>
+<li>if the current goroutine is not hungry or waiter only one, switch from hungry mode to normal mode.</li>
+<li>set the state.</li>
+</ol>
+<p>The following illustration is used to explain.</p>
+<p>This part of the illustration is the operation before hibernation, hibernation will be based on the state of old to determine whether it can directly obtain the lock, if the old state is not locked, nor hungry, then directly break return, because this situation will be set in CAS plus lock;.</p>
+<p>Then down to determine whether waitStartTime is equal to 0, if not equal, that is not the first time to come, but was woken up after coming here, then you can not directly to the end of the team and then hibernate, but to the head of the team to prevent a long time to grab the lock.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/26/c5908ff147c24fd2beba7a8119c54206.png" alt="sobyte"></p>
+<p>The following diagram is the schematic diagram after waking up, how to be woken up can be directly to the jump to the unlocking part to see the end and then come back.</p>
+<p>At the beginning of the wake-up call, we need to determine the current starving state and the waiting time if it exceeds 1ms, then starving will be set to true.</p>
+<p>Next there will be an if judgment, there is a detail here, because it is woken up, so you need to reacquire the lock before judgment, if the current is not hungry mode, then it will return directly, and then re-enter the for loop.</p>
+<p>If the current is in starvation mode, then it will calculate the delta for locking, and the current goroutine is able to directly seize the lock, so you need to waiter minus one, if starving is not hungry, or waiting time does not exceed 1ms, or waiter only one, then you also need to delta minus mutexStarving, said to exit the starvation mode.</p>
+<p>Finally, the state is added to delta by AddInt32. The reason why it can be added directly here is that the mutexLocked value of the state is definitely 0, and the mutexStarving bit is definitely 1, and there is at least one current goroutine in the waiting queue before acquiring the lock, so the waiter can be directly subtracted by 1.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/26/e1038dc06729428fa1ea8ef440f0c86e.png" alt="sobyte"></p>
+<h2 id="unlocking-process">unlocking process</h2>
+<h3 id="fast-path-1">fast path</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Mutex</span><span class="p">)</span> <span class="nf">Unlock</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">race</span><span class="p">.</span><span class="nx">Enabled</span> <span class="p">{</span>
+        <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">state</span>
+        <span class="nx">race</span><span class="p">.</span><span class="nf">Release</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">m</span><span class="p">))</span>
+    <span class="p">}</span>
+    <span class="c1">//返回一个state被减后的值    
+</span><span class="c1"></span>    <span class="nx">new</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">AddInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">m</span><span class="p">.</span><span class="nx">state</span><span class="p">,</span> <span class="o">-</span><span class="nx">mutexLocked</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">new</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span> 
+        <span class="c1">//如果返回的state值不为0，那么进入到unlockSlow中
+</span><span class="c1"></span>        <span class="nx">m</span><span class="p">.</span><span class="nf">unlockSlow</span><span class="p">(</span><span class="nx">new</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The main thing here is that AddInt32 resets the state&rsquo;s mutexLocked bit to 0, and then determines whether the new state value is not 0. If it is not 0, the unlockSlow method is called.</p>
+<h3 id="unlockslow">unlockSlow</h3>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/26/7e30ee9149bf4b1c8a020c51a16d2374.png" alt="sobyte"></p>
+<p>The unlockSlow method is also divided into normal mode and starvation mode unlocking.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Mutex</span><span class="p">)</span> <span class="nf">unlockSlow</span><span class="p">(</span><span class="nx">new</span> <span class="kt">int32</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="nx">new</span><span class="o">+</span><span class="nx">mutexLocked</span><span class="p">)</span><span class="o">&amp;</span><span class="nx">mutexLocked</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;sync: unlock of unlocked mutex&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// 正常模式
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">new</span><span class="o">&amp;</span><span class="nx">mutexStarving</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nx">old</span> <span class="o">:=</span> <span class="nx">new</span>
+        <span class="k">for</span> <span class="p">{</span> 
+            <span class="c1">// 如果没有 waiter，或者已经有在处理的情况，直接返回
+</span><span class="c1"></span>            <span class="k">if</span> <span class="nx">old</span><span class="o">&gt;&gt;</span><span class="nx">mutexWaiterShift</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">old</span><span class="o">&amp;</span><span class="p">(</span><span class="nx">mutexLocked</span><span class="p">|</span><span class="nx">mutexWoken</span><span class="p">|</span><span class="nx">mutexStarving</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="k">return</span>
+            <span class="p">}</span> 
+            <span class="c1">// waiter 数减 1，mutexWoken 标志设置上，通过 CAS 更新 state 的值
+</span><span class="c1"></span>            <span class="nx">new</span> <span class="p">=</span> <span class="p">(</span><span class="nx">old</span> <span class="o">-</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="nx">mutexWaiterShift</span><span class="p">)</span> <span class="p">|</span> <span class="nx">mutexWoken</span>
+            <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapInt32</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">m</span><span class="p">.</span><span class="nx">state</span><span class="p">,</span> <span class="nx">old</span><span class="p">,</span> <span class="nx">new</span><span class="p">)</span> <span class="p">{</span>
+                <span class="c1">// 直接唤醒等待队列中的 waiter
+</span><span class="c1"></span>                <span class="nf">runtime_Semrelease</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">m</span><span class="p">.</span><span class="nx">sema</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="k">return</span>
+            <span class="p">}</span>
+            <span class="nx">old</span> <span class="p">=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">state</span>
+        <span class="p">}</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span> <span class="c1">// 饥饿模式
+</span><span class="c1"></span>        <span class="c1">// 直接唤醒等待队列中的 waiter
+</span><span class="c1"></span>        <span class="nf">runtime_Semrelease</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">m</span><span class="p">.</span><span class="nx">sema</span><span class="p">,</span> <span class="kc">true</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>in normal mode, if there is no waiter, or if one of mutexLocked, mutexStarving, or mutexWoken is not zero indicating that another goroutine is already processing, return directly; if there is a waiter for the mutex lock, then wake up the waiter in the waiting queue directly by runtime_Semrelease.</p>
+<p>In starvation mode, the runtime_Semrelease method is called directly to give the current lock to the next waiter that is trying to get the lock, and the waiter will get the lock when it is woken up.</p>
+<h2 id="summary">Summary</h2>
+<p>The design of Mutex is very concise, from the code can be seen in order to design such a simple code state a field can be used as four fields. And in order to solve the goroutine starvation problem, Mutex in 1.9 added the starvation mode to make the lock more fair, unfair waiting time is limited to 1 millisecond, but at the same time, the code has become more and more difficult to understand, so to understand its ideas above need to slowly waste some time to experience it in detail.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/rebuild-iso-image/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Rebuild the ISO image using overlay2 or bind</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/go-sync-pool/">
+            <span class="next-text nav-default">Detailed analysis of the source code of Go sync.Pool</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

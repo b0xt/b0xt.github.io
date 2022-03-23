@@ -1,0 +1,2092 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Explaining the Golang memory allocation implementation from source code - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Introduction The Go language&amp;rsquo;s memory allocator takes its cue from TCMalloc&amp;rsquo;s design for high-speed memory allocation. The core idea is to use a multi-level cache to sort objects by size and implement different allocation strategies by class. Information about TCMalloc can be found here: http://goog-perftools.sourceforge.net/doc/tcmalloc.html. If the object to be allocated is a small object (&amp;lt;= 32k), there is a lock-free cache of small objects in each thread that can" /><meta name="keywords" content="golang, Memory, Allocation" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/go-memory-allocation/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Explaining the Golang memory allocation implementation from source code" />
+<meta property="og:description" content="Introduction The Go language&rsquo;s memory allocator takes its cue from TCMalloc&rsquo;s design for high-speed memory allocation. The core idea is to use a multi-level cache to sort objects by size and implement different allocation strategies by class. Information about TCMalloc can be found here: http://goog-perftools.sourceforge.net/doc/tcmalloc.html. If the object to be allocated is a small object (&lt;= 32k), there is a lock-free cache of small objects in each thread that can" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/go-memory-allocation/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-25T10:52:05+08:00" />
+<meta property="article:modified_time" content="2022-01-25T10:52:05+08:00" />
+
+<meta itemprop="name" content="Explaining the Golang memory allocation implementation from source code">
+<meta itemprop="description" content="Introduction The Go language&rsquo;s memory allocator takes its cue from TCMalloc&rsquo;s design for high-speed memory allocation. The core idea is to use a multi-level cache to sort objects by size and implement different allocation strategies by class. Information about TCMalloc can be found here: http://goog-perftools.sourceforge.net/doc/tcmalloc.html. If the object to be allocated is a small object (&lt;= 32k), there is a lock-free cache of small objects in each thread that can"><meta itemprop="datePublished" content="2022-01-25T10:52:05+08:00" />
+<meta itemprop="dateModified" content="2022-01-25T10:52:05+08:00" />
+<meta itemprop="wordCount" content="6412">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Explaining the Golang memory allocation implementation from source code"/>
+<meta name="twitter:description" content="Introduction The Go language&rsquo;s memory allocator takes its cue from TCMalloc&rsquo;s design for high-speed memory allocation. The core idea is to use a multi-level cache to sort objects by size and implement different allocation strategies by class. Information about TCMalloc can be found here: http://goog-perftools.sourceforge.net/doc/tcmalloc.html. If the object to be allocated is a small object (&lt;= 32k), there is a lock-free cache of small objects in each thread that can"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Explaining the Golang memory allocation implementation from source code</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-25 10:52:05 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 6412 words </span>
+          <span class="more-meta"> 13 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#introduction">Introduction</a>
+          <ul>
+            <li><a href="#breakpoint-debugging-assembly">Breakpoint debugging assembly</a></li>
+            <li><a href="#entrance-to-each-object">Entrance to each object</a></li>
+            <li><a href="#int64-object">int64 object</a></li>
+            <li><a href="#string-object">string object</a></li>
+            <li><a href="#debugging-examples">Debugging examples</a></li>
+          </ul>
+        </li>
+        <li><a href="#analysis">Analysis</a>
+          <ul>
+            <li><a href="#components-of-the-allocator">Components of the allocator</a></li>
+            <li><a href="#allocating-memory-to-objects">Allocating memory to objects</a></li>
+            <li><a href="#allocation-of-large-objects">Allocation of large objects</a></li>
+            <li><a href="#allocation-of-small-objects">Allocation of small objects</a></li>
+            <li><a href="#micro-object-allocation">Micro-object allocation</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="introduction">Introduction</h2>
+<p>The Go language&rsquo;s memory allocator takes its cue from TCMalloc&rsquo;s design for high-speed memory allocation. The core idea is to use a multi-level cache to sort objects by size and implement different allocation strategies by class.</p>
+<blockquote>
+<p>Information about TCMalloc can be found here: <a href="http://goog-perftools.sourceforge.net/doc/tcmalloc.html">http://goog-perftools.sourceforge.net/doc/tcmalloc.html</a>.</p>
+</blockquote>
+<p>If the object to be allocated is a small object (&lt;= 32k), there is a lock-free cache of small objects in each thread that can be allocated in a straightforward and efficient lock-free manner.</p>
+<p>As follows: objects are divided into chained tables in different memory size groups.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/25/a43ab1e8d3434501acfba5f769e8b1f5.png" alt="sobyte"></p>
+<p>If it is a large object (&gt;32k), then the page heap is allocated. as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/25/dc7bf744f9c240608689a539de3a88b7.png" alt="sobyte"></p>
+<p>Although the go memory allocator was originally based on tcmalloc, it is now very different. So some of the structure above will have changed slightly, and I&rsquo;ll ramble on about it below.</p>
+<p>Because the source code for memory allocation is quite complex, it is important to see how breakpoint assembly is used for debugging before proceeding with the source code analysis.</p>
+<h3 id="breakpoint-debugging-assembly">Breakpoint debugging assembly</h3>
+<p>The Go language currently supports several debuggers, GDB, LLDB and Delve. Only Delve is a debugging tool designed and developed specifically for the Go language. Moreover, Delve itself is developed in Go and provides the same support for the Windows platform. In this section we briefly explain how to debug Go assembler based on Delve. Project address: <a href="https://github.com/go-delve/delve">https://github.com/go-delve/delve</a></p>
+<p>Installation.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">go get github.com/go-delve/delve/cmd/dlv
+</code></pre></td></tr></table>
+</div>
+</div><p>First write an example - test.go.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="s">&#34;fmt&#34;</span>
+
+<span class="kd">type</span> <span class="nx">A</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">test</span> <span class="kt">string</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">a</span> <span class="o">:=</span> <span class="nb">new</span><span class="p">(</span><span class="nx">A</span><span class="p">)</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Then enter the package directory on the command line and type <code>dlv debug</code> to debug.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">PS C:<span class="se">\d</span>ocument<span class="se">\c</span>ode<span class="se">\t</span>est_go<span class="se">\s</span>rc&gt; dlv debug
+Type <span class="s1">&#39;help&#39;</span> <span class="k">for</span> list of commands.
+</code></pre></td></tr></table>
+</div>
+</div><p>You can then use the break command to set a breakpoint on the main method of the main package.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="p">(</span><span class="nx">dlv</span><span class="p">)</span> <span class="k">break</span> <span class="nx">main</span><span class="p">.</span><span class="nx">main</span>
+<span class="nx">Breakpoint</span> <span class="mi">1</span> <span class="nx">set</span> <span class="nx">at</span> <span class="mh">0x4bd30a</span> <span class="k">for</span> <span class="nx">main</span><span class="p">.</span><span class="nf">main</span><span class="p">()</span> <span class="nx">c</span><span class="p">:</span><span class="o">/</span><span class="nx">document</span><span class="o">/</span><span class="nx">code</span><span class="o">/</span><span class="nx">test_go</span><span class="o">/</span><span class="nx">src</span><span class="o">/</span><span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>See all the breakpoints that have been set via breakpoints.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="o">(</span>dlv<span class="o">)</span> breakpoints
+Breakpoint runtime-fatal-throw at 0x4377e0 <span class="k">for</span> runtime.fatalthrow<span class="o">()</span> c:/software/go/src/runtime/panic.go:1162 <span class="o">(</span>0<span class="o">)</span>
+Breakpoint unrecovered-panic at 0x437860 <span class="k">for</span> runtime.fatalpanic<span class="o">()</span> c:/software/go/src/runtime/panic.go:1189 <span class="o">(</span>0<span class="o">)</span>
+        print runtime.curg._panic.arg
+Breakpoint <span class="m">1</span> at 0x4bd30a <span class="k">for</span> main.main<span class="o">()</span> c:/document/code/test_go/src/test.go:8 <span class="o">(</span>0<span class="o">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The continue command allows the program to run to the next breakpoint.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="p">(</span><span class="nx">dlv</span><span class="p">)</span> <span class="k">continue</span>
+<span class="p">&gt;</span> <span class="nx">main</span><span class="p">.</span><span class="nf">main</span><span class="p">()</span> <span class="nx">c</span><span class="p">:</span><span class="o">/</span><span class="nx">document</span><span class="o">/</span><span class="nx">code</span><span class="o">/</span><span class="nx">test_go</span><span class="o">/</span><span class="nx">src</span><span class="o">/</span><span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span> <span class="p">(</span><span class="nx">hits</span> <span class="nf">goroutine</span><span class="p">(</span><span class="mi">1</span><span class="p">):</span><span class="mi">1</span> <span class="nx">total</span><span class="p">:</span><span class="mi">1</span><span class="p">)</span> <span class="p">(</span><span class="nx">PC</span><span class="p">:</span> <span class="mh">0x4bd30a</span><span class="p">)</span>
+     <span class="mi">3</span><span class="p">:</span> <span class="kn">import</span> <span class="s">&#34;fmt&#34;</span>
+     <span class="mi">4</span><span class="p">:</span>
+     <span class="mi">5</span><span class="p">:</span> <span class="kd">type</span> <span class="nx">A</span> <span class="kd">struct</span> <span class="p">{</span>
+     <span class="mi">6</span><span class="p">:</span>         <span class="nx">test</span> <span class="kt">string</span>
+     <span class="mi">7</span><span class="p">:</span> <span class="p">}</span>
+<span class="p">=&gt;</span>   <span class="mi">8</span><span class="p">:</span> <span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+     <span class="mi">9</span><span class="p">:</span>         <span class="nx">a</span> <span class="o">:=</span> <span class="nb">new</span><span class="p">(</span><span class="nx">A</span><span class="p">)</span>
+    <span class="mi">10</span><span class="p">:</span>         <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span>
+    <span class="mi">11</span><span class="p">:</span> <span class="p">}</span>
+    <span class="mi">12</span><span class="p">:</span>
+    <span class="mi">13</span><span class="p">:</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>View the assembly code corresponding to the main function with the disassemble command.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="p">(</span><span class="nx">dlv</span><span class="p">)</span> <span class="nx">disassemble</span>
+<span class="nx">TEXT</span> <span class="nx">main</span><span class="p">.</span><span class="nf">main</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span> <span class="nx">C</span><span class="p">:</span><span class="o">/</span><span class="nx">document</span><span class="o">/</span><span class="nx">code</span><span class="o">/</span><span class="nx">test_go</span><span class="o">/</span><span class="nx">src</span><span class="o">/</span><span class="nx">test</span><span class="p">.</span><span class="k">go</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span>       <span class="mh">0x4bd2f0</span>        <span class="mi">65488</span><span class="nx">b0c2528000000</span>      <span class="nx">mov</span> <span class="nx">rcx</span><span class="p">,</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="nx">gs</span><span class="p">:[</span><span class="mh">0x28</span><span class="p">]</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span>       <span class="mh">0x4bd2f9</span>        <span class="mi">488</span><span class="nx">b8900000000</span>          <span class="nx">mov</span> <span class="nx">rcx</span><span class="p">,</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rcx</span><span class="p">]</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span>       <span class="mh">0x4bd300</span>        <span class="mi">483</span><span class="nx">b6110</span>                <span class="nx">cmp</span> <span class="nx">rsp</span><span class="p">,</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rcx</span><span class="o">+</span><span class="mh">0x10</span><span class="p">]</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span>       <span class="mh">0x4bd304</span>        <span class="mi">0</span><span class="nx">f8697000000</span>            <span class="nx">jbe</span> <span class="mh">0x4bd3a1</span>
+<span class="p">=&gt;</span>      <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span>       <span class="mh">0x4bd30a</span><span class="o">*</span>       <span class="mi">4883</span><span class="nx">ec78</span>                <span class="nx">sub</span> <span class="nx">rsp</span><span class="p">,</span> <span class="mh">0x78</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span>       <span class="mh">0x4bd30e</span>        <span class="mi">48896</span><span class="nx">c2470</span>              <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x70</span><span class="p">],</span> <span class="nx">rbp</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span>       <span class="mh">0x4bd313</span>        <span class="mi">488</span><span class="nx">d6c2470</span>              <span class="nx">lea</span> <span class="nx">rbp</span><span class="p">,</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x70</span><span class="p">]</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span>       <span class="mh">0x4bd318</span>        <span class="mi">488</span><span class="nx">d0581860100</span>          <span class="nx">lea</span> <span class="nx">rax</span><span class="p">,</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">__image_base__</span><span class="o">+</span><span class="mi">874912</span><span class="p">]</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span>       <span class="mh">0x4bd31f</span>        <span class="mi">48890424</span>                <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="p">],</span> <span class="nx">rax</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span>       <span class="mh">0x4bd323</span>        <span class="nx">e8e800f5ff</span>              <span class="nx">call</span> <span class="err">$</span><span class="nx">runtime</span><span class="p">.</span><span class="nx">newobject</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span>       <span class="mh">0x4bd328</span>        <span class="mi">488</span><span class="nx">b442408</span>              <span class="nx">mov</span> <span class="nx">rax</span><span class="p">,</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x8</span><span class="p">]</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">9</span>       <span class="mh">0x4bd32d</span>        <span class="mi">4889442430</span>              <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x30</span><span class="p">],</span> <span class="nx">rax</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd332</span>        <span class="mi">4889442440</span>              <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x40</span><span class="p">],</span> <span class="nx">rax</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd337</span>        <span class="mi">0</span><span class="nx">f57c0</span>                  <span class="nx">xorps</span> <span class="nx">xmm0</span><span class="p">,</span> <span class="nx">xmm0</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd33a</span>        <span class="mi">0</span><span class="nx">f11442448</span>              <span class="nx">movups</span> <span class="nx">xmmword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x48</span><span class="p">],</span> <span class="nx">xmm0</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd33f</span>        <span class="mi">488</span><span class="nx">d442448</span>              <span class="nx">lea</span> <span class="nx">rax</span><span class="p">,</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x48</span><span class="p">]</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd344</span>        <span class="mi">4889442438</span>              <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x38</span><span class="p">],</span> <span class="nx">rax</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd349</span>        <span class="mi">8400</span>                    <span class="nx">test</span> <span class="kt">byte</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rax</span><span class="p">],</span> <span class="nx">al</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd34b</span>        <span class="mi">488</span><span class="nx">b4c2440</span>              <span class="nx">mov</span> <span class="nx">rcx</span><span class="p">,</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x40</span><span class="p">]</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd350</span>        <span class="mi">488</span><span class="nx">d15099f0000</span>          <span class="nx">lea</span> <span class="nx">rdx</span><span class="p">,</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">__image_base__</span><span class="o">+</span><span class="mi">815712</span><span class="p">]</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd357</span>        <span class="mi">4889542448</span>              <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x48</span><span class="p">],</span> <span class="nx">rdx</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd35c</span>        <span class="mi">48894</span><span class="nx">c2450</span>              <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x50</span><span class="p">],</span> <span class="nx">rcx</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd361</span>        <span class="mi">8400</span>                    <span class="nx">test</span> <span class="kt">byte</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rax</span><span class="p">],</span> <span class="nx">al</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd363</span>        <span class="nx">eb00</span>                    <span class="nx">jmp</span> <span class="mh">0x4bd365</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd365</span>        <span class="mi">4889442458</span>              <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x58</span><span class="p">],</span> <span class="nx">rax</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd36a</span>        <span class="mi">48</span><span class="nx">c744246001000000</span>      <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x60</span><span class="p">],</span> <span class="mh">0x1</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd373</span>        <span class="mi">48</span><span class="nx">c744246801000000</span>      <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x68</span><span class="p">],</span> <span class="mh">0x1</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd37c</span>        <span class="mi">48890424</span>                <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="p">],</span> <span class="nx">rax</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd380</span>        <span class="mi">48</span><span class="nx">c744240801000000</span>      <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x8</span><span class="p">],</span> <span class="mh">0x1</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd389</span>        <span class="mi">48</span><span class="nx">c744241001000000</span>      <span class="nx">mov</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x10</span><span class="p">],</span> <span class="mh">0x1</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">10</span>      <span class="mh">0x4bd392</span>        <span class="nx">e869a0ffff</span>              <span class="nx">call</span> <span class="err">$</span><span class="nx">fmt</span><span class="p">.</span><span class="nx">Println</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span>      <span class="mh">0x4bd397</span>        <span class="mi">488</span><span class="nx">b6c2470</span>              <span class="nx">mov</span> <span class="nx">rbp</span><span class="p">,</span> <span class="nx">qword</span> <span class="nx">ptr</span> <span class="p">[</span><span class="nx">rsp</span><span class="o">+</span><span class="mh">0x70</span><span class="p">]</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span>      <span class="mh">0x4bd39c</span>        <span class="mi">4883</span><span class="nx">c478</span>                <span class="nx">add</span> <span class="nx">rsp</span><span class="p">,</span> <span class="mh">0x78</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">11</span>      <span class="mh">0x4bd3a0</span>        <span class="nx">c3</span>                      <span class="nx">ret</span>
+        <span class="nx">test</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">8</span>       <span class="mh">0x4bd3a1</span>        <span class="nx">e82a50faff</span>              <span class="nx">call</span> <span class="err">$</span><span class="nx">runtime</span><span class="p">.</span><span class="nx">morestack_noctxt</span>
+        <span class="p">.:</span><span class="mi">0</span>             <span class="mh">0x4bd3a6</span>        <span class="nx">e945ffffff</span>              <span class="nx">jmp</span> <span class="err">$</span><span class="nx">main</span><span class="p">.</span><span class="nx">main</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We can now use break breakpoints to calls to the runtime.newobject function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="p">(</span><span class="nx">dlv</span><span class="p">)</span> <span class="k">break</span> <span class="nx">runtime</span><span class="p">.</span><span class="nx">newobject</span>
+<span class="nx">Breakpoint</span> <span class="mi">2</span> <span class="nx">set</span> <span class="nx">at</span> <span class="mh">0x40d426</span> <span class="k">for</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">newobject</span><span class="p">()</span> <span class="nx">c</span><span class="p">:</span><span class="o">/</span><span class="nx">software</span><span class="o">/</span><span class="k">go</span><span class="o">/</span><span class="nx">src</span><span class="o">/</span><span class="nx">runtime</span><span class="o">/</span><span class="nx">malloc</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">1164</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Type continue to jump to the location of the breakpoint.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="p">(</span><span class="nx">dlv</span><span class="p">)</span> <span class="k">continue</span>
+<span class="p">&gt;</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">newobject</span><span class="p">()</span> <span class="nx">c</span><span class="p">:</span><span class="o">/</span><span class="nx">software</span><span class="o">/</span><span class="k">go</span><span class="o">/</span><span class="nx">src</span><span class="o">/</span><span class="nx">runtime</span><span class="o">/</span><span class="nx">malloc</span><span class="p">.</span><span class="k">go</span><span class="p">:</span><span class="mi">1164</span> <span class="p">(</span><span class="nx">hits</span> <span class="nf">goroutine</span><span class="p">(</span><span class="mi">1</span><span class="p">):</span><span class="mi">1</span> <span class="nx">total</span><span class="p">:</span><span class="mi">1</span><span class="p">)</span> <span class="p">(</span><span class="nx">PC</span><span class="p">:</span> <span class="mh">0x40d426</span><span class="p">)</span>
+<span class="nx">Warning</span><span class="p">:</span> <span class="nx">debugging</span> <span class="nx">optimized</span> <span class="nx">function</span>
+  <span class="mi">1159</span><span class="p">:</span> <span class="p">}</span>
+  <span class="mi">1160</span><span class="p">:</span>
+  <span class="mi">1161</span><span class="p">:</span> <span class="c1">// implementation of new builtin
+</span><span class="c1"></span>  <span class="mi">1162</span><span class="p">:</span> <span class="c1">// compiler (both frontend and SSA backend) knows the signature
+</span><span class="c1"></span>  <span class="mi">1163</span><span class="p">:</span> <span class="c1">// of this function
+</span><span class="c1"></span><span class="p">=&gt;</span><span class="mi">1164</span><span class="p">:</span> <span class="kd">func</span> <span class="nf">newobject</span><span class="p">(</span><span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+  <span class="mi">1165</span><span class="p">:</span>         <span class="k">return</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">typ</span><span class="p">.</span><span class="nx">size</span><span class="p">,</span> <span class="nx">typ</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+  <span class="mi">1166</span><span class="p">:</span> <span class="p">}</span>
+  <span class="mi">1167</span><span class="p">:</span>
+  <span class="mi">1168</span><span class="p">:</span> <span class="c1">//go:linkname reflect_unsafe_New reflect.unsafe_New
+</span><span class="c1"></span>  <span class="mi">1169</span><span class="p">:</span> <span class="kd">func</span> <span class="nf">reflect_unsafe_New</span><span class="p">(</span><span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The print command is used to view the data of the typ.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="o">(</span>dlv<span class="o">)</span> print typ
+*runtime._type <span class="o">{</span>size: 16, ptrdata: 8, hash: 875453117, tflag: tflagUncommon<span class="p">|</span>tflagExtraStar<span class="p">|</span>tflagNamed <span class="o">(</span>7<span class="o">)</span>, align: 8, fieldAlign: 8, kind: 25, equal: runtime.strequal, gcdata: *1, str: 5418, ptrToThis: 37472<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>You can see that the size printed here is 16bytes, because we have just one string type field inside the A structure.</p>
+<p>Once you get to the mallocgc method, look at the arguments and local variables of the function with the args and locals commands.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="p">(</span><span class="nx">dlv</span><span class="p">)</span> <span class="nx">args</span>
+<span class="nx">size</span> <span class="p">=</span> <span class="p">(</span><span class="nx">unreadable</span> <span class="nx">could</span> <span class="nx">not</span> <span class="nx">find</span> <span class="nx">loclist</span> <span class="nx">entry</span> <span class="nx">at</span> <span class="mh">0x8b40</span> <span class="k">for</span> <span class="nx">address</span> <span class="mh">0x40ca73</span><span class="p">)</span>
+<span class="nx">typ</span> <span class="p">=</span> <span class="p">(</span><span class="o">*</span><span class="nx">runtime</span><span class="p">.</span><span class="nx">_type</span><span class="p">)(</span><span class="mh">0x4d59a0</span><span class="p">)</span>
+<span class="nx">needzero</span> <span class="p">=</span> <span class="kc">true</span>
+<span class="err">~</span><span class="nx">r3</span> <span class="p">=</span> <span class="p">(</span><span class="nx">unreadable</span> <span class="nx">empty</span> <span class="nx">OP</span> <span class="nx">stack</span><span class="p">)</span>
+<span class="p">(</span><span class="nx">dlv</span><span class="p">)</span> <span class="nf">locals</span>
+<span class="p">(</span><span class="nx">no</span> <span class="nx">locals</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="entrance-to-each-object">Entrance to each object</h3>
+<p>As we can tell from the assembly, all the function entries are <code>runtime.mallocgc</code>, but the following two objects need some attention.</p>
+<h3 id="int64-object">int64 object</h3>
+<p><code>runtime.convT64</code></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">convT64</span><span class="p">(</span><span class="nx">val</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">(</span><span class="nx">x</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">val</span> <span class="p">&lt;</span> <span class="nb">uint64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">staticuint64s</span><span class="p">))</span> <span class="p">{</span>
+        <span class="nx">x</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">staticuint64s</span><span class="p">[</span><span class="nx">val</span><span class="p">])</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="nx">x</span> <span class="p">=</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="mi">8</span><span class="p">,</span> <span class="nx">uint64Type</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
+        <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">uint64</span><span class="p">)(</span><span class="nx">x</span><span class="p">)</span> <span class="p">=</span> <span class="nx">val</span>
+    <span class="p">}</span>
+    <span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This code indicates that if a value of type int64 is less than 256 and is fetched directly as a cached value, no memory allocation will be made for this value.</p>
+<h3 id="string-object">string object</h3>
+<p><code>runtime.convTstring</code></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">convTstring</span><span class="p">(</span><span class="nx">val</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">x</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">val</span> <span class="o">==</span> <span class="s">&#34;&#34;</span> <span class="p">{</span>
+        <span class="nx">x</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">zeroVal</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="nx">x</span> <span class="p">=</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">val</span><span class="p">),</span> <span class="nx">stringType</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+        <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">string</span><span class="p">)(</span><span class="nx">x</span><span class="p">)</span> <span class="p">=</span> <span class="nx">val</span>
+    <span class="p">}</span>
+    <span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As shown by this code, if a string object is created as &ldquo;&rdquo;, then a fixed address value will be returned directly and no memory allocation will be done.</p>
+<h3 id="debugging-examples">Debugging examples</h3>
+<p>You can also use the following example to debug when debugging, because the object allocation inside go is divided into large objects, small objects and micro-objects, so the following three methods are prepared to debug when creating each of the three kinds of objects.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">smallobj</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">arr</span> <span class="p">[</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">10</span><span class="p">]</span><span class="kt">byte</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">largeobj</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">arr</span> <span class="p">[</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">26</span><span class="p">]</span><span class="kt">byte</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">tiny</span><span class="p">()</span>   <span class="p">{</span>
+    <span class="nx">y</span> <span class="o">:=</span> <span class="mi">100000</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">y</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">large</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">large</span> <span class="o">:=</span> <span class="nx">largeobj</span><span class="p">{}</span>
+    <span class="nb">println</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">large</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">small</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">small</span> <span class="o">:=</span> <span class="nx">smallobj</span><span class="p">{}</span>
+    <span class="nb">print</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">small</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="c1">//tiny()
+</span><span class="c1"></span>    <span class="c1">//small()
+</span><span class="c1"></span>    <span class="c1">//large() 
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="analysis">Analysis</h2>
+<h3 id="components-of-the-allocator">Components of the allocator</h3>
+<p>Memory allocation is done by the memory allocator, which consists of 3 components: <code>runtime.mspan</code>, <code>runtime.mcache</code>, <code>runtime.mcentral</code>, <code>runtime.mheap</code>.</p>
+<p><strong>runtime.mspan</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">mspan</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="c1">// 上一个节点
+</span><span class="c1"></span>    <span class="nx">next</span> <span class="o">*</span><span class="nx">mspan</span>     
+    <span class="c1">// 下一个节点
+</span><span class="c1"></span>    <span class="nx">prev</span> <span class="o">*</span><span class="nx">mspan</span>      
+    <span class="c1">// span集合
+</span><span class="c1"></span>    <span class="nx">list</span> <span class="o">*</span><span class="nx">mSpanList</span>  
+    <span class="c1">// span开始的地址值
+</span><span class="c1"></span>    <span class="nx">startAddr</span> <span class="kt">uintptr</span>  
+    <span class="c1">// span管理的页数
+</span><span class="c1"></span>    <span class="nx">npages</span>    <span class="kt">uintptr</span>  
+
+    <span class="c1">// Object n starts at address n*elemsize + (start &lt;&lt; pageShift).
+</span><span class="c1"></span>    <span class="c1">// 空闲节点的索引
+</span><span class="c1"></span>    <span class="nx">freeindex</span> <span class="kt">uintptr</span> 
+    <span class="c1">// span中存放的对象数量
+</span><span class="c1"></span>    <span class="nx">nelems</span> <span class="kt">uintptr</span>  
+
+    <span class="c1">// 用于快速查找内存中未被使用的内存
+</span><span class="c1"></span>    <span class="nx">allocCache</span> <span class="kt">uint64</span> 
+  <span class="c1">// 用于计算mspan管理了多少内存
+</span><span class="c1"></span>  <span class="nx">elemsize</span>    <span class="kt">uintptr</span>
+  <span class="c1">// span的结束地址值
+</span><span class="c1"></span>  <span class="nx">limit</span>       <span class="kt">uintptr</span>
+
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>runtime.mspan</code> is the smallest granular unit inside the memory manager, and all objects are managed under mspan.</p>
+<p>mspan is a linked table with upper and lower pointers.</p>
+<p>npages represents the number of heap pages managed by mspan.</p>
+<p>freeindex is the index of a free object.</p>
+<p>nelems represents how many objects can be stored in this mspan and is equal to <code>(npages * pageSize)/elemsize</code>.</p>
+<p>allocCache is used to quickly find unused memory addresses.</p>
+<p>elemsize indicates how many bytes an object will take up, equal to <code>class_to_size[sizeclass]</code>, note that sizeclass will sizeclass method each time it is fetched, will <code>sizeclass&gt;&gt;1</code>.</p>
+<p>limit indicates the address value of the end of span, equal to <code>startAddr+ npages*pageSize</code>.</p>
+<p>The example diagram is as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/25/63d532830aa94b0aa7117ab0c847edab.png" alt="sobyte"></p>
+<p>The figure alloc is an mspan array with 137 elements. The mspan array manages several pages of memory, each page is 8k, and the number of pages is determined by the spanclass specification.</p>
+<p><strong>runtime.mcache</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">mcache</span> <span class="kd">struct</span> <span class="p">{</span> 
+    <span class="o">...</span>
+    <span class="c1">// 申请小对象的起始地址
+</span><span class="c1"></span>    <span class="nx">tiny</span>             <span class="kt">uintptr</span>
+    <span class="c1">// 从起始地址tiny开始的偏移量
+</span><span class="c1"></span>    <span class="nx">tinyoffset</span>       <span class="kt">uintptr</span>
+    <span class="c1">// tiny对象分配的数量
+</span><span class="c1"></span>    <span class="nx">local_tinyallocs</span> <span class="kt">uintptr</span> <span class="c1">// number of tiny allocs not counted in other stats
+</span><span class="c1"></span>    <span class="c1">// mspan对象集合，numSpanClasses=134
+</span><span class="c1"></span>    <span class="nx">alloc</span> <span class="p">[</span><span class="nx">numSpanClasses</span><span class="p">]</span><span class="o">*</span><span class="nx">mspan</span> <span class="c1">// spans to allocate from, indexed by spanClass
+</span><span class="c1"></span>    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>runtime.mcache</code> is tied to the concurrency model GPM&rsquo;s P. When allocating micro- and small objects it goes to <code>runtime.mcache</code> first, and each processor is allocated a thread cache <code>runtime.mcache</code>, so allocations from <code>runtime.mcache</code> are done without locking.</p>
+<p>There is an alloc array in <code>runtime.mcache</code>, a collection of <code>runtime.mspan</code>, which is the basic unit of memory management in Go. For objects of [16B,32KB] this part of the span is used for memory allocation, so all objects of this size in this interval are looked at from the alloc array, as will be analysed below.</p>
+<p><strong>runtime.mcentral</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">mcentral</span> <span class="kd">struct</span> <span class="p">{</span> 
+    <span class="c1">//spanClass Id
+</span><span class="c1"></span>    <span class="nx">spanclass</span> <span class="nx">spanClass</span>
+    <span class="c1">// 空闲的span列表
+</span><span class="c1"></span>    <span class="nx">partial</span> <span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="nx">spanSet</span> <span class="c1">// list of spans with a free object
+</span><span class="c1"></span>    <span class="c1">// 已经被使用的span列表
+</span><span class="c1"></span>    <span class="nx">full</span>    <span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="nx">spanSet</span> <span class="c1">// list of spans with no free objects
+</span><span class="c1"></span>
+    <span class="c1">//分配mspan的累积计数
+</span><span class="c1"></span>    <span class="nx">nmalloc</span> <span class="kt">uint64</span>
+<span class="p">}</span> 
+</code></pre></td></tr></table>
+</div>
+</div><p>When there is not enough space in <code>runtime.mcache</code>, it will go to <code>runtime.mcentral</code> and request the mspan of the corresponding size. mspan will be fetched from the partial list and the full list, and will be fetched in a lock-free way.</p>
+<p>In <code>runtime.mcentral</code>, there is the spanclass identifier, and the spanclass indicates the type of this mcentral, as we will see below, when allocating objects of size [16B,32KB], the size of the object is divided into 67 groups.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">var <span class="nv">class_to_size</span> <span class="o">=</span> <span class="o">[</span>_NumSizeClasses<span class="o">]</span>uint16<span class="o">{</span>0, 8, 16, 32, 48, 64, 80, 96, 112, 128, 144, 160, 176, 192, 208, 224, 240, 256, 288, 320, 352, 384, 416, 448, 480, 512, 576, 640, 704, 768, 896, 1024, 1152, 1280, 1408, 1536, 1792, 2048, 2304, 2688, 3072, 3200, 3456, 4096, 4864, 5376, 6144, 6528, 6784, 6912, 8192, 9472, 9728, 10240, 10880, 12288, 13568, 14336, 16384, 18432, 19072, 20480, 21760, 24576, 27264, 28672, 32768<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>So <code>runtime.mcentral</code> is responsible for only one spanclass specification type.</p>
+<p>The data in <code>runtime.mcentral</code> will be hosted by two spanSet, partial for the free list and full for the used list.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">headTailIndex</span> <span class="kt">uint64</span>
+
+<span class="kd">type</span> <span class="nx">spanSet</span> <span class="kd">struct</span> <span class="p">{</span> 
+    <span class="c1">// lock
+</span><span class="c1"></span>    <span class="nx">spineLock</span> <span class="nx">mutex</span>
+    <span class="c1">// 数据块的指针
+</span><span class="c1"></span>    <span class="nx">spine</span>     <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// *[N]*spanSetBlock, accessed atomically
+</span><span class="c1"></span>    <span class="c1">// len
+</span><span class="c1"></span>    <span class="nx">spineLen</span>  <span class="kt">uintptr</span>        <span class="c1">// Spine array length, accessed atomically
+</span><span class="c1"></span>    <span class="c1">// cap
+</span><span class="c1"></span>    <span class="nx">spineCap</span>  <span class="kt">uintptr</span>        <span class="c1">// Spine array cap, accessed under lock
+</span><span class="c1"></span>
+    <span class="c1">// 头尾的指针，前32位是头指针，后32位是尾指针
+</span><span class="c1"></span>    <span class="nx">index</span> <span class="nx">headTailIndex</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The spanSet data structure has a head and tail pointer consisting of an index, which is fetched from the head when popping data and put in from the tail when pushing data. spine is equivalent to a pointer to a data block, and the exact position of each data block can be calculated by the position of the head and tail, which is represented by the spanSetBlock.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="nx">spanSetBlockEntries</span> <span class="p">=</span> <span class="mi">512</span>
+<span class="kd">type</span> <span class="nx">spanSetBlock</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="nx">spans</span> <span class="p">[</span><span class="nx">spanSetBlockEntries</span><span class="p">]</span><span class="o">*</span><span class="nx">mspan</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The spanSetBlock is a data block that holds the mspan and will contain a data pointer to the 512 mspan stored inside. So the overall data structure of mcentral is as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/25/2bd50ce2a63846e49bb0cd906f7601de.png" alt="sobyte"></p>
+<p><strong>runtime.mheap</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">mheap</span> <span class="kd">struct</span> <span class="p">{</span> 
+    <span class="nx">lock</span>      <span class="nx">mutex</span>
+    <span class="nx">pages</span>     <span class="nx">pageAlloc</span> <span class="c1">// page allocation data structure 
+</span><span class="c1"></span>
+    <span class="c1">//arenas数组集合,一个二维数组
+</span><span class="c1"></span>    <span class="nx">arenas</span> <span class="p">[</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="nx">arenaL1Bits</span><span class="p">]</span><span class="o">*</span><span class="p">[</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="nx">arenaL2Bits</span><span class="p">]</span><span class="o">*</span><span class="nx">heapArena</span>
+
+    <span class="c1">//各个规格的mcentral集合
+</span><span class="c1"></span>    <span class="nx">central</span> <span class="p">[</span><span class="nx">numSpanClasses</span><span class="p">]</span><span class="kd">struct</span> <span class="p">{</span>
+        <span class="nx">mcentral</span> <span class="nx">mcentral</span>
+        <span class="nx">pad</span>      <span class="p">[</span><span class="nx">cpu</span><span class="p">.</span><span class="nx">CacheLinePadSize</span> <span class="o">-</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">mcentral</span><span class="p">{})</span><span class="o">%</span><span class="nx">cpu</span><span class="p">.</span><span class="nx">CacheLinePadSize</span><span class="p">]</span><span class="kt">byte</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>For <code>runtime.mheap</code> attention needs to be paid to central and arenas. central is a collection of mcentral for each specification, which is created by traversing class_to_size during initialization; arenas is a two-dimensional array that manages memory space. arenas consists of multiple <code>runtime.heapArena</code>, each of which manages 64MB of memory space.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="p">(</span>
+    <span class="nx">pageSize</span>             <span class="p">=</span> <span class="mi">8192</span>                       <span class="c1">// 8KB
+</span><span class="c1"></span>    <span class="nx">heapArenaBytes</span>       <span class="p">=</span> <span class="mi">67108864</span>                   <span class="c1">// 64MB 
+</span><span class="c1"></span>    <span class="nx">pagesPerArena</span>        <span class="p">=</span> <span class="nx">heapArenaBytes</span> <span class="o">/</span> <span class="nx">pageSize</span>  <span class="c1">// 8192
+</span><span class="c1"></span><span class="p">)</span>
+
+<span class="kd">type</span> <span class="nx">heapArena</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">bitmap</span> <span class="p">[</span><span class="nx">heapArenaBitmapBytes</span><span class="p">]</span><span class="kt">byte</span>
+    <span class="nx">spans</span> <span class="p">[</span><span class="nx">pagesPerArena</span><span class="p">]</span><span class="o">*</span><span class="nx">mspan</span>
+    <span class="nx">pageInUse</span> <span class="p">[</span><span class="nx">pagesPerArena</span> <span class="o">/</span> <span class="mi">8</span><span class="p">]</span><span class="kt">uint8</span>
+    <span class="nx">pageMarks</span> <span class="p">[</span><span class="nx">pagesPerArena</span> <span class="o">/</span> <span class="mi">8</span><span class="p">]</span><span class="kt">uint8</span>
+    <span class="nx">zeroedBase</span> <span class="kt">uintptr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Note that the 64M heapArenaBytes above is only displayed on 64-bit machines other than windows, where it is 4MB. see the official notes below for details.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">    <span class="c1">//       Platform  Addr bits  Arena size  L1 entries   L2 entries
+</span><span class="c1"></span>    <span class="c1">// --------------  ---------  ----------  ----------  -----------
+</span><span class="c1"></span>    <span class="c1">//       */64-bit         48        64MB           1    4M (32MB)
+</span><span class="c1"></span>    <span class="c1">// windows/64-bit         48         4MB          64    1M  (8MB)
+</span><span class="c1"></span>    <span class="c1">//       */32-bit         32         4MB           1  1024  (4KB)
+</span><span class="c1"></span>    <span class="c1">//     */mips(le)         31         4MB           1   512  (2KB)
+</span></code></pre></td></tr></table>
+</div>
+</div><p>L1 entries and L2 entries represent the one-dimensional and two-dimensional values of arenas in <code>runtime.mheap</code> respectively.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/25/1015ab8667b34e9a9e6709bc78ed4de2.png" alt="sobyte"></p>
+<h3 id="allocating-memory-to-objects">Allocating memory to objects</h3>
+<p>We know from decompiling the source code that all objects on the heap are allocated memory by calling the <code>runtime.newobject</code> function, which calls <code>runtime.mallocgc</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">//创建一个新的对象
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">newobject</span><span class="p">(</span><span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+    <span class="c1">//size表示该对象的大小
+</span><span class="c1"></span>    <span class="k">return</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">typ</span><span class="p">.</span><span class="nx">size</span><span class="p">,</span> <span class="nx">typ</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span> 
+    <span class="o">...</span>  
+    <span class="nx">dataSize</span> <span class="o">:=</span> <span class="nx">size</span>
+    <span class="c1">// 获取mcache，用于处理微对象和小对象的分配
+</span><span class="c1"></span>    <span class="nx">c</span> <span class="o">:=</span> <span class="nf">gomcache</span><span class="p">()</span>
+    <span class="kd">var</span> <span class="nx">x</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+    <span class="c1">// 表示对象是否包含指针，true表示对象里没有指针
+</span><span class="c1"></span>    <span class="nx">noscan</span> <span class="o">:=</span> <span class="nx">typ</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">typ</span><span class="p">.</span><span class="nx">ptrdata</span> <span class="o">==</span> <span class="mi">0</span>
+    <span class="c1">// maxSmallSize=32768 32k
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">maxSmallSize</span> <span class="p">{</span>
+        <span class="c1">// maxTinySize= 16 bytes 
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">noscan</span> <span class="o">&amp;&amp;</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="nx">maxTinySize</span> <span class="p">{</span>
+            <span class="o">...</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="o">...</span>
+        <span class="p">}</span>
+        <span class="c1">// 大于 32 Kb 的内存分配,通过 mheap 分配
+</span><span class="c1"></span>    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="o">...</span>
+    <span class="p">}</span> 
+    <span class="o">...</span> 
+    <span class="k">return</span> <span class="nx">x</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As you can tell from mallocgc&rsquo;s code, mallocgc allocates memory in 3 classes according to the size of the object.</p>
+<ol>
+<li>small objects smaller than 16bytes.</li>
+<li>micro-objects between 16bytes and 32k.</li>
+<li>large objects larger than 32 Kbytes.</li>
+</ol>
+<h3 id="allocation-of-large-objects">Allocation of large objects</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span> 
+    <span class="o">...</span>  
+    <span class="kd">var</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span>
+    <span class="nx">shouldhelpgc</span> <span class="p">=</span> <span class="kc">true</span>
+    <span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">s</span> <span class="p">=</span> <span class="nf">largeAlloc</span><span class="p">(</span><span class="nx">size</span><span class="p">,</span> <span class="nx">needzero</span><span class="p">,</span> <span class="nx">noscan</span><span class="p">)</span>
+    <span class="p">})</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="p">=</span> <span class="mi">1</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span> <span class="p">=</span> <span class="mi">1</span>
+    <span class="nx">x</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">())</span>
+    <span class="nx">size</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span>
+    <span class="o">...</span> 
+    <span class="k">return</span> <span class="nx">x</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>From the above we can see that when allocating space larger than 32KB, a largeAlloc is used directly to allocate an mspan.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">largeAlloc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">noscan</span> <span class="kt">bool</span><span class="p">)</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+    <span class="c1">// _PageSize=8k,也就是表明对象太大，溢出
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">size</span><span class="o">+</span><span class="nx">_PageSize</span> <span class="p">&lt;</span> <span class="nx">size</span> <span class="p">{</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;out of memory&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// _PageShift==13，计算需要分配的页数
+</span><span class="c1"></span>    <span class="nx">npages</span> <span class="o">:=</span> <span class="nx">size</span> <span class="o">&gt;&gt;</span> <span class="nx">_PageShift</span>
+    <span class="c1">// 如果不是整数，多出来一些，需要加1
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">size</span><span class="o">&amp;</span><span class="nx">_PageMask</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nx">npages</span><span class="o">++</span>
+    <span class="p">}</span> 
+    <span class="o">...</span>
+    <span class="c1">// 从堆上分配
+</span><span class="c1"></span>    <span class="nx">s</span> <span class="o">:=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">,</span> <span class="nf">makeSpanClass</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="nx">noscan</span><span class="p">),</span> <span class="nx">needzero</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;out of memory&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+    <span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The allocation of memory is done on a per-page basis, with each page having a size of _PageSize (8K), and then it is necessary to determine how many pages need to be divided according to the size passed in, and finally call alloc to allocate from the heap.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">spanclass</span> <span class="nx">spanClass</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span>
+    <span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span> 
+        <span class="k">if</span> <span class="nx">h</span><span class="p">.</span><span class="nx">sweepdone</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+            <span class="c1">// 回收一部分内存
+</span><span class="c1"></span>            <span class="nx">h</span><span class="p">.</span><span class="nf">reclaim</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="c1">// 进行内存分配
+</span><span class="c1"></span>        <span class="nx">s</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">allocSpan</span><span class="p">(</span><span class="nx">npages</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="nx">spanclass</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_inuse</span><span class="p">)</span>
+    <span class="p">})</span> 
+    <span class="o">...</span>
+    <span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Continue with the implementation of allocSpan.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="nx">pageCachePages</span> <span class="p">=</span> <span class="mi">8</span> <span class="o">*</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">pageCache</span><span class="p">{}.</span><span class="nx">cache</span><span class="p">)</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">allocSpan</span><span class="p">(</span><span class="nx">npages</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">manual</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">spanclass</span> <span class="nx">spanClass</span><span class="p">,</span> <span class="nx">sysStat</span> <span class="o">*</span><span class="kt">uint64</span><span class="p">)</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// Function-global state.
+</span><span class="c1"></span>    <span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+    <span class="nx">base</span><span class="p">,</span> <span class="nx">scav</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+
+    <span class="nx">pp</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">p</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span>
+    <span class="c1">// 申请的内存比较小,尝试从pcache申请内存
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">pp</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">npages</span> <span class="p">&lt;</span> <span class="nx">pageCachePages</span><span class="o">/</span><span class="mi">4</span> <span class="p">{</span>
+        <span class="nx">c</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">pp</span><span class="p">.</span><span class="nx">pcache</span>
+
+        <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nf">empty</span><span class="p">()</span> <span class="p">{</span>
+            <span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+            <span class="o">*</span><span class="nx">c</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">pages</span><span class="p">.</span><span class="nf">allocToCache</span><span class="p">()</span>
+            <span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+        <span class="p">}</span> 
+
+        <span class="nx">base</span><span class="p">,</span> <span class="nx">scav</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">base</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+            <span class="nx">s</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">tryAllocMSpan</span><span class="p">()</span>
+
+            <span class="k">if</span> <span class="nx">s</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">gcBlackenEnabled</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">manual</span> <span class="o">||</span> <span class="nx">spanclass</span><span class="p">.</span><span class="nf">sizeclass</span><span class="p">()</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+                <span class="k">goto</span> <span class="nx">HaveSpan</span>
+            <span class="p">}</span> 
+        <span class="p">}</span>
+    <span class="p">}</span> 
+    <span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+    <span class="c1">// 内存比较大或者线程的页缓存中内存不足，从mheap的pages上获取内存
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">base</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span> 
+        <span class="nx">base</span><span class="p">,</span> <span class="nx">scav</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">pages</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span>
+        <span class="c1">// 内存也不够，那么进行扩容
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">base</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+            <span class="k">if</span> <span class="p">!</span><span class="nx">h</span><span class="p">.</span><span class="nf">grow</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span> <span class="p">{</span>
+                <span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+                <span class="k">return</span> <span class="kc">nil</span>
+            <span class="p">}</span>
+            <span class="c1">// 重新申请内存
+</span><span class="c1"></span>            <span class="nx">base</span><span class="p">,</span> <span class="nx">scav</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">pages</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">)</span>
+            <span class="c1">// 内存不足，抛出异常
+</span><span class="c1"></span>            <span class="k">if</span> <span class="nx">base</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;grew heap, but no adequate free space found&#34;</span><span class="p">)</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span> 
+        <span class="c1">// 分配一个mspan对象
+</span><span class="c1"></span>        <span class="nx">s</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">allocMSpanLocked</span><span class="p">()</span>
+    <span class="p">}</span>
+
+    <span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+
+<span class="nx">HaveSpan</span><span class="p">:</span> 
+    <span class="c1">// 设置参数初始化
+</span><span class="c1"></span>    <span class="nx">s</span><span class="p">.</span><span class="nf">init</span><span class="p">(</span><span class="nx">base</span><span class="p">,</span> <span class="nx">npages</span><span class="p">)</span> 
+    <span class="o">...</span>
+    <span class="c1">// 建立mheap与mspan之间的联系
+</span><span class="c1"></span>    <span class="nx">h</span><span class="p">.</span><span class="nf">setSpans</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">(),</span> <span class="nx">npages</span><span class="p">,</span> <span class="nx">s</span><span class="p">)</span>
+    <span class="o">...</span>
+    <span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Here another determination is made based on the size of the memory to be allocated.</p>
+<ul>
+<li>If the number of pages to be allocated is less than <code>pageCachePages/4=64/4=16</code> pages, then an attempt is made to request memory from the pcache.</li>
+<li>If the memory requested is large or the thread is running low on memory in the page cache, memory is allocated from the page heap via <code>runtime.pageAlloc.alloc</code>.</li>
+<li>if there is not enough memory on the page heap, then the grow method of mheap requests memory from the system and then calls pageAlloc&rsquo;s alloc to allocate memory.</li>
+</ul>
+<p>Here&rsquo;s a look at grow&rsquo;s request for memory from the operating system.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">grow</span><span class="p">(</span><span class="nx">npage</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+    <span class="c1">// We must grow the heap in whole palloc chunks.
+</span><span class="c1"></span>    <span class="nx">ask</span> <span class="o">:=</span> <span class="nf">alignUp</span><span class="p">(</span><span class="nx">npage</span><span class="p">,</span> <span class="nx">pallocChunkPages</span><span class="p">)</span> <span class="o">*</span> <span class="nx">pageSize</span>
+
+    <span class="nx">totalGrowth</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+    <span class="nx">nBase</span> <span class="o">:=</span> <span class="nf">alignUp</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nx">curArena</span><span class="p">.</span><span class="nx">base</span><span class="o">+</span><span class="nx">ask</span><span class="p">,</span> <span class="nx">physPageSize</span><span class="p">)</span>
+    <span class="c1">// 内存不够则调用sysAlloc申请内存
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">nBase</span> <span class="p">&gt;</span> <span class="nx">h</span><span class="p">.</span><span class="nx">curArena</span><span class="p">.</span><span class="nx">end</span> <span class="p">{</span> 
+        <span class="nx">av</span><span class="p">,</span> <span class="nx">asize</span> <span class="o">:=</span> <span class="nx">h</span><span class="p">.</span><span class="nf">sysAlloc</span><span class="p">(</span><span class="nx">ask</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">av</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nb">print</span><span class="p">(</span><span class="s">&#34;runtime: out of memory: cannot allocate &#34;</span><span class="p">,</span> <span class="nx">ask</span><span class="p">,</span> <span class="s">&#34;-byte block (&#34;</span><span class="p">,</span> <span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_sys</span><span class="p">,</span> <span class="s">&#34; in use)\n&#34;</span><span class="p">)</span>
+            <span class="k">return</span> <span class="kc">false</span>
+        <span class="p">}</span>
+        <span class="c1">// 重新设置curArena的值
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">av</span><span class="p">)</span> <span class="o">==</span> <span class="nx">h</span><span class="p">.</span><span class="nx">curArena</span><span class="p">.</span><span class="nx">end</span> <span class="p">{</span> 
+            <span class="nx">h</span><span class="p">.</span><span class="nx">curArena</span><span class="p">.</span><span class="nx">end</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">av</span><span class="p">)</span> <span class="o">+</span> <span class="nx">asize</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span> 
+            <span class="k">if</span> <span class="nx">size</span> <span class="o">:=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">curArena</span><span class="p">.</span><span class="nx">end</span> <span class="o">-</span> <span class="nx">h</span><span class="p">.</span><span class="nx">curArena</span><span class="p">.</span><span class="nx">base</span><span class="p">;</span> <span class="nx">size</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="nx">h</span><span class="p">.</span><span class="nx">pages</span><span class="p">.</span><span class="nf">grow</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nx">curArena</span><span class="p">.</span><span class="nx">base</span><span class="p">,</span> <span class="nx">size</span><span class="p">)</span>
+                <span class="nx">totalGrowth</span> <span class="o">+=</span> <span class="nx">size</span>
+            <span class="p">}</span> 
+            <span class="nx">h</span><span class="p">.</span><span class="nx">curArena</span><span class="p">.</span><span class="nx">base</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">av</span><span class="p">)</span>
+            <span class="nx">h</span><span class="p">.</span><span class="nx">curArena</span><span class="p">.</span><span class="nx">end</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">av</span><span class="p">)</span> <span class="o">+</span> <span class="nx">asize</span>
+        <span class="p">}</span> 
+        <span class="nx">nBase</span> <span class="p">=</span> <span class="nf">alignUp</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nx">curArena</span><span class="p">.</span><span class="nx">base</span><span class="o">+</span><span class="nx">ask</span><span class="p">,</span> <span class="nx">physPageSize</span><span class="p">)</span>
+    <span class="p">}</span> 
+    <span class="o">...</span>
+    <span class="k">return</span> <span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>grow will use the end value of curArena to determine if it needs to request memory from the system; if end is less than nBase then the <code>runtime.mheap.sysAlloc</code> method will be called to request more memory from the OS.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">h</span> <span class="o">*</span><span class="nx">mheap</span><span class="p">)</span> <span class="nf">sysAlloc</span><span class="p">(</span><span class="nx">n</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">(</span><span class="nx">v</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">size</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">n</span> <span class="p">=</span> <span class="nf">alignUp</span><span class="p">(</span><span class="nx">n</span><span class="p">,</span> <span class="nx">heapArenaBytes</span><span class="p">)</span>
+
+    <span class="c1">// 在预先保留的内存中申请一块可以使用的空间
+</span><span class="c1"></span>    <span class="nx">v</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">arena</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">n</span><span class="p">,</span> <span class="nx">heapArenaBytes</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_sys</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">v</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">size</span> <span class="p">=</span> <span class="nx">n</span>
+        <span class="k">goto</span> <span class="nx">mapped</span>
+    <span class="p">}</span> 
+    <span class="c1">// 根据页堆的arenaHints在目标地址上尝试扩容
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">h</span><span class="p">.</span><span class="nx">arenaHints</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">hint</span> <span class="o">:=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">arenaHints</span>
+        <span class="nx">p</span> <span class="o">:=</span> <span class="nx">hint</span><span class="p">.</span><span class="nx">addr</span>
+        <span class="k">if</span> <span class="nx">hint</span><span class="p">.</span><span class="nx">down</span> <span class="p">{</span>
+            <span class="nx">p</span> <span class="o">-=</span> <span class="nx">n</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="nx">p</span><span class="o">+</span><span class="nx">n</span> <span class="p">&lt;</span> <span class="nx">p</span> <span class="p">{</span>
+            <span class="c1">// We can&#39;t use this, so don&#39;t ask.
+</span><span class="c1"></span>            <span class="nx">v</span> <span class="p">=</span> <span class="kc">nil</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nf">arenaIndex</span><span class="p">(</span><span class="nx">p</span><span class="o">+</span><span class="nx">n</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="nx">arenaBits</span> <span class="p">{</span>
+            <span class="c1">// Outside addressable heap. Can&#39;t use.
+</span><span class="c1"></span>            <span class="nx">v</span> <span class="p">=</span> <span class="kc">nil</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="c1">// 从操作系统中申请内存
+</span><span class="c1"></span>            <span class="nx">v</span> <span class="p">=</span> <span class="nf">sysReserve</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">p</span><span class="p">),</span> <span class="nx">n</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span> <span class="p">{</span>
+            <span class="c1">// Success. Update the hint.
+</span><span class="c1"></span>            <span class="k">if</span> <span class="p">!</span><span class="nx">hint</span><span class="p">.</span><span class="nx">down</span> <span class="p">{</span>
+                <span class="nx">p</span> <span class="o">+=</span> <span class="nx">n</span>
+            <span class="p">}</span>
+            <span class="nx">hint</span><span class="p">.</span><span class="nx">addr</span> <span class="p">=</span> <span class="nx">p</span>
+            <span class="nx">size</span> <span class="p">=</span> <span class="nx">n</span>
+            <span class="k">break</span>
+        <span class="p">}</span> 
+        <span class="k">if</span> <span class="nx">v</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nf">sysFree</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">n</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="nx">h</span><span class="p">.</span><span class="nx">arenaHints</span> <span class="p">=</span> <span class="nx">hint</span><span class="p">.</span><span class="nx">next</span>
+        <span class="nx">h</span><span class="p">.</span><span class="nx">arenaHintAlloc</span><span class="p">.</span><span class="nf">free</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">hint</span><span class="p">))</span>
+    <span class="p">}</span>  
+    <span class="o">...</span>
+    <span class="c1">// 将内存由Reserved转为Prepared
+</span><span class="c1"></span>    <span class="nf">sysMap</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">size</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_sys</span><span class="p">)</span>
+
+<span class="nx">mapped</span><span class="p">:</span>
+    <span class="c1">// Create arena metadata.
+</span><span class="c1"></span>    <span class="c1">// 初始化一个heapArena来管理刚刚申请的内存
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">ri</span> <span class="o">:=</span> <span class="nf">arenaIndex</span><span class="p">(</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">v</span><span class="p">));</span> <span class="nx">ri</span> <span class="o">&lt;=</span> <span class="nf">arenaIndex</span><span class="p">(</span><span class="nb">uintptr</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span><span class="o">+</span><span class="nx">size</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span> <span class="nx">ri</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">l2</span> <span class="o">:=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">arenas</span><span class="p">[</span><span class="nx">ri</span><span class="p">.</span><span class="nf">l1</span><span class="p">()]</span>
+        <span class="k">if</span> <span class="nx">l2</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span> 
+            <span class="nx">l2</span> <span class="p">=</span> <span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="nx">arenaL2Bits</span><span class="p">]</span><span class="o">*</span><span class="nx">heapArena</span><span class="p">)(</span><span class="nf">persistentalloc</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="o">*</span><span class="nx">l2</span><span class="p">),</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span><span class="p">,</span> <span class="kc">nil</span><span class="p">))</span>
+            <span class="k">if</span> <span class="nx">l2</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;out of memory allocating heap arena map&#34;</span><span class="p">)</span>
+            <span class="p">}</span>
+            <span class="nx">atomic</span><span class="p">.</span><span class="nf">StorepNoWB</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">h</span><span class="p">.</span><span class="nx">arenas</span><span class="p">[</span><span class="nx">ri</span><span class="p">.</span><span class="nf">l1</span><span class="p">()]),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">l2</span><span class="p">))</span>
+        <span class="p">}</span>  
+        <span class="kd">var</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">heapArena</span>
+        <span class="nx">r</span> <span class="p">=</span> <span class="p">(</span><span class="o">*</span><span class="nx">heapArena</span><span class="p">)(</span><span class="nx">h</span><span class="p">.</span><span class="nx">heapArenaAlloc</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="o">*</span><span class="nx">r</span><span class="p">),</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">gc_sys</span><span class="p">))</span>
+        <span class="o">...</span>  
+        <span class="c1">// 将创建heapArena放入到arenas列表中
+</span><span class="c1"></span>        <span class="nx">h</span><span class="p">.</span><span class="nx">allArenas</span> <span class="p">=</span> <span class="nx">h</span><span class="p">.</span><span class="nx">allArenas</span><span class="p">[:</span><span class="nb">len</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nx">allArenas</span><span class="p">)</span><span class="o">+</span><span class="mi">1</span><span class="p">]</span>
+        <span class="nx">h</span><span class="p">.</span><span class="nx">allArenas</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="nx">h</span><span class="p">.</span><span class="nx">allArenas</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">]</span> <span class="p">=</span> <span class="nx">ri</span>
+        <span class="nx">atomic</span><span class="p">.</span><span class="nf">StorepNoWB</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">l2</span><span class="p">[</span><span class="nx">ri</span><span class="p">.</span><span class="nf">l2</span><span class="p">()]),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">r</span><span class="p">))</span>
+    <span class="p">}</span>
+    <span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The sysAlloc method calls <code>runtime.linearAlloc.alloc</code> to request a piece of memory from the pre-reserved memory; if not, the sysReserve method is called to request memory from the operating system; finally, a heapArena is initialised to manage the memory just requested, and the created The heapArena is then placed in the list of arenas.</p>
+<p>This concludes the allocation process for large objects.</p>
+<h3 id="allocation-of-small-objects">Allocation of small objects</h3>
+<p>For objects between 16bytes and 32K the allocation is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="nx">dataSize</span> <span class="o">:=</span> <span class="nx">size</span>
+    <span class="c1">// 获取mcache，用于处理微对象和小对象的分配
+</span><span class="c1"></span>    <span class="nx">c</span> <span class="o">:=</span> <span class="nf">gomcache</span><span class="p">()</span>
+    <span class="kd">var</span> <span class="nx">x</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+    <span class="c1">// 表示对象是否包含指针，true表示对象里没有指针
+</span><span class="c1"></span>    <span class="nx">noscan</span> <span class="o">:=</span> <span class="nx">typ</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">typ</span><span class="p">.</span><span class="nx">ptrdata</span> <span class="o">==</span> <span class="mi">0</span>
+    <span class="c1">// maxSmallSize=32768 32k
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">maxSmallSize</span> <span class="p">{</span>
+        <span class="c1">// maxTinySize= 16 bytes 
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">noscan</span> <span class="o">&amp;&amp;</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="nx">maxTinySize</span> <span class="p">{</span> 
+            <span class="o">...</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="kd">var</span> <span class="nx">sizeclass</span> <span class="kt">uint8</span>
+            <span class="c1">//计算 sizeclass
+</span><span class="c1"></span>            <span class="c1">// smallSizeMax=1024
+</span><span class="c1"></span>            <span class="k">if</span> <span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">smallSizeMax</span><span class="o">-</span><span class="mi">8</span> <span class="p">{</span>
+                <span class="c1">// smallSizeDiv=8
+</span><span class="c1"></span>                <span class="nx">sizeclass</span> <span class="p">=</span> <span class="nx">size_to_class8</span><span class="p">[(</span><span class="nx">size</span><span class="o">+</span><span class="nx">smallSizeDiv</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="nx">smallSizeDiv</span><span class="p">]</span>
+            <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+                <span class="c1">// largeSizeDiv=128,smallSizeMax = 1024
+</span><span class="c1"></span>                <span class="nx">sizeclass</span> <span class="p">=</span> <span class="nx">size_to_class128</span><span class="p">[(</span><span class="nx">size</span><span class="o">-</span><span class="nx">smallSizeMax</span><span class="o">+</span><span class="nx">largeSizeDiv</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">/</span><span class="nx">largeSizeDiv</span><span class="p">]</span>
+            <span class="p">}</span>
+            <span class="nx">size</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">class_to_size</span><span class="p">[</span><span class="nx">sizeclass</span><span class="p">])</span>
+            <span class="nx">spc</span> <span class="o">:=</span> <span class="nf">makeSpanClass</span><span class="p">(</span><span class="nx">sizeclass</span><span class="p">,</span> <span class="nx">noscan</span><span class="p">)</span>
+            <span class="nx">span</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">spc</span><span class="p">]</span>
+            <span class="c1">//从对应的 span 里面分配一个 object 
+</span><span class="c1"></span>            <span class="nx">v</span> <span class="o">:=</span> <span class="nf">nextFreeFast</span><span class="p">(</span><span class="nx">span</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nx">v</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="c1">// mcache不够用了，则从 mcentral 申请内存到 mcache
+</span><span class="c1"></span>                <span class="nx">v</span><span class="p">,</span> <span class="nx">span</span><span class="p">,</span> <span class="nx">shouldhelpgc</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">nextFree</span><span class="p">(</span><span class="nx">spc</span><span class="p">)</span>
+            <span class="p">}</span>
+            <span class="nx">x</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nx">needzero</span> <span class="o">&amp;&amp;</span> <span class="nx">span</span><span class="p">.</span><span class="nx">needzero</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="nf">memclrNoHeapPointers</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">v</span><span class="p">),</span> <span class="nx">size</span><span class="p">)</span>
+            <span class="p">}</span>
+        <span class="p">}</span> 
+        <span class="o">...</span>
+    <span class="p">}</span>  
+    <span class="o">...</span>
+    <span class="k">return</span> <span class="nx">x</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The sizeclass size is first calculated by pre-defining two arrays: size_to_class8 and size_to_class128. less than 1024 - 8 = 1016 (smallSizeMax=1024), use size_to_class8, otherwise use the array size_to_class128. class8, otherwise the array size_to_class128 is used.</p>
+<p>For example, if you want to allocate 20 byte of memory, then sizeclass = size_to_calss8[(20+7)/8] = size_to_class8[3] = 3. Then the corresponding value of 32 is obtained from class_to_size[3], indicating that 32bytes of memory value should be allocated.</p>
+<p>Then it will get a pointer to span from the alloc array, try to get memory from the mcache by calling nextFreeFast, and if the mcache is running low, try to call nextFree to request memory from mcentral to the mcache.</p>
+<p>See nextFreeFast below.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">nextFreeFast</span><span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span><span class="p">)</span> <span class="nx">gclinkptr</span> <span class="p">{</span>
+    <span class="c1">// 获取allocCache二进制中0的个数
+</span><span class="c1"></span>    <span class="nx">theBit</span> <span class="o">:=</span> <span class="nx">sys</span><span class="p">.</span><span class="nf">Ctz64</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">allocCache</span><span class="p">)</span> <span class="c1">// Is there a free object in the allocCache?
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">theBit</span> <span class="p">&lt;</span> <span class="mi">64</span> <span class="p">{</span>
+        <span class="nx">result</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="o">+</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">theBit</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">result</span> <span class="p">&lt;</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
+            <span class="nx">freeidx</span> <span class="o">:=</span> <span class="nx">result</span> <span class="o">+</span> <span class="mi">1</span>
+            <span class="k">if</span> <span class="nx">freeidx</span><span class="o">%</span><span class="mi">64</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">freeidx</span> <span class="o">!=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="mi">0</span>
+            <span class="p">}</span>
+            <span class="nx">s</span><span class="p">.</span><span class="nx">allocCache</span> <span class="o">&gt;&gt;=</span> <span class="nb">uint</span><span class="p">(</span><span class="nx">theBit</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+            <span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="p">=</span> <span class="nx">freeidx</span>
+            <span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="o">++</span>
+            <span class="k">return</span> <span class="nf">gclinkptr</span><span class="p">(</span><span class="nx">result</span><span class="o">*</span><span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span> <span class="o">+</span> <span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">())</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="mi">0</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>allocCache is initialised to <code>^uint64(0)</code> during initialisation, converted to binary, if it is 0 then it is occupied, the allocCache allows you to quickly locate the space to be allocated.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/25/2900e206a4d6421ba6c8b0cdb1e3f193.png" alt="sobyte"></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcache</span><span class="p">)</span> <span class="nf">nextFree</span><span class="p">(</span><span class="nx">spc</span> <span class="nx">spanClass</span><span class="p">)</span> <span class="p">(</span><span class="nx">v</span> <span class="nx">gclinkptr</span><span class="p">,</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span><span class="p">,</span> <span class="nx">shouldhelpgc</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">spc</span><span class="p">]</span>
+    <span class="nx">shouldhelpgc</span> <span class="p">=</span> <span class="kc">false</span>
+    <span class="c1">// 当前span中找到合适的index索引
+</span><span class="c1"></span>    <span class="nx">freeIndex</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">nextFreeIndex</span><span class="p">()</span>
+    <span class="c1">// 当前span已经满了
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">freeIndex</span> <span class="o">==</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span> 
+        <span class="k">if</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="p">)</span> <span class="o">!=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
+            <span class="nb">println</span><span class="p">(</span><span class="s">&#34;runtime: s.allocCount=&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="p">,</span> <span class="s">&#34;s.nelems=&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span><span class="p">)</span>
+            <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;s.allocCount != s.nelems &amp;&amp; freeIndex == s.nelems&#34;</span><span class="p">)</span>
+        <span class="p">}</span>
+        <span class="c1">// 从 mcentral 中获取可用的span，并替换掉当前 mcache里面的span
+</span><span class="c1"></span>        <span class="nx">c</span><span class="p">.</span><span class="nf">refill</span><span class="p">(</span><span class="nx">spc</span><span class="p">)</span>
+        <span class="nx">shouldhelpgc</span> <span class="p">=</span> <span class="kc">true</span>
+        <span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">spc</span><span class="p">]</span>
+        <span class="c1">// 再次到新的span里面查找合适的index
+</span><span class="c1"></span>        <span class="nx">freeIndex</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">nextFreeIndex</span><span class="p">()</span>
+    <span class="p">}</span>
+
+    <span class="k">if</span> <span class="nx">freeIndex</span> <span class="o">&gt;=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;freeIndex is not valid&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// 计算出来内存地址，并更新span的属性
+</span><span class="c1"></span>    <span class="nx">v</span> <span class="p">=</span> <span class="nf">gclinkptr</span><span class="p">(</span><span class="nx">freeIndex</span><span class="o">*</span><span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span> <span class="o">+</span> <span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">())</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="o">++</span>
+    <span class="k">if</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="p">)</span> <span class="p">&gt;</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
+        <span class="nb">println</span><span class="p">(</span><span class="s">&#34;s.allocCount=&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="p">,</span> <span class="s">&#34;s.nelems=&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span><span class="p">)</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;s.allocCount &gt; s.nelems&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>NextFree will determine if the current span is full, and if so, call the refill method to retrieve the available span from the mcentral and replace the span in the current mcache.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcache</span><span class="p">)</span> <span class="nf">refill</span><span class="p">(</span><span class="nx">spc</span> <span class="nx">spanClass</span><span class="p">)</span> <span class="p">{</span> 
+    <span class="nx">s</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">spc</span><span class="p">]</span>
+    <span class="o">...</span>
+    <span class="nx">s</span> <span class="p">=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nx">central</span><span class="p">[</span><span class="nx">spc</span><span class="p">].</span><span class="nx">mcentral</span><span class="p">.</span><span class="nf">cacheSpan</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;out of memory&#34;</span><span class="p">)</span>
+    <span class="p">}</span> 
+    <span class="o">...</span>
+    <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">spc</span><span class="p">]</span> <span class="p">=</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Refill gets the corresponding span according to the specified sizeclass and uses it as the span corresponding to the new sizeclass of the mcache.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcentral</span><span class="p">)</span> <span class="nf">cacheSpan</span><span class="p">()</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="nx">sg</span> <span class="o">:=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nx">sweepgen</span>
+    <span class="nx">spanBudget</span> <span class="o">:=</span> <span class="mi">100</span>
+
+    <span class="kd">var</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span>
+
+    <span class="c1">// 从清理过的、包含空闲空间的spanSet结构中查找可以使用的内存管理单元
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">partialSwept</span><span class="p">(</span><span class="nx">sg</span><span class="p">).</span><span class="nf">pop</span><span class="p">();</span> <span class="nx">s</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">goto</span> <span class="nx">havespan</span>
+    <span class="p">}</span> 
+    <span class="k">for</span> <span class="p">;</span> <span class="nx">spanBudget</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">spanBudget</span><span class="o">--</span> <span class="p">{</span>
+        <span class="c1">// 从未被清理过的、有空闲对象的spanSet查找可用的span
+</span><span class="c1"></span>        <span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">partialUnswept</span><span class="p">(</span><span class="nx">sg</span><span class="p">).</span><span class="nf">pop</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="k">break</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">)</span> <span class="o">==</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+            <span class="c1">// 找到要回收的span，触发sweep进行清理
+</span><span class="c1"></span>            <span class="nx">s</span><span class="p">.</span><span class="nf">sweep</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+            <span class="k">goto</span> <span class="nx">havespan</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="k">for</span> <span class="p">;</span> <span class="nx">spanBudget</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">spanBudget</span><span class="o">--</span> <span class="p">{</span>
+        <span class="c1">// 获取未被清理的、不包含空闲空间的spanSet查找可用的span
+</span><span class="c1"></span>        <span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">fullUnswept</span><span class="p">(</span><span class="nx">sg</span><span class="p">).</span><span class="nf">pop</span><span class="p">()</span>
+        <span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="k">break</span>
+        <span class="p">}</span>
+        <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">)</span> <span class="o">==</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+            <span class="nx">s</span><span class="p">.</span><span class="nf">sweep</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+            <span class="nx">freeIndex</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">nextFreeIndex</span><span class="p">()</span>
+            <span class="k">if</span> <span class="nx">freeIndex</span> <span class="o">!=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
+                <span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="p">=</span> <span class="nx">freeIndex</span>
+                <span class="k">goto</span> <span class="nx">havespan</span>
+            <span class="p">}</span>
+            <span class="nx">c</span><span class="p">.</span><span class="nf">fullSwept</span><span class="p">(</span><span class="nx">sg</span><span class="p">).</span><span class="nf">push</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="c1">// 从堆中申请新的内存管理单元
+</span><span class="c1"></span>    <span class="nx">s</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">grow</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="kc">nil</span>
+    <span class="p">}</span> 
+<span class="nx">havespan</span><span class="p">:</span>
+    <span class="nx">n</span> <span class="o">:=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span><span class="p">)</span> <span class="o">-</span> <span class="nb">int</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">n</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="o">==</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="o">||</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="p">)</span> <span class="o">==</span> <span class="nx">s</span><span class="p">.</span><span class="nx">nelems</span> <span class="p">{</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;span has no free objects&#34;</span><span class="p">)</span>
+    <span class="p">}</span> 
+    <span class="c1">//更新 nmalloc
+</span><span class="c1"></span>    <span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">nmalloc</span><span class="p">,</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">n</span><span class="p">))</span>
+    <span class="nx">usedBytes</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">allocCount</span><span class="p">)</span> <span class="o">*</span> <span class="nx">s</span><span class="p">.</span><span class="nx">elemsize</span>
+    <span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_live</span><span class="p">,</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">spanBytes</span><span class="p">)</span><span class="o">-</span><span class="nb">int64</span><span class="p">(</span><span class="nx">usedBytes</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nx">trace</span><span class="p">.</span><span class="nx">enabled</span> <span class="p">{</span>
+        <span class="c1">// heap_live changed.
+</span><span class="c1"></span>        <span class="nf">traceHeapAlloc</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">gcBlackenEnabled</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="c1">// heap_live changed.
+</span><span class="c1"></span>        <span class="nx">gcController</span><span class="p">.</span><span class="nf">revise</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="nx">freeByteBase</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="o">&amp;^</span> <span class="p">(</span><span class="mi">64</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="nx">whichByte</span> <span class="o">:=</span> <span class="nx">freeByteBase</span> <span class="o">/</span> <span class="mi">8</span> 
+    <span class="c1">// 更新allocCache
+</span><span class="c1"></span>    <span class="nx">s</span><span class="p">.</span><span class="nf">refillAllocCache</span><span class="p">(</span><span class="nx">whichByte</span><span class="p">)</span> 
+    <span class="c1">// s.allocCache.
+</span><span class="c1"></span>    <span class="nx">s</span><span class="p">.</span><span class="nx">allocCache</span> <span class="o">&gt;&gt;=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">freeindex</span> <span class="o">%</span> <span class="mi">64</span> 
+    <span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>cacheSpan mainly looks for available spans from mcentral&rsquo;s spanset, if not found then the grow method is called to request a new memory management unit from the heap.</p>
+<p>Once obtained, the fields nmalloc, allocCache, etc. are updated.</p>
+<p><code>runtime.mcentral.grow</code> triggers an expand operation to request new memory from the heap.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">mcentral</span><span class="p">)</span> <span class="nf">grow</span><span class="p">()</span> <span class="o">*</span><span class="nx">mspan</span> <span class="p">{</span>
+    <span class="c1">// 获取待分配的页数
+</span><span class="c1"></span>    <span class="nx">npages</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">class_to_allocnpages</span><span class="p">[</span><span class="nx">c</span><span class="p">.</span><span class="nx">spanclass</span><span class="p">.</span><span class="nf">sizeclass</span><span class="p">()])</span>
+    <span class="nx">size</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">class_to_size</span><span class="p">[</span><span class="nx">c</span><span class="p">.</span><span class="nx">spanclass</span><span class="p">.</span><span class="nf">sizeclass</span><span class="p">()])</span>
+    <span class="c1">// 获取新的span
+</span><span class="c1"></span>    <span class="nx">s</span> <span class="o">:=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nf">alloc</span><span class="p">(</span><span class="nx">npages</span><span class="p">,</span> <span class="nx">c</span><span class="p">.</span><span class="nx">spanclass</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="kc">nil</span>
+    <span class="p">}</span>
+
+    <span class="c1">// Use division by multiplication and shifts to quickly compute:
+</span><span class="c1"></span>    <span class="c1">// n := (npages &lt;&lt; _PageShift) / size
+</span><span class="c1"></span>    <span class="nx">n</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">npages</span> <span class="o">&lt;&lt;</span> <span class="nx">_PageShift</span><span class="p">)</span> <span class="o">&gt;&gt;</span> <span class="nx">s</span><span class="p">.</span><span class="nx">divShift</span> <span class="o">*</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">divMul</span><span class="p">)</span> <span class="o">&gt;&gt;</span> <span class="nx">s</span><span class="p">.</span><span class="nx">divShift2</span>
+    <span class="c1">// 初始化limit 
+</span><span class="c1"></span>    <span class="nx">s</span><span class="p">.</span><span class="nx">limit</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()</span> <span class="o">+</span> <span class="nx">size</span><span class="o">*</span><span class="nx">n</span>
+    <span class="nf">heapBitsForAddr</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">base</span><span class="p">()).</span><span class="nf">initSpan</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">s</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The method <code>runtime.mheap.alloc</code> will be called inside grow to get the span, this method has already been covered above, if you don&rsquo;t remember it you can look up the article.</p>
+<p>This is the end of the allocation of micro-objects.</p>
+<h3 id="micro-object-allocation">Micro-object allocation</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="nx">dataSize</span> <span class="o">:=</span> <span class="nx">size</span>
+    <span class="c1">// 获取mcache，用于处理微对象和小对象的分配
+</span><span class="c1"></span>    <span class="nx">c</span> <span class="o">:=</span> <span class="nf">gomcache</span><span class="p">()</span>
+    <span class="kd">var</span> <span class="nx">x</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+    <span class="c1">// 表示对象是否包含指针，true表示对象里没有指针
+</span><span class="c1"></span>    <span class="nx">noscan</span> <span class="o">:=</span> <span class="nx">typ</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">typ</span><span class="p">.</span><span class="nx">ptrdata</span> <span class="o">==</span> <span class="mi">0</span>
+    <span class="c1">// maxSmallSize=32768 32k
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">maxSmallSize</span> <span class="p">{</span>
+        <span class="c1">// maxTinySize= 16 bytes 
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">noscan</span> <span class="o">&amp;&amp;</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="nx">maxTinySize</span> <span class="p">{</span> 
+            <span class="nx">off</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">tinyoffset</span> 
+            <span class="c1">// 指针内存对齐
+</span><span class="c1"></span>            <span class="k">if</span> <span class="nx">size</span><span class="o">&amp;</span><span class="mi">7</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="nx">off</span> <span class="p">=</span> <span class="nf">alignUp</span><span class="p">(</span><span class="nx">off</span><span class="p">,</span> <span class="mi">8</span><span class="p">)</span>
+            <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">size</span><span class="o">&amp;</span><span class="mi">3</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="nx">off</span> <span class="p">=</span> <span class="nf">alignUp</span><span class="p">(</span><span class="nx">off</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+            <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">size</span><span class="o">&amp;</span><span class="mi">1</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="nx">off</span> <span class="p">=</span> <span class="nf">alignUp</span><span class="p">(</span><span class="nx">off</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+            <span class="p">}</span>
+            <span class="c1">// 判断指针大小相加是否超过16
+</span><span class="c1"></span>            <span class="k">if</span> <span class="nx">off</span><span class="o">+</span><span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">maxTinySize</span> <span class="o">&amp;&amp;</span> <span class="nx">c</span><span class="p">.</span><span class="nx">tiny</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="c1">// 获取tiny空闲内存的起始位置
+</span><span class="c1"></span>                <span class="nx">x</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">tiny</span> <span class="o">+</span> <span class="nx">off</span><span class="p">)</span>
+                <span class="c1">// 重设偏移量
+</span><span class="c1"></span>                <span class="nx">c</span><span class="p">.</span><span class="nx">tinyoffset</span> <span class="p">=</span> <span class="nx">off</span> <span class="o">+</span> <span class="nx">size</span>
+                <span class="c1">// 统计数量
+</span><span class="c1"></span>                <span class="nx">c</span><span class="p">.</span><span class="nx">local_tinyallocs</span><span class="o">++</span>
+                <span class="nx">mp</span><span class="p">.</span><span class="nx">mallocing</span> <span class="p">=</span> <span class="mi">0</span>
+                <span class="nf">releasem</span><span class="p">(</span><span class="nx">mp</span><span class="p">)</span>
+                <span class="k">return</span> <span class="nx">x</span>
+            <span class="p">}</span>  
+            <span class="c1">// 重新分配一个内存块
+</span><span class="c1"></span>            <span class="nx">span</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">alloc</span><span class="p">[</span><span class="nx">tinySpanClass</span><span class="p">]</span>
+            <span class="nx">v</span> <span class="o">:=</span> <span class="nf">nextFreeFast</span><span class="p">(</span><span class="nx">span</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nx">v</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="nx">v</span><span class="p">,</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">shouldhelpgc</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">nextFree</span><span class="p">(</span><span class="nx">tinySpanClass</span><span class="p">)</span>
+            <span class="p">}</span>
+            <span class="nx">x</span> <span class="p">=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span>
+            <span class="c1">//将申请的内存块全置为 0
+</span><span class="c1"></span>            <span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="kt">uint64</span><span class="p">)(</span><span class="nx">x</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span> <span class="p">=</span> <span class="mi">0</span>
+            <span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span><span class="kt">uint64</span><span class="p">)(</span><span class="nx">x</span><span class="p">)[</span><span class="mi">1</span><span class="p">]</span> <span class="p">=</span> <span class="mi">0</span> 
+            <span class="c1">// 如果申请的内存块用不完，则将剩下的给 tiny，用 tinyoffset 记录分配了多少。
+</span><span class="c1"></span>            <span class="k">if</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="nx">c</span><span class="p">.</span><span class="nx">tinyoffset</span> <span class="o">||</span> <span class="nx">c</span><span class="p">.</span><span class="nx">tiny</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="nx">c</span><span class="p">.</span><span class="nx">tiny</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">x</span><span class="p">)</span>
+                <span class="nx">c</span><span class="p">.</span><span class="nx">tinyoffset</span> <span class="p">=</span> <span class="nx">size</span>
+            <span class="p">}</span>
+            <span class="nx">size</span> <span class="p">=</span> <span class="nx">maxTinySize</span>
+        <span class="p">}</span>  
+        <span class="o">...</span>
+    <span class="p">}</span>  
+    <span class="o">...</span>
+    <span class="k">return</span> <span class="nx">x</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If the object is less than 16bytes in size and does not contain a pointer, then it can be considered a micro-object.</p>
+<p>When allocating a micro-object, a judgement is made as to whether the memory block pointed to by tiny is sufficient, and if the space left in tiny exceeds the size, then memory is allocated directly on tiny and returned.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/25/3c3c273aff4d43fdb82725ab6d8cd8c7.png" alt="sobyte"></p>
+<p>Here again I will use my diagram above to explain. First it will go to the mcache array and find the corresponding span. The properties of the span corresponding to the tinySpanClass are as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">startAddr: 824635752448,
+npages: 1,
+manualFreeList: 0,
+freeindex: 128,
+nelems: 512,
+elemsize: 16,
+limit: 824635760640,
+allocCount: 128,
+spanclass: tinySpanClass <span class="o">(</span>5<span class="o">)</span>,
+...
+</code></pre></td></tr></table>
+</div>
+</div><p>The mspan corresponding to tinySpanClass has only one page, which can contain 512 elements (nelems); the size of each object in the page is 16bytes (elemsize), and 128 objects have been allocated so far (allocCount), but of course I can&rsquo;t draw so many pages above, so I symbolically draw them.</p>
+<p>The diagram above also shows that one of the objects in the page has been used by 12bytes, leaving 4bytes unused, so the values of tinyoffset and tiny will be updated.</p>
+<h2 id="summary">Summary</h2>
+<p>This article started by describing how to debug the go assembly, and then went into three levels to explain how memory allocation works in go. For objects less than 32k, go can get the corresponding memory directly from mcache in a lock-free way. If there is not enough mcache memory, it will first go to mcentral to get memory, and then finally to mheap to request memory. For large objects (&gt;32k) you can apply directly to mheap, but for large objects there are certain optimisations, when a large object requires less than 16 pages to be allocated it will be allocated directly from pageCache, otherwise it will be fetched from the heap pages.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/java-atomic/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Atomic atomic classes and their underlying principles CAS</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/go-netpoller/">
+            <span class="next-text nav-default">Explaining the Golang I/O multiplexing netpoller model</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

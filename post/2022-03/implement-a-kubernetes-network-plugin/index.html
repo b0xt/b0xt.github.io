@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How to Implement a Kubernetes Network Plugin - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="There are more and more networking solutions for containers, and with each new solution, it is obviously unreasonable to adapt the networking solution to different container runtimes, and CNI is designed to solve this problem.
+While maintaining a &amp;ldquo;home-level Kubernetes cluster&amp;rdquo; at home during holidays, I got the idea to write a network plugin, and developed Village Net based on cni/plugin.
+Taking this network plugin as an example, this article focuses on how to implement a CNI plugin." /><meta name="keywords" content="kubernetes, Network Plugin, cni" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/implement-a-kubernetes-network-plugin/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="How to Implement a Kubernetes Network Plugin" />
+<meta property="og:description" content="There are more and more networking solutions for containers, and with each new solution, it is obviously unreasonable to adapt the networking solution to different container runtimes, and CNI is designed to solve this problem.
+While maintaining a &ldquo;home-level Kubernetes cluster&rdquo; at home during holidays, I got the idea to write a network plugin, and developed Village Net based on cni/plugin.
+Taking this network plugin as an example, this article focuses on how to implement a CNI plugin." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/implement-a-kubernetes-network-plugin/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-10T09:07:00+08:00" />
+<meta property="article:modified_time" content="2022-03-10T09:07:00+08:00" />
+
+<meta itemprop="name" content="How to Implement a Kubernetes Network Plugin">
+<meta itemprop="description" content="There are more and more networking solutions for containers, and with each new solution, it is obviously unreasonable to adapt the networking solution to different container runtimes, and CNI is designed to solve this problem.
+While maintaining a &ldquo;home-level Kubernetes cluster&rdquo; at home during holidays, I got the idea to write a network plugin, and developed Village Net based on cni/plugin.
+Taking this network plugin as an example, this article focuses on how to implement a CNI plugin."><meta itemprop="datePublished" content="2022-03-10T09:07:00+08:00" />
+<meta itemprop="dateModified" content="2022-03-10T09:07:00+08:00" />
+<meta itemprop="wordCount" content="2722">
+<meta itemprop="keywords" content="kubernetes," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How to Implement a Kubernetes Network Plugin"/>
+<meta name="twitter:description" content="There are more and more networking solutions for containers, and with each new solution, it is obviously unreasonable to adapt the networking solution to different container runtimes, and CNI is designed to solve this problem.
+While maintaining a &ldquo;home-level Kubernetes cluster&rdquo; at home during holidays, I got the idea to write a network plugin, and developed Village Net based on cni/plugin.
+Taking this network plugin as an example, this article focuses on how to implement a CNI plugin."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How to Implement a Kubernetes Network Plugin</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-10 09:07:00 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2722 words </span>
+          <span class="more-meta"> 13 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#how-cni-works">How CNI works</a>
+          <ul>
+            <li><a href="#what-is-cni-plugin">What is CNI Plugin</a></li>
+            <li><a href="#what-is-cni">What is CNI</a></li>
+            <li><a href="#how-kubelet-uses-cni">How kubelet uses CNI</a></li>
+          </ul>
+        </li>
+        <li><a href="#simulate-the-execution-of-cni">Simulate the execution of CNI</a>
+          <ul>
+            <li><a href="#compile-plugins">Compile plugins</a></li>
+            <li><a href="#creating-a-network-profile">Creating a network profile</a></li>
+            <li><a href="#create-a-network-namespace">Create a network namespace</a></li>
+            <li><a href="#executes-cnitools-add">executes cnitool&rsquo;s add</a></li>
+            <li><a href="#verification">Verification</a></li>
+          </ul>
+        </li>
+        <li><a href="#village-net">Village Net</a>
+          <ul>
+            <li><a href="#working-principle">Working principle</a></li>
+            <li><a href="#workflow">Workflow</a></li>
+          </ul>
+        </li>
+        <li><a href="#finally">Finally</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>There are more and more networking solutions for containers, and with each new solution, it is obviously unreasonable to adapt the networking solution to different container runtimes, and CNI is designed to solve this problem.</p>
+<p>While maintaining a &ldquo;home-level Kubernetes cluster&rdquo; at home during holidays, I got the idea to write a network plugin, and developed <a href="https://github.com/zwwhdls/village-net">Village Net</a> based on cni/plugin.</p>
+<p>Taking this network plugin as an example, this article focuses on how to implement a CNI plugin.</p>
+<h2 id="how-cni-works">How CNI works</h2>
+<p>To understand how to implement a CNI plug-in, you need to understand how CNI works, which stands for Container Network Interface, an interface protocol used to configure a container&rsquo;s network. After the container management system provides the network namespace where the container is located, CNI is responsible for inserting the network interface into that network namespace and configuring the corresponding ip and route.</p>
+<p>CNI is actually a bridge between container runtime system and CNI Plugin, CNI will pass the container runtime information and network configuration information to Plugin, and each Plugin will realize the subsequent work, so CNI Plugin is the concrete implementation of container network. This can be summarized in the following diagram.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/8fd98b56e7ef430fa28cf09635b29284.png" alt="k8s CNI"></p>
+<h3 id="what-is-cni-plugin">What is CNI Plugin</h3>
+<p>We now know that a CNI Plugin is a concrete implementation of a container network. In a cluster, each Plugin exists as a binary and is invoked by the kubelet through the CNI interface for each plugin to execute. The exact process is as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/15548643a1a94266b25c52909df80735.png" alt="CNI Plugin Process"></p>
+<p>CNI Plugin can be divided into three categories: Main, IPAM and Meta, where the Main and IPAM plugins complement each other and do the basic work of creating a network environment for containers.</p>
+<h4 id="ipam-plugin">IPAM Plugin</h4>
+<p>The IPAM (IP Address Management) plug-in is mainly responsible for assigning IP addresses. The official plug-ins available include the following.</p>
+<ul>
+<li>dhcp: A daemon running on the host that makes DHCP requests on behalf of the container.</li>
+<li>host-local: uses a pre-assigned IP address segment to assign and logs the IP usage in memory</li>
+<li>static: used to assign a static IP address to the container, mainly for debugging purposes</li>
+</ul>
+<h4 id="main-plugin">Main Plugin</h4>
+<p>Main plug-in is mainly used to create binary files for specific network devices. The official plug-ins available include the following.</p>
+<ul>
+<li>bridge: Create a bridge on the host and connect it to the container via veth pair.</li>
+<li>macvlan: virtualize multiple macvtaps, each with a different mac address</li>
+<li>ipvlan: similar to macvla n, also virtualize multiple virtual network interfaces through a host interface, the difference is that ipvlan virtualizes a shared MAC address, ip address is different</li>
+<li>loopback: lo device (set the loopback interface to up)</li>
+<li>ptp: veth pair device</li>
+<li>vlan: assign vlan device</li>
+<li>host-device: move a device that already exists on the host to the container</li>
+</ul>
+<h4 id="meta-plugin">Meta Plugin</h4>
+<p>Internal plugins maintained by the CNI community, currently consisting mainly of</p>
+<ul>
+<li>flannel: A plugin specifically for the Flannel project</li>
+<li>tuning: binary for tuning network device parameters via sysctl</li>
+<li>portmap: binary for configuring port mapping via iptables</li>
+<li>bandwidth: binary for limiting traffic using Token Bucket Filter (TBF)</li>
+<li>firewall: Add rules to control incoming and outgoing traffic to the container via iptables or firewalled</li>
+</ul>
+<h4 id="cni-plugin-implementation">CNI Plugin Implementation</h4>
+<p>The CNI Plugin repository is located at <a href="https://github.com/containernetworking/plugins">https://github.com/containernetworking/plugins</a>. Inside you can see the specific implementation of each type of Plugin. Each Plugin needs to implement the following three methods and register them in main.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">cmdCheck</span><span class="p">(</span><span class="nx">args</span> <span class="o">*</span><span class="nx">skel</span><span class="p">.</span><span class="nx">CmdArgs</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">cmdAdd</span><span class="p">(</span><span class="nx">args</span> <span class="o">*</span><span class="nx">skel</span><span class="p">.</span><span class="nx">CmdArgs</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">cmdDel</span><span class="p">(</span><span class="nx">args</span> <span class="o">*</span><span class="nx">skel</span><span class="p">.</span><span class="nx">CmdArgs</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Take host-local as an example, the registration method is as follows, you need to specify the three methods implemented above, the supported version, and the name of the Plugin.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">skel</span><span class="p">.</span><span class="nf">PluginMain</span><span class="p">(</span><span class="nx">cmdAdd</span><span class="p">,</span> <span class="nx">cmdCheck</span><span class="p">,</span> <span class="nx">cmdDel</span><span class="p">,</span> <span class="nx">version</span><span class="p">.</span><span class="nx">All</span><span class="p">,</span> <span class="nx">bv</span><span class="p">.</span><span class="nf">BuildString</span><span class="p">(</span><span class="s">&#34;host-local&#34;</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="what-is-cni">What is CNI</h3>
+<p>After understanding how the Plugin works, let&rsquo;s look at how the CNI works. The CNI repository is at <a href="https://github.com/containernetworking/cni">https://github.com/containernetworking/cni</a>. The code analyzed in this article is based on the latest version, v0.8.1.</p>
+<p>The community provides a tool, cnitool, that simulates the CNI interface being called to add or remove network devices from an existing network namespace.</p>
+<p>First, let&rsquo;s look at the implementation logic of cnitool.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nx">netconf</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">libcni</span><span class="p">.</span><span class="nf">LoadConfList</span><span class="p">(</span><span class="nx">netdir</span><span class="p">,</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span>
+    <span class="o">...</span>
+	<span class="nx">netns</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span>
+	<span class="nx">netns</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">filepath</span><span class="p">.</span><span class="nf">Abs</span><span class="p">(</span><span class="nx">netns</span><span class="p">)</span>
+    <span class="o">...</span>
+	<span class="c1">// Generate the containerid by hashing the netns path
+</span><span class="c1"></span>	<span class="nx">s</span> <span class="o">:=</span> <span class="nx">sha512</span><span class="p">.</span><span class="nf">Sum512</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">netns</span><span class="p">))</span>
+	<span class="nx">containerID</span> <span class="o">:=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;cnitool-%x&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">[:</span><span class="mi">10</span><span class="p">])</span>
+	<span class="nx">cninet</span> <span class="o">:=</span> <span class="nx">libcni</span><span class="p">.</span><span class="nf">NewCNIConfig</span><span class="p">(</span><span class="nx">filepath</span><span class="p">.</span><span class="nf">SplitList</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nf">Getenv</span><span class="p">(</span><span class="nx">EnvCNIPath</span><span class="p">)),</span> <span class="kc">nil</span><span class="p">)</span>
+
+	<span class="nx">rt</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">libcni</span><span class="p">.</span><span class="nx">RuntimeConf</span><span class="p">{</span>
+		<span class="nx">ContainerID</span><span class="p">:</span>    <span class="nx">containerID</span><span class="p">,</span>
+		<span class="nx">NetNS</span><span class="p">:</span>          <span class="nx">netns</span><span class="p">,</span>
+		<span class="nx">IfName</span><span class="p">:</span>         <span class="nx">ifName</span><span class="p">,</span>
+		<span class="nx">Args</span><span class="p">:</span>           <span class="nx">cniArgs</span><span class="p">,</span>
+		<span class="nx">CapabilityArgs</span><span class="p">:</span> <span class="nx">capabilityArgs</span><span class="p">,</span>
+	<span class="p">}</span>
+
+	<span class="k">switch</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">CmdAdd</span><span class="p">:</span>
+		<span class="nx">result</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">cninet</span><span class="p">.</span><span class="nf">AddNetworkList</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">(),</span> <span class="nx">netconf</span><span class="p">,</span> <span class="nx">rt</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">result</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">_</span> <span class="p">=</span> <span class="nx">result</span><span class="p">.</span><span class="nf">Print</span><span class="p">()</span>
+		<span class="p">}</span>
+		<span class="nf">exit</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="k">case</span> <span class="nx">CmdCheck</span><span class="p">:</span>
+		<span class="nx">err</span> <span class="o">:=</span> <span class="nx">cninet</span><span class="p">.</span><span class="nf">CheckNetworkList</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">(),</span> <span class="nx">netconf</span><span class="p">,</span> <span class="nx">rt</span><span class="p">)</span>
+		<span class="nf">exit</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+	<span class="k">case</span> <span class="nx">CmdDel</span><span class="p">:</span>
+		<span class="nf">exit</span><span class="p">(</span><span class="nx">cninet</span><span class="p">.</span><span class="nf">DelNetworkList</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">(),</span> <span class="nx">netconf</span><span class="p">,</span> <span class="nx">rt</span><span class="p">))</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>From the above code, we can see that the configuration netconf is first parsed from the cni configuration file, and then the netns, containerId and other information is passed to the interface cninet.AddNetworkList as the container&rsquo;s runtime information.</p>
+<p>Next, look at the implementation of the interface AddNetworkList.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// AddNetworkList executes a sequence of plugins with the ADD command
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">CNIConfig</span><span class="p">)</span> <span class="nf">AddNetworkList</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">list</span> <span class="o">*</span><span class="nx">NetworkConfigList</span><span class="p">,</span> <span class="nx">rt</span> <span class="o">*</span><span class="nx">RuntimeConf</span><span class="p">)</span> <span class="p">(</span><span class="nx">types</span><span class="p">.</span><span class="nx">Result</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">err</span> <span class="kt">error</span>
+	<span class="kd">var</span> <span class="nx">result</span> <span class="nx">types</span><span class="p">.</span><span class="nx">Result</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">net</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">list</span><span class="p">.</span><span class="nx">Plugins</span> <span class="p">{</span>
+		<span class="nx">result</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">addNetwork</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">list</span><span class="p">.</span><span class="nx">Name</span><span class="p">,</span> <span class="nx">list</span><span class="p">.</span><span class="nx">CNIVersion</span><span class="p">,</span> <span class="nx">net</span><span class="p">,</span> <span class="nx">result</span><span class="p">,</span> <span class="nx">rt</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+    <span class="o">...</span>
+	<span class="k">return</span> <span class="nx">result</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Obviously, the function&rsquo;s role is to execute the addNetwork operations of each Plugin in order. Then look at the addNetwork function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">CNIConfig</span><span class="p">)</span> <span class="nf">addNetwork</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">name</span><span class="p">,</span> <span class="nx">cniVersion</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">net</span> <span class="o">*</span><span class="nx">NetworkConfig</span><span class="p">,</span> <span class="nx">prevResult</span> <span class="nx">types</span><span class="p">.</span><span class="nx">Result</span><span class="p">,</span> <span class="nx">rt</span> <span class="o">*</span><span class="nx">RuntimeConf</span><span class="p">)</span> <span class="p">(</span><span class="nx">types</span><span class="p">.</span><span class="nx">Result</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nf">ensureExec</span><span class="p">()</span>
+	<span class="nx">pluginPath</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">exec</span><span class="p">.</span><span class="nf">FindInPath</span><span class="p">(</span><span class="nx">net</span><span class="p">.</span><span class="nx">Network</span><span class="p">.</span><span class="nx">Type</span><span class="p">,</span> <span class="nx">c</span><span class="p">.</span><span class="nx">Path</span><span class="p">)</span>
+    <span class="o">...</span>
+
+	<span class="nx">newConf</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">buildOneConfig</span><span class="p">(</span><span class="nx">name</span><span class="p">,</span> <span class="nx">cniVersion</span><span class="p">,</span> <span class="nx">net</span><span class="p">,</span> <span class="nx">prevResult</span><span class="p">,</span> <span class="nx">rt</span><span class="p">)</span>
+    <span class="o">...</span>
+	<span class="k">return</span> <span class="nx">invoke</span><span class="p">.</span><span class="nf">ExecPluginWithResult</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">pluginPath</span><span class="p">,</span> <span class="nx">newConf</span><span class="p">.</span><span class="nx">Bytes</span><span class="p">,</span> <span class="nx">c</span><span class="p">.</span><span class="nf">args</span><span class="p">(</span><span class="s">&#34;ADD&#34;</span><span class="p">,</span> <span class="nx">rt</span><span class="p">),</span> <span class="nx">c</span><span class="p">.</span><span class="nx">exec</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The addNetwork operation for each plugin is divided into three parts.</p>
+<ul>
+<li>First, the FindInPath function is called to find the absolute path of the plugin based on the type of the plugin.</li>
+<li>Then, the buildOneConfig function is called to extract the NetworkConfig structure of the current plugin from the NetworkList, where the preResult is the result of the previous plugin&rsquo;s execution.</li>
+<li>ExecPluginWithResult function is called to actually execute the Add operation of the plugin. Bytes stores the NetworkConfig structure and a stream of bytes encoded with the result of the previous plugin&rsquo;s execution, while the c.args function is used to build an instance of type Args, which stores mainly container runtime information and information about the execution of CNI operations.</li>
+</ul>
+<p>In fact, invoke.ExecPluginWithResult is just a wrapper function, which calls exec.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">e</span> <span class="o">*</span><span class="nx">RawExec</span><span class="p">)</span> <span class="nf">ExecPlugin</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">pluginPath</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">stdinData</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">environ</span> <span class="p">[]</span><span class="kt">string</span><span class="p">)</span> <span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">stdout</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">bytes</span><span class="p">.</span><span class="nx">Buffer</span><span class="p">{}</span>
+	<span class="nx">stderr</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">bytes</span><span class="p">.</span><span class="nx">Buffer</span><span class="p">{}</span>
+	<span class="nx">c</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">CommandContext</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">pluginPath</span><span class="p">)</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">Env</span> <span class="p">=</span> <span class="nx">environ</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">Stdin</span> <span class="p">=</span> <span class="nx">bytes</span><span class="p">.</span><span class="nf">NewBuffer</span><span class="p">(</span><span class="nx">stdinData</span><span class="p">)</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">stdout</span>
+	<span class="nx">c</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">stderr</span>
+
+	<span class="c1">// Retry the command on &#34;text file busy&#34; errors
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="o">&lt;=</span> <span class="mi">5</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Run</span><span class="p">()</span>
+        <span class="o">...</span>
+		<span class="c1">// All other errors except than the busy text file
+</span><span class="c1"></span>		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">e</span><span class="p">.</span><span class="nf">pluginErr</span><span class="p">(</span><span class="nx">err</span><span class="p">,</span> <span class="nx">stdout</span><span class="p">.</span><span class="nf">Bytes</span><span class="p">(),</span> <span class="nx">stderr</span><span class="p">.</span><span class="nf">Bytes</span><span class="p">())</span>
+	<span class="p">}</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>See here, we also see the core logic of the entire CNI, surprisingly simple, just exec the plug-in executable, and retry 5 times when an error occurs.</p>
+<p>In short, a CNI plug-in is an executable file that gets the configuration information of the network from the configuration file and the container information from the container runtime, the former in the form of standard input and the latter in the form of environment variables passed to each plug-in, which eventually invokes each plug-in in turn in the order defined in the configuration file and passes the results of the execution of the previous plug-in to the next plug-in with the configuration information included.</p>
+<p>Nevertheless, the mature network plugins we are familiar with (e.g. calico) usually do not call Plugin sequentially, but only the main plug-in, which calls the ipam plug-in and gets the execution result on the spot.</p>
+<h3 id="how-kubelet-uses-cni">How kubelet uses CNI</h3>
+<p>After understanding how the CNI plugin works, let&rsquo;s take a look at how kubelet uses the CNI plugin.</p>
+<p>When kubelet creates a pod, it calls the CNI plugin to create a network environment for the pod. The source code is as follows. You can see that kubelet calls the plugin.addToNetwork function in the SetUpPod function (pkg/kubelet/dockershim/network/cni/cni.go).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">plugin</span> <span class="o">*</span><span class="nx">cniNetworkPlugin</span><span class="p">)</span> <span class="nf">SetUpPod</span><span class="p">(</span><span class="nx">namespace</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">name</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">id</span> <span class="nx">kubecontainer</span><span class="p">.</span><span class="nx">ContainerID</span><span class="p">,</span> <span class="nx">annotations</span><span class="p">,</span> <span class="nx">options</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">plugin</span><span class="p">.</span><span class="nf">checkInitialized</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">err</span>
+	<span class="p">}</span>
+	<span class="nx">netnsPath</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">plugin</span><span class="p">.</span><span class="nx">host</span><span class="p">.</span><span class="nf">GetNetNS</span><span class="p">(</span><span class="nx">id</span><span class="p">.</span><span class="nx">ID</span><span class="p">)</span>
+    <span class="o">...</span>
+	<span class="k">if</span> <span class="nx">plugin</span><span class="p">.</span><span class="nx">loNetwork</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">plugin</span><span class="p">.</span><span class="nf">addToNetwork</span><span class="p">(</span><span class="nx">cniTimeoutCtx</span><span class="p">,</span> <span class="nx">plugin</span><span class="p">.</span><span class="nx">loNetwork</span><span class="p">,</span> <span class="nx">name</span><span class="p">,</span> <span class="nx">namespace</span><span class="p">,</span> <span class="nx">id</span><span class="p">,</span> <span class="nx">netnsPath</span><span class="p">,</span> <span class="nx">annotations</span><span class="p">,</span> <span class="nx">options</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="nx">err</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">plugin</span><span class="p">.</span><span class="nf">addToNetwork</span><span class="p">(</span><span class="nx">cniTimeoutCtx</span><span class="p">,</span> <span class="nx">plugin</span><span class="p">.</span><span class="nf">getDefaultNetwork</span><span class="p">(),</span> <span class="nx">name</span><span class="p">,</span> <span class="nx">namespace</span><span class="p">,</span> <span class="nx">id</span><span class="p">,</span> <span class="nx">netnsPath</span><span class="p">,</span> <span class="nx">annotations</span><span class="p">,</span> <span class="nx">options</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">err</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s take a look at the addToNetwork function, which will first build the runtime information of the pod and then read the network configuration information of the CNI plugin, i.e. the configuration file in the /etc/cni/net.d directory. After assembling the parameters needed by the plugin, it calls cni&rsquo;s interface cniNet.AddNetworkList.</p>
+<p>The source code is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">plugin</span> <span class="o">*</span><span class="nx">cniNetworkPlugin</span><span class="p">)</span> <span class="nf">addToNetwork</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">network</span> <span class="o">*</span><span class="nx">cniNetwork</span><span class="p">,</span> <span class="nx">podName</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">podNamespace</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">podSandboxID</span> <span class="nx">kubecontainer</span><span class="p">.</span><span class="nx">ContainerID</span><span class="p">,</span> <span class="nx">podNetnsPath</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">annotations</span><span class="p">,</span> <span class="nx">options</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">cnitypes</span><span class="p">.</span><span class="nx">Result</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">rt</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">plugin</span><span class="p">.</span><span class="nf">buildCNIRuntimeConf</span><span class="p">(</span><span class="nx">podName</span><span class="p">,</span> <span class="nx">podNamespace</span><span class="p">,</span> <span class="nx">podSandboxID</span><span class="p">,</span> <span class="nx">podNetnsPath</span><span class="p">,</span> <span class="nx">annotations</span><span class="p">,</span> <span class="nx">options</span><span class="p">)</span>
+    <span class="o">...</span>
+
+	<span class="nx">pdesc</span> <span class="o">:=</span> <span class="nf">podDesc</span><span class="p">(</span><span class="nx">podNamespace</span><span class="p">,</span> <span class="nx">podName</span><span class="p">,</span> <span class="nx">podSandboxID</span><span class="p">)</span>
+	<span class="nx">netConf</span><span class="p">,</span> <span class="nx">cniNet</span> <span class="o">:=</span> <span class="nx">network</span><span class="p">.</span><span class="nx">NetworkConfig</span><span class="p">,</span> <span class="nx">network</span><span class="p">.</span><span class="nx">CNIConfig</span>
+    <span class="o">...</span>
+	<span class="nx">res</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">cniNet</span><span class="p">.</span><span class="nf">AddNetworkList</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">netConf</span><span class="p">,</span> <span class="nx">rt</span><span class="p">)</span>
+    <span class="o">...</span>
+	<span class="k">return</span> <span class="nx">res</span><span class="p">,</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="simulate-the-execution-of-cni">Simulate the execution of CNI</h2>
+<p>After understanding the entire CNI execution process, let&rsquo;s simulate the CNI execution process. We use the cnitool tool, the main plugin selects bridge and the ipam plugin selects host-local to simulate the container network configuration.</p>
+<h3 id="compile-plugins">Compile plugins</h3>
+<p>First, compile the CNI Plugin into an executable file, which can be executed by running the build_linux.sh script from the official repository.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ mkdir -p <span class="nv">$GOPATH</span>/src/github.com/containernetworking/plugins
+$ git clone https://github.com/containernetworking/plugins.git  <span class="nv">$GOPATH</span>/src/github.com/containernetworking/plugins
+$ <span class="nb">cd</span> <span class="nv">$GOPATH</span>/src/github.com/containernetworking/plugins
+$ ./build_linux.sh
+$ ls
+bandwidth  dhcp      flannel      host-local  loopback  portmap  sbr     tuning   village-ipam  vrf
+bridge     firewall  host-device  ipvlan      macvlan   ptp      static  village  vlan
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="creating-a-network-profile">Creating a network profile</h3>
+<p>Next, create our own network configuration file, choose bridge for the main plugin, host-local for the ipam plugin, and specify the available ip segments.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ mkdir -p /etc/cni/net.d
+$ cat &gt;/etc/cni/net.d/10-hdlsnet.conf <span class="s">&lt;&lt;EOF
+</span><span class="s">{
+</span><span class="s">	&#34;cniVersion&#34;: &#34;0.2.0&#34;,
+</span><span class="s">	&#34;name&#34;: &#34;hdls-net&#34;,
+</span><span class="s">	&#34;type&#34;: &#34;bridge&#34;,
+</span><span class="s">	&#34;bridge&#34;: &#34;cni0&#34;,
+</span><span class="s">	&#34;isGateway&#34;: true,
+</span><span class="s">	&#34;ipMasq&#34;: true,
+</span><span class="s">	&#34;ipam&#34;: {
+</span><span class="s">		&#34;type&#34;: &#34;host-local&#34;,
+</span><span class="s">		&#34;subnet&#34;: &#34;10.22.0.0/16&#34;,
+</span><span class="s">		&#34;routes&#34;: [
+</span><span class="s">			{ &#34;dst&#34;: &#34;0.0.0.0/0&#34; }
+</span><span class="s">		]
+</span><span class="s">	}
+</span><span class="s">}
+</span><span class="s">EOF</span>
+$ cat &gt;/etc/cni/net.d/99-loopback.conf <span class="s">&lt;&lt;EOF
+</span><span class="s">{
+</span><span class="s">	&#34;cniVersion&#34;: &#34;0.2.0&#34;,
+</span><span class="s">	&#34;name&#34;: &#34;lo&#34;,
+</span><span class="s">	&#34;type&#34;: &#34;loopback&#34;
+</span><span class="s">}
+</span><span class="s">EOF</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="create-a-network-namespace">Create a network namespace</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ ip netns add hdls
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="executes-cnitools-add">executes cnitool&rsquo;s add</h3>
+<p>Finally, specify CNI_PATH as the path to the above compiled plugin executable, and run the cnitool tool from the official repository.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ mkdir -p <span class="nv">$GOPATH</span>/src/github.com/containernetworking/cni
+$ git clone https://github.com/containernetworking/cni.git  <span class="nv">$GOPATH</span>/src/github.com/containernetworking/cni
+$ <span class="nb">export</span> <span class="nv">CNI_PATH</span><span class="o">=</span><span class="nv">$GOPATH</span>/src/github.com/containernetworking/plugins/bin
+$ go run cnitool.go  add hdls-net /var/run/netns/hdls
+<span class="se">\{</span>
+    <span class="s2">&#34;cniVersion&#34;</span>: <span class="s2">&#34;0.2.0&#34;</span>,
+    <span class="s2">&#34;ip4&#34;</span>: <span class="o">{</span>
+        <span class="s2">&#34;ip&#34;</span>: <span class="s2">&#34;10.22.0.2/16&#34;</span>,
+        <span class="s2">&#34;gateway&#34;</span>: <span class="s2">&#34;10.22.0.1&#34;</span>,
+        <span class="s2">&#34;routes&#34;</span>: <span class="o">[</span>
+            <span class="o">{</span>
+                <span class="s2">&#34;dst&#34;</span>: <span class="s2">&#34;0.0.0.0/0&#34;</span>
+            <span class="o">}</span>
+        <span class="o">]</span>
+    <span class="o">}</span>,
+    <span class="s2">&#34;dns&#34;</span>: <span class="o">{}</span>
+<span class="o">}</span><span class="c1">#</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The result appears to assign an ip of 10.22.0.2 to this network namespace hdls-net, which actually means that the container we created manually has an ip of 10.22.0.2.</p>
+<h3 id="verification">Verification</h3>
+<p>After obtaining the container&rsquo;s ip, we can verify that it is possible to ping through and use the nsenter command to enter the container&rsquo;s namespace to find that the container&rsquo;s default network device, eth0, has also been created.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ ping 10.22.0.2
+PING 10.22.0.2 <span class="o">(</span>10.22.0.2<span class="o">)</span> 56<span class="o">(</span>84<span class="o">)</span> bytes of data.
+<span class="m">64</span> bytes from 10.22.0.2: <span class="nv">icmp_seq</span><span class="o">=</span><span class="m">1</span> <span class="nv">ttl</span><span class="o">=</span><span class="m">64</span> <span class="nv">time</span><span class="o">=</span>0.039 ms
+<span class="m">64</span> bytes from 10.22.0.2: <span class="nv">icmp_seq</span><span class="o">=</span><span class="m">2</span> <span class="nv">ttl</span><span class="o">=</span><span class="m">64</span> <span class="nv">time</span><span class="o">=</span>0.046 ms
+<span class="m">64</span> bytes from 10.22.0.2: <span class="nv">icmp_seq</span><span class="o">=</span><span class="m">3</span> <span class="nv">ttl</span><span class="o">=</span><span class="m">64</span> <span class="nv">time</span><span class="o">=</span>0.042 ms
+<span class="m">64</span> bytes from 10.22.0.2: <span class="nv">icmp_seq</span><span class="o">=</span><span class="m">4</span> <span class="nv">ttl</span><span class="o">=</span><span class="m">64</span> <span class="nv">time</span><span class="o">=</span>0.073 ms
+^C
+--- 10.22.0.2 ping statistics ---
+<span class="m">4</span> packets transmitted, <span class="m">4</span> received, 0% packet loss, <span class="nb">time</span> 3000ms
+rtt min/avg/max/mdev <span class="o">=</span> 0.039/0.050/0.073/0.013 ms
+$ nsenter --net<span class="o">=</span>/var/run/netns/hdls bash
+<span class="o">[</span>root@node-3 ~<span class="o">]</span><span class="c1"># ip l</span>
+1: lo: &lt;LOOPBACK&gt; mtu <span class="m">65536</span> qdisc noop state DOWN mode DEFAULT group default qlen <span class="m">1000</span>
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+3: eth0@if5: &lt;BROADCAST,MULTICAST,UP,LOWER_UP&gt; mtu <span class="m">1500</span> qdisc noqueue state UP mode DEFAULT group default
+    link/ether be:6b:0c:93:3a:75 brd ff:ff:ff:ff:ff:ff link-netnsid <span class="m">0</span>
+
+<span class="o">[</span>root@node-3 ~<span class="o">]</span><span class="c1">#</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Finally, let&rsquo;s check the network devices of the host and find that the veth device pair corresponding to the eth0 of the container has been created.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ ip l
+1: lo: &lt;LOOPBACK,UP,LOWER_UP&gt; mtu <span class="m">65536</span> qdisc noqueue state UNKNOWN mode DEFAULT group default qlen <span class="m">1000</span>
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+2: ens33: &lt;BROADCAST,MULTICAST,UP,LOWER_UP&gt; mtu <span class="m">1500</span> qdisc pfifo_fast state UP mode DEFAULT group default qlen <span class="m">1000</span>
+    link/ether 00:0c:29:9a:04:8d brd ff:ff:ff:ff:ff:ff
+3: docker0: &lt;NO-CARRIER,BROADCAST,MULTICAST,UP&gt; mtu <span class="m">1500</span> qdisc noqueue state DOWN mode DEFAULT group default
+    link/ether 02:42:22:86:98:d9 brd ff:ff:ff:ff:ff:ff
+4: cni0: &lt;BROADCAST,MULTICAST,UP,LOWER_UP&gt; mtu <span class="m">1500</span> qdisc noqueue state UP mode DEFAULT group default qlen <span class="m">1000</span>
+    link/ether 76:32:56:61:e4:f5 brd ff:ff:ff:ff:ff:ff
+5: veth3e674876@if3: &lt;BROADCAST,MULTICAST,UP,LOWER_UP&gt; mtu <span class="m">1500</span> qdisc noqueue master cni0 state UP mode DEFAULT group default
+    link/ether 62:b3:06:15:f9:39 brd ff:ff:ff:ff:ff:ff link-netnsid <span class="m">0</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="village-net">Village Net</h2>
+<p>The reason for choosing Village Net as the name of the plugin is to implement a layer 2 based network plugin via macvlan. For a layer 2 network, the internal communication is like a small village, communication is basically by roar (arp), of course, there is the meaning of village net, although simple, but good enough to use.</p>
+<h3 id="working-principle">Working principle</h3>
+<p>The reason for choosing macvlan is that for a &ldquo;family Kubernetes cluster&rdquo;, there are not many nodes but many services, so services can only be differentiated by port mapping (nodeport), and since all machines are originally on the same switch and IPs are relatively rich, macvlan/ipvlan are both simple and good solutions. is a simple and well implemented solution. Considering that mac-based dhcp services can be used, and even the ip of pods can be fixed based on mac, we tried to use macvlan to implement network plugins.</p>
+<p>However, macvlan has a lot of problems across net namespace, for example, when there is a separate net namespace, the traffic will cross the host&rsquo;s protocol stack, which causes the iptables/ipvs based cluster ip to not work properly.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/31208bdc375c4772b4a3b08798b70c32.png" alt="family Kubernetes cluster Working principle"></p>
+<p>Of course, for the same reason, the host and container networks do not interoperate when using macvlan, but this can be solved by creating an additional macvlan bridge.</p>
+<p>In order to solve the problem of cluster ip not working properly, the idea of just using macvlan was abandoned and multiple network interfaces were used for networking.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/ac0510a9c5824576b5cf1007daa6c6f3.png" alt="sobyte"></p>
+<p>Each Pod has two network interfaces, one is bridge-based eth0 and acts as the default gateway, while relevant routes are added on the host to ensure that communication across nodes is possible. The second interface is a bridge-mode macvlan and assigns the ip of the host segment to this device.</p>
+<h3 id="workflow">Workflow</h3>
+<p>Similar to the workflow of CNI mentioned earlier, village net is also divided into main and ipam plugins.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/10/fbf392379f5b407196524d6c4ed677fb.png" alt="workflow of CNI"></p>
+<p>The main task of ipam is to assign an available IP from each of the two network segments based on the configuration, and the main plugin is to create bridge, veth, macvlan devices based on the IPs of the two segments and configure them.</p>
+<h2 id="finally">Finally</h2>
+<p>The implementation of Village Net is still relatively simple, and even requires some manual operations, such as the routing part of the bridge. But the functionality basically meets expectations, and the pitfalls of cni are completely sorted out. cni itself is not complicated, but there are many details that were not considered at the beginning of the process, and even in the end just bypassed by a number of workaround. If there is still time and energy to put into the web plugin later, then consider how to optimize it.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/kubernetes/">kubernetes</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/how-the-kubernetes-network-plugin-works/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">How the Kubernetes Network Plugin Works</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/how-csi-works/">
+            <span class="next-text nav-default">A Brief Analysis of How CSI Works</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

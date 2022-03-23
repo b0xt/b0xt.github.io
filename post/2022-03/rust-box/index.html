@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>The Box Smart Pointer in Rust - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Those familiar with c&#43;&#43; definitely know shared_ptr , unique_ptr , and Rust also has smart pointers Box , Rc , Arc , RefCell , etc. This article shares the underlying implementation of Box .
+Box&amp;lt;T&amp;gt; allocates space on the heap, stores the T value, and returns the corresponding pointer. Also Box implements trait Deref dereference and Drop destructor to automatically free space when Box leaves the scope.
+Getting Started Example Example from the rust book, without the print statement for demonstration purposes." /><meta name="keywords" content="rust, Box, Smart Pointer" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/rust-box/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="The Box Smart Pointer in Rust" />
+<meta property="og:description" content="Those familiar with c&#43;&#43; definitely know shared_ptr , unique_ptr , and Rust also has smart pointers Box , Rc , Arc , RefCell , etc. This article shares the underlying implementation of Box .
+Box&lt;T&gt; allocates space on the heap, stores the T value, and returns the corresponding pointer. Also Box implements trait Deref dereference and Drop destructor to automatically free space when Box leaves the scope.
+Getting Started Example Example from the rust book, without the print statement for demonstration purposes." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/rust-box/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-08T15:13:49+08:00" />
+<meta property="article:modified_time" content="2022-03-08T15:13:49+08:00" />
+
+<meta itemprop="name" content="The Box Smart Pointer in Rust">
+<meta itemprop="description" content="Those familiar with c&#43;&#43; definitely know shared_ptr , unique_ptr , and Rust also has smart pointers Box , Rc , Arc , RefCell , etc. This article shares the underlying implementation of Box .
+Box&lt;T&gt; allocates space on the heap, stores the T value, and returns the corresponding pointer. Also Box implements trait Deref dereference and Drop destructor to automatically free space when Box leaves the scope.
+Getting Started Example Example from the rust book, without the print statement for demonstration purposes."><meta itemprop="datePublished" content="2022-03-08T15:13:49+08:00" />
+<meta itemprop="dateModified" content="2022-03-08T15:13:49+08:00" />
+<meta itemprop="wordCount" content="712">
+<meta itemprop="keywords" content="rust," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="The Box Smart Pointer in Rust"/>
+<meta name="twitter:description" content="Those familiar with c&#43;&#43; definitely know shared_ptr , unique_ptr , and Rust also has smart pointers Box , Rc , Arc , RefCell , etc. This article shares the underlying implementation of Box .
+Box&lt;T&gt; allocates space on the heap, stores the T value, and returns the corresponding pointer. Also Box implements trait Deref dereference and Drop destructor to automatically free space when Box leaves the scope.
+Getting Started Example Example from the rust book, without the print statement for demonstration purposes."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">The Box Smart Pointer in Rust</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-08 15:13:49 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 712 words </span>
+          <span class="more-meta"> 4 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#getting-started-example">Getting Started Example</a></li>
+        <li><a href="#ownership">Ownership</a></li>
+        <li><a href="#underlying-implementation">Underlying implementation</a></li>
+        <li><a href="#applicable-scenarios">Applicable scenarios</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/08/5b02b3be29cf474abcc7157c03455b47.png" alt="rust"></p>
+<p>Those familiar with c++ definitely know <code>shared_ptr</code> , <code>unique_ptr</code> , and Rust also has smart pointers <code>Box</code> , <code>Rc</code> , <code>Arc</code> , <code>RefCell</code> , etc. This article shares the underlying implementation of <code>Box</code> .</p>
+<p><code>Box&lt;T&gt;</code> allocates space on the heap, stores the T value, and returns the corresponding pointer. Also <code>Box</code> implements trait <code>Deref</code> dereference and <code>Drop</code> destructor to automatically free space when <code>Box</code> leaves the scope.</p>
+<h2 id="getting-started-example">Getting Started Example</h2>
+<p>Example from <a href="https://doc.rust-lang.org/book/ch15-01-box.html">the rust book</a>, without the print statement for demonstration purposes.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="k">fn</span> <span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">_</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">Box</span>::<span class="n">new</span><span class="p">(</span><span class="mh">0x11223344</span><span class="p">);</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>Assign the variable 0x11223344 to the heap, the so-called boxing, which java students are surely familiar with. Let&rsquo;s mount docker, and use rust-gdb to see the assembly implementation.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">Dump of assembler code for function hello_cargo::main:
+   0x000055555555bdb0 &lt;+0&gt;:	sub    $0x18,%rsp
+   0x000055555555bdb4 &lt;+4&gt;:	movl   $0x11223344,0x14(%rsp)
+=&gt; 0x000055555555bdbc &lt;+12&gt;:	mov    $0x4,%esi
+   0x000055555555bdc1 &lt;+17&gt;:	mov    %rsi,%rdi
+   0x000055555555bdc4 &lt;+20&gt;:	callq  0x55555555b5b0 &lt;alloc::alloc::exchange_malloc&gt;
+   0x000055555555bdc9 &lt;+25&gt;:	mov    %rax,%rcx
+   0x000055555555bdcc &lt;+28&gt;:	mov    %rcx,%rax
+   0x000055555555bdcf &lt;+31&gt;:	movl   $0x11223344,(%rcx)
+   0x000055555555bdd5 &lt;+37&gt;:	mov    %rax,0x8(%rsp)
+   0x000055555555bdda &lt;+42&gt;:	lea    0x8(%rsp),%rdi
+   0x000055555555bddf &lt;+47&gt;:	callq  0x55555555bd20 &lt;core::ptr::drop_in_place&lt;alloc::boxed::Box&lt;i32&gt;&gt;&gt;
+   0x000055555555bde4 &lt;+52&gt;:	add    $0x18,%rsp
+   0x000055555555bde8 &lt;+56&gt;:	retq
+End of assembler dump.
+</code></pre></td></tr></table>
+</div>
+</div><p>The key point is two, <code>alloc::alloc::exchange_malloc</code> allocates memory space on the heap and then stores <code>0x11223344</code> to the address of this malloc</p>
+<p>At the end of the function, the address is passed to <code>core::ptr::drop_in_place</code> to be freed, because the compiler knows that the type is <code>alloc::boxed::Box&lt;i32&gt;</code> , and will drop the corresponding drop function with <code>Box</code></p>
+<p>Looking at this example alone, <code>Box</code> is not mysterious, it corresponds to the assembly implementation and is no different from a normal pointer, all constraints are compile-time behavior.</p>
+<h2 id="ownership">Ownership</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="k">fn</span> <span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">x</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">Box</span>::<span class="n">new</span><span class="p">(</span><span class="nb">String</span>::<span class="n">from</span><span class="p">(</span><span class="s">&#34;Rust&#34;</span><span class="p">));</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">*</span><span class="n">x</span><span class="p">;</span><span class="w">
+</span><span class="w">    </span><span class="fm">println!</span><span class="p">(</span><span class="s">&#34;x is {}&#34;</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">);</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>This example boxes a string, which is not necessary because <code>String</code> is, broadly speaking, a smart pointer. This example will report an error.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="mi">3</span><span class="w"> </span><span class="o">|</span><span class="w">     </span><span class="kd">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">*</span><span class="n">x</span><span class="p">;</span><span class="w">
+</span><span class="w">  </span><span class="o">|</span><span class="w">             </span><span class="o">--</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="n">moved</span><span class="w"> </span><span class="n">here</span><span class="w">
+</span><span class="w"></span><span class="mi">4</span><span class="w"> </span><span class="o">|</span><span class="w">     </span><span class="fm">println!</span><span class="p">(</span><span class="s">&#34;x is {}&#34;</span><span class="p">,</span><span class="w"> </span><span class="n">x</span><span class="p">);</span><span class="w">
+</span><span class="w">  </span><span class="o">|</span><span class="w">                         </span><span class="o">^</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="n">borrowed</span><span class="w"> </span><span class="n">here</span><span class="w"> </span><span class="n">after</span><span class="w"> </span><span class="k">move</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>After <code>*x</code> is dereferenced, it corresponds to <code>String</code>, and when it is assigned to y, it executes move semantics, and the ownership is gone, so the subsequent println cannot print x.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="kd">let</span><span class="w"> </span><span class="n">y</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">&amp;*</span><span class="n">x</span><span class="p">;</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>You can take an immutable reference to a string to fix it.</p>
+<h2 id="underlying-implementation">Underlying implementation</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="k">pub</span><span class="w"> </span><span class="k">struct</span> <span class="nb">Box</span><span class="o">&lt;</span><span class="w">
+</span><span class="w">    </span><span class="n">T</span>: <span class="o">?</span><span class="nb">Sized</span><span class="p">,</span><span class="w">
+</span><span class="w">    </span><span class="cp">#[unstable(feature = </span><span class="s">&#34;allocator_api&#34;</span><span class="cp">, issue = </span><span class="s">&#34;32838&#34;</span><span class="cp">)]</span><span class="w"> </span><span class="n">A</span>: <span class="nc">Allocator</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Global</span><span class="p">,</span><span class="w">
+</span><span class="w"></span><span class="o">&gt;</span><span class="p">(</span><span class="n">Unique</span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="p">,</span><span class="w"> </span><span class="n">A</span><span class="p">);</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>Above is the definition of <code>Box</code>, which can be seen as a tuple structure with two generic parameters: <code>T</code> for an arbitrary type and <code>A</code> for a memory allocator. In the standard library <code>A</code> is the Gloal default value. Where <code>T</code> has a generic constraint <code>?Sized</code> , indicating that the type size may or may not be known at compile time.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="cp">#[stable(feature = </span><span class="s">&#34;rust1&#34;</span><span class="cp">, since = </span><span class="s">&#34;1.0.0&#34;</span><span class="cp">)]</span><span class="w">
+</span><span class="w"></span><span class="k">unsafe</span><span class="w"> </span><span class="k">impl</span><span class="o">&lt;</span><span class="cp">#[may_dangle]</span><span class="w"> </span><span class="n">T</span>: <span class="o">?</span><span class="nb">Sized</span><span class="p">,</span><span class="w"> </span><span class="n">A</span>: <span class="nc">Allocator</span><span class="o">&gt;</span><span class="w"> </span><span class="nb">Drop</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="nb">Box</span><span class="o">&lt;</span><span class="n">T</span><span class="p">,</span><span class="w"> </span><span class="n">A</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="k">fn</span> <span class="nf">drop</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">        </span><span class="c1">// FIXME: Do nothing, drop is currently performed by compiler.
+</span><span class="c1"></span><span class="w">    </span><span class="p">}</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>This is the <code>Drop</code> implementation, as stated in the source code, implemented by the compiler.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="cp">#[stable(feature = </span><span class="s">&#34;rust1&#34;</span><span class="cp">, since = </span><span class="s">&#34;1.0.0&#34;</span><span class="cp">)]</span><span class="w">
+</span><span class="w"></span><span class="k">impl</span><span class="o">&lt;</span><span class="n">T</span>: <span class="o">?</span><span class="nb">Sized</span><span class="p">,</span><span class="w"> </span><span class="n">A</span>: <span class="nc">Allocator</span><span class="o">&gt;</span><span class="w"> </span><span class="n">Deref</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="nb">Box</span><span class="o">&lt;</span><span class="n">T</span><span class="p">,</span><span class="w"> </span><span class="n">A</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="k">type</span> <span class="nc">Target</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">T</span><span class="p">;</span><span class="w">
+</span><span class="w">
+</span><span class="w">    </span><span class="k">fn</span> <span class="nf">deref</span><span class="p">(</span><span class="o">&amp;</span><span class="bp">self</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kp">&amp;</span><span class="nc">T</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">        </span><span class="o">&amp;**</span><span class="bp">self</span><span class="w">
+</span><span class="w">    </span><span class="p">}</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="cp">#[stable(feature = </span><span class="s">&#34;rust1&#34;</span><span class="cp">, since = </span><span class="s">&#34;1.0.0&#34;</span><span class="cp">)]</span><span class="w">
+</span><span class="w"></span><span class="k">impl</span><span class="o">&lt;</span><span class="n">T</span>: <span class="o">?</span><span class="nb">Sized</span><span class="p">,</span><span class="w"> </span><span class="n">A</span>: <span class="nc">Allocator</span><span class="o">&gt;</span><span class="w"> </span><span class="n">DerefMut</span><span class="w"> </span><span class="k">for</span><span class="w"> </span><span class="nb">Box</span><span class="o">&lt;</span><span class="n">T</span><span class="p">,</span><span class="w"> </span><span class="n">A</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="k">fn</span> <span class="nf">deref_mut</span><span class="p">(</span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="bp">self</span><span class="p">)</span><span class="w"> </span>-&gt; <span class="kp">&amp;</span><span class="nc">mut</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">        </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="o">**</span><span class="bp">self</span><span class="w">
+</span><span class="w">    </span><span class="p">}</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>implements <code>Deref</code> to define dereference behavior, and <code>DerefMut</code> to mutable dereferences. So <code>*x</code> corresponds to the operation <code>*(x.deref())</code>.</p>
+<h2 id="applicable-scenarios">Applicable scenarios</h2>
+<p>The official website mentions the following three scenarios, essentially <code>Box</code> is not very different from a normal pointer, so it is not as useful as <code>Rc</code> , <code>Arc</code> , <code>RefCell</code>.</p>
+<ul>
+<li>When the type does not know the size at compile time, but the code scenario also requires confirming the type size.</li>
+<li>When you have a lot of data and need to move ownership, and don&rsquo;t want to copy the data.</li>
+<li>trait objects, or dyn dynamic distribution is commonly used to store different types in a collection, or parameters specify different types.
+s
+The official website mentions an implementation of a linked table.</li>
+</ul>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="k">enum</span> <span class="nc">List</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="n">Cons</span><span class="p">(</span><span class="kt">i32</span><span class="p">,</span><span class="w"> </span><span class="n">List</span><span class="p">),</span><span class="w">
+</span><span class="w">    </span><span class="n">Nil</span><span class="p">,</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>The above code does not work, and the reason is simple: it is a recursive definition. It doesn&rsquo;t work with c code either, we usually have to define next type as a pointer.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="k">enum</span> <span class="nc">List</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="n">Cons</span><span class="p">(</span><span class="kt">i32</span><span class="p">,</span><span class="w"> </span><span class="nb">Box</span><span class="o">&lt;</span><span class="n">List</span><span class="o">&gt;</span><span class="p">),</span><span class="w">
+</span><span class="w">    </span><span class="n">Nil</span><span class="p">,</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="k">use</span><span class="w"> </span><span class="k">crate</span>::<span class="n">List</span>::<span class="p">{</span><span class="n">Cons</span><span class="p">,</span><span class="w"> </span><span class="n">Nil</span><span class="p">};</span><span class="w">
+</span><span class="w">
+</span><span class="w"></span><span class="k">fn</span> <span class="nf">main</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span><span class="w">    </span><span class="kd">let</span><span class="w"> </span><span class="n">list</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Cons</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span><span class="w"> </span><span class="nb">Box</span>::<span class="n">new</span><span class="p">(</span><span class="n">Cons</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span><span class="w"> </span><span class="nb">Box</span>::<span class="n">new</span><span class="p">(</span><span class="n">Cons</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span><span class="w"> </span><span class="nb">Box</span>::<span class="n">new</span><span class="p">(</span><span class="n">Nil</span><span class="p">))))));</span><span class="w">
+</span><span class="w"></span><span class="p">}</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>The solution given by the official website is to turn next into a pointer <code>Box&lt;List&gt;</code> , which is common sense, nothing to say.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/rust/">rust</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/rust-lifetime/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Rust Lifetime</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/smart-pointer-rc-weak-arc/">
+            <span class="next-text nav-default">Dissecting Smart Pointers Rc Weak and Arc</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

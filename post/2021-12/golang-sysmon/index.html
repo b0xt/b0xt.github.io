@@ -1,0 +1,837 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>The principle of Go language system monitoring implementation - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Many systems have daemons that monitor the running state of the system in the background and respond to unexpected situations as they arise. The system monitor is an important part of the Go language runtime, checking the Go language runtime at regular intervals to ensure that the program has not entered an abnormal state. This section describes the design and implementation of the Go system monitor, including its startup, execution process, and main responsibilities." /><meta name="keywords" content="golang, Sysmon" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2021-12/golang-sysmon/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="The principle of Go language system monitoring implementation" />
+<meta property="og:description" content="Many systems have daemons that monitor the running state of the system in the background and respond to unexpected situations as they arise. The system monitor is an important part of the Go language runtime, checking the Go language runtime at regular intervals to ensure that the program has not entered an abnormal state. This section describes the design and implementation of the Go system monitor, including its startup, execution process, and main responsibilities." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2021-12/golang-sysmon/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-12-07T15:16:02+08:00" />
+<meta property="article:modified_time" content="2021-12-07T15:16:02+08:00" />
+
+<meta itemprop="name" content="The principle of Go language system monitoring implementation">
+<meta itemprop="description" content="Many systems have daemons that monitor the running state of the system in the background and respond to unexpected situations as they arise. The system monitor is an important part of the Go language runtime, checking the Go language runtime at regular intervals to ensure that the program has not entered an abnormal state. This section describes the design and implementation of the Go system monitor, including its startup, execution process, and main responsibilities."><meta itemprop="datePublished" content="2021-12-07T15:16:02+08:00" />
+<meta itemprop="dateModified" content="2021-12-07T15:16:02+08:00" />
+<meta itemprop="wordCount" content="2160">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="The principle of Go language system monitoring implementation"/>
+<meta name="twitter:description" content="Many systems have daemons that monitor the running state of the system in the background and respond to unexpected situations as they arise. The system monitor is an important part of the Go language runtime, checking the Go language runtime at regular intervals to ensure that the program has not entered an abnormal state. This section describes the design and implementation of the Go system monitor, including its startup, execution process, and main responsibilities."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">The principle of Go language system monitoring implementation</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-12-07 15:16:02 </span>
+        <div class="post-category">
+            <a href="/categories/skills/"> skills </a>
+            </div>
+          <span class="more-meta"> 2160 words </span>
+          <span class="more-meta"> 11 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#design-principles">Design Principles</a></li>
+        <li><a href="#monitor-loop">Monitor Loop</a>
+          <ul>
+            <li><a href="#checking-for-deadlocks">Checking for deadlocks</a></li>
+            <li><a href="#running-timers">Running timers</a></li>
+            <li><a href="#polling-the-network">Polling the network</a></li>
+            <li><a href="#preempting-processors">Preempting processors</a></li>
+            <li><a href="#garbage-collection">Garbage collection</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Many systems have daemons that monitor the running state of the system in the background and respond to unexpected situations as they arise. The system monitor is an important part of the Go language runtime, checking the Go language runtime at regular intervals to ensure that the program has not entered an abnormal state. This section describes the design and implementation of the Go system monitor, including its startup, execution process, and main responsibilities.</p>
+<h2 id="design-principles">Design Principles</h2>
+<p>In operating systems that support multitasking, daemons are computer programs that run in the background and are not operated directly by the user; they typically run automatically when the operating system starts. both DaemonSet for Kubernetes and System Monitor for the Go language use a similar design to provide some general functionality.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/07/a61774bb517647a0b244c03d49863a33.png" alt=""></p>
+<p>Daemons are very efficient designs that exist throughout the life of a system, starting as the system starts and ending as the system ends. In the OS and Kubernetes, we often run processes such as database services, logging services, and monitoring services as daemons.</p>
+<p>The Go language&rsquo;s system monitoring also plays an important role by starting an internal loop that does not abort, polling the network inside the loop, preempting long-running or system-calling Goroutines, and triggering garbage collection, which, through these actions, can make the system run in a healthier state.</p>
+<h2 id="monitor-loop">Monitor Loop</h2>
+<p>When a Go language program is started, the runtime calls runtime.main in the first Goroutine to start the main program, which creates a new thread on the system stack: the</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">GOARCH</span> <span class="o">!=</span> <span class="s">&#34;wasm&#34;</span> <span class="p">{</span>
+		<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nf">newm</span><span class="p">(</span><span class="nx">sysmon</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+		<span class="p">})</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.newm creates a new structure runtime.m that stores the functions and processors to be executed. runtime executes the system monitor without a processor, and the system monitor&rsquo;s Goroutine runs directly on the created thread.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">newm</span><span class="p">(</span><span class="nx">fn</span> <span class="kd">func</span><span class="p">(),</span> <span class="nx">_p_</span> <span class="o">*</span><span class="nx">p</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">mp</span> <span class="o">:=</span> <span class="nf">allocm</span><span class="p">(</span><span class="nx">_p_</span><span class="p">,</span> <span class="nx">fn</span><span class="p">)</span>
+	<span class="nx">mp</span><span class="p">.</span><span class="nx">nextp</span><span class="p">.</span><span class="nf">set</span><span class="p">(</span><span class="nx">_p_</span><span class="p">)</span>
+	<span class="nx">mp</span><span class="p">.</span><span class="nx">sigmask</span> <span class="p">=</span> <span class="nx">initSigmask</span>
+	<span class="o">...</span>
+	<span class="nf">newm1</span><span class="p">(</span><span class="nx">mp</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.newm1 calls platform-specific runtime.newosproc to create a new thread via the system call clone and execute runtime.mstart in the new thread.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">newosproc</span><span class="p">(</span><span class="nx">mp</span> <span class="o">*</span><span class="nx">m</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">stk</span> <span class="o">:=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">mp</span><span class="p">.</span><span class="nx">g0</span><span class="p">.</span><span class="nx">stack</span><span class="p">.</span><span class="nx">hi</span><span class="p">)</span>
+	<span class="kd">var</span> <span class="nx">oset</span> <span class="nx">sigset</span>
+	<span class="nf">sigprocmask</span><span class="p">(</span><span class="nx">_SIG_SETMASK</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">sigset_all</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">oset</span><span class="p">)</span>
+	<span class="nx">ret</span> <span class="o">:=</span> <span class="nf">clone</span><span class="p">(</span><span class="nx">cloneFlags</span><span class="p">,</span> <span class="nx">stk</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">mp</span><span class="p">),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">mp</span><span class="p">.</span><span class="nx">g0</span><span class="p">),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nf">funcPC</span><span class="p">(</span><span class="nx">mstart</span><span class="p">)))</span>
+	<span class="nf">sigprocmask</span><span class="p">(</span><span class="nx">_SIG_SETMASK</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">oset</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the newly created thread, we execute the runtime.sysmon stored in runtime.m to start the system monitoring.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">sysmon</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">sched</span><span class="p">.</span><span class="nx">nmsys</span><span class="o">++</span>
+	<span class="nf">checkdead</span><span class="p">()</span>
+
+	<span class="nx">lasttrace</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+	<span class="nx">idle</span> <span class="o">:=</span> <span class="mi">0</span>
+	<span class="nx">delay</span> <span class="o">:=</span> <span class="nb">uint32</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">idle</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">delay</span> <span class="p">=</span> <span class="mi">20</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">idle</span> <span class="p">&gt;</span> <span class="mi">50</span> <span class="p">{</span>
+			<span class="nx">delay</span> <span class="o">*=</span> <span class="mi">2</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">delay</span> <span class="p">&gt;</span> <span class="mi">10</span><span class="o">*</span><span class="mi">1000</span> <span class="p">{</span>
+			<span class="nx">delay</span> <span class="p">=</span> <span class="mi">10</span> <span class="o">*</span> <span class="mi">1000</span>
+		<span class="p">}</span>
+		<span class="nf">usleep</span><span class="p">(</span><span class="nx">delay</span><span class="p">)</span>
+		<span class="o">...</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When the above function is just called at runtime, it will first check for deadlocks via runtime.checkdead and then enter the core monitoring loop; the system monitoring hangs the current thread via usleep at the beginning of each loop, the argument to this function is microseconds and the runtime will follow the following rules to determine the hibernation time.</p>
+<ul>
+<li>The initial hibernation time is 20 μs.</li>
+<li>the maximum hibernation time is 10ms.</li>
+<li>when the system monitor does not wake up the Goroutine for 50 cycles, the hibernation time is multiplied in each cycle.</li>
+</ul>
+<p>Once the program stabilizes, the system monitor&rsquo;s trigger time stabilizes at 10 ms. In addition to checking for deadlocks, it does the following in the loop.</p>
+<ul>
+<li>Run timer - get the next timer that needs to be triggered.</li>
+<li>Polling Network - getting the due file descriptors that need to be processed.</li>
+<li>Preemption Processor - preempts Goroutines that have been running for a long time or are in a system call.</li>
+<li>Garbage collection - triggers garbage collection to reclaim memory when conditions are met.</li>
+</ul>
+<p>We will describe in this section in turn how system monitoring accomplishes several of these different tasks.</p>
+<h3 id="checking-for-deadlocks">Checking for deadlocks</h3>
+<p>The system monitor checks for deadlocks at runtime with <code>runtime.checkdead</code>, and we can break the process of checking for deadlocks into three steps as follows.</p>
+<ol>
+<li>checking for the existence of a running thread.</li>
+<li>check for the presence of a running Goroutine.</li>
+<li>checking for the presence of a timer on the processor.</li>
+</ol>
+<p>This function first checks the number of running threads in the Go language runtime, and we calculate the result of this value using several fields in the scheduler.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">checkdead</span><span class="p">()</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">run0</span> <span class="kt">int32</span>
+	<span class="nx">run</span> <span class="o">:=</span> <span class="nf">mcount</span><span class="p">()</span> <span class="o">-</span> <span class="nx">sched</span><span class="p">.</span><span class="nx">nmidle</span> <span class="o">-</span> <span class="nx">sched</span><span class="p">.</span><span class="nx">nmidlelocked</span> <span class="o">-</span> <span class="nx">sched</span><span class="p">.</span><span class="nx">nmsys</span>
+	<span class="k">if</span> <span class="nx">run</span> <span class="p">&gt;</span> <span class="nx">run0</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="k">if</span> <span class="nx">run</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nb">print</span><span class="p">(</span><span class="s">&#34;runtime: checkdead: nmidle=&#34;</span><span class="p">,</span> <span class="nx">sched</span><span class="p">.</span><span class="nx">nmidle</span><span class="p">,</span> <span class="s">&#34; nmidlelocked=&#34;</span><span class="p">,</span> <span class="nx">sched</span><span class="p">.</span><span class="nx">nmidlelocked</span><span class="p">,</span> <span class="s">&#34; mcount=&#34;</span><span class="p">,</span> <span class="nf">mcount</span><span class="p">(),</span> <span class="s">&#34; nmsys=&#34;</span><span class="p">,</span> <span class="nx">sched</span><span class="p">.</span><span class="nx">nmsys</span><span class="p">,</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;checkdead: inconsistent counts&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ol>
+<li>runtime.mcount gets the number of threads present in the system based on the next thread id to be created and the number of threads released.</li>
+<li>nmidle is the number of threads that are idle.</li>
+<li>nmidlelocked is the number of threads in a locked state.</li>
+<li>nmsys is the number of threads in the system call.</li>
+</ol>
+<p>Using the above thread-related data, we can get the number of running threads. If the number of threads is greater than 0, it means that there is no deadlock in the current program; if the number of threads is less than 0, it means that the state of the current program is inconsistent; if the number of threads is equal to 0, we need to further check the running state of the program.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">checkdead</span><span class="p">()</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nx">grunning</span> <span class="o">:=</span> <span class="mi">0</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">allgs</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">gp</span> <span class="o">:=</span> <span class="nx">allgs</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+		<span class="k">if</span> <span class="nf">isSystemGoroutine</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">continue</span>
+		<span class="p">}</span>
+		<span class="nx">s</span> <span class="o">:=</span> <span class="nf">readgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+		<span class="k">switch</span> <span class="nx">s</span> <span class="o">&amp;^</span> <span class="nx">_Gscan</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="nx">_Gwaiting</span><span class="p">,</span> <span class="nx">_Gpreempted</span><span class="p">:</span>
+			<span class="nx">grunning</span><span class="o">++</span>
+		<span class="k">case</span> <span class="nx">_Grunnable</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">,</span> <span class="nx">_Gsyscall</span><span class="p">:</span>
+			<span class="nb">print</span><span class="p">(</span><span class="s">&#34;runtime: checkdead: find g &#34;</span><span class="p">,</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">goid</span><span class="p">,</span> <span class="s">&#34; in status &#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">,</span> <span class="s">&#34;\n&#34;</span><span class="p">)</span>
+			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;checkdead: runnable g&#34;</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">allglock</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">grunning</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;no goroutines (main called runtime.Goexit) - deadlock!&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ol>
+<li>when there are Goroutines in the _Grunnable, _Grunning, and _Gsyscall states, it means that the program has deadlocked.</li>
+<li>when all Goroutines are in the _Gidle, _Gdead, and _Gcopystack states, it means that the main program called runtime.goexit.</li>
+</ol>
+<p>When there is a waiting Goroutine at runtime and there is no running Goroutine, we check the timer present in the processor</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">checkdead</span><span class="p">()</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">_p_</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">allp</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">timers</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;all goroutines are asleep - deadlock!&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If there are waiting timers in the processor, it makes sense for all Goroutines to fall asleep, but if there are no waiting timers, the run will simply report an error and exit the program.</p>
+<h3 id="running-timers">Running timers</h3>
+<p>In the system monitor loop, we use runtime.nanotime and runtime.timeSleepUntil to get the current time and the next time the timer needs to wake up; when the scheduler needs to perform garbage collection or when all processors are idle, the system monitor can temporarily fall asleep if there is no timer that needs to be triggered : The</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">sysmon</span><span class="p">()</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="o">...</span>
+		<span class="nx">now</span> <span class="o">:=</span> <span class="nf">nanotime</span><span class="p">()</span>
+		<span class="nx">next</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nf">timeSleepUntil</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">debug</span><span class="p">.</span><span class="nx">schedtrace</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">sched</span><span class="p">.</span><span class="nx">gcwaiting</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">npidle</span><span class="p">)</span> <span class="o">==</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">gomaxprocs</span><span class="p">))</span> <span class="p">{</span>
+			<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">gcwaiting</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">npidle</span><span class="p">)</span> <span class="o">==</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">gomaxprocs</span><span class="p">)</span> <span class="p">{</span>
+				<span class="k">if</span> <span class="nx">next</span> <span class="p">&gt;</span> <span class="nx">now</span> <span class="p">{</span>
+					<span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sysmonwait</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+					<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+					<span class="nx">sleep</span> <span class="o">:=</span> <span class="nx">forcegcperiod</span> <span class="o">/</span> <span class="mi">2</span>
+					<span class="k">if</span> <span class="nx">next</span><span class="o">-</span><span class="nx">now</span> <span class="p">&lt;</span> <span class="nx">sleep</span> <span class="p">{</span>
+						<span class="nx">sleep</span> <span class="p">=</span> <span class="nx">next</span> <span class="o">-</span> <span class="nx">now</span>
+					<span class="p">}</span>
+					<span class="o">...</span>
+					<span class="nf">notetsleep</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sysmonnote</span><span class="p">,</span> <span class="nx">sleep</span><span class="p">)</span>
+					<span class="o">...</span>
+					<span class="nx">now</span> <span class="p">=</span> <span class="nf">nanotime</span><span class="p">()</span>
+					<span class="nx">next</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nf">timeSleepUntil</span><span class="p">()</span>
+					<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+					<span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sysmonwait</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+					<span class="nf">noteclear</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">sysmonnote</span><span class="p">)</span>
+				<span class="p">}</span>
+				<span class="nx">idle</span> <span class="p">=</span> <span class="mi">0</span>
+				<span class="nx">delay</span> <span class="p">=</span> <span class="mi">20</span>
+			<span class="p">}</span>
+			<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="o">...</span>
+		<span class="k">if</span> <span class="nx">next</span> <span class="p">&lt;</span> <span class="nx">now</span> <span class="p">{</span>
+			<span class="nf">startm</span><span class="p">(</span><span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The duration of hibernation is determined by the forced GC period forcegcperiod and the time when the timer is next triggered. runtime.notesleep uses a semaphore to synchronize the system monitor to the hibernation state. When the system monitor is woken up, we recalculate the current time and the next timer to be triggered, call runtime.noteclear to notify the system monitor of the wake-up and reset the hibernation interval.</p>
+<p>If after this we find that the next timer needs to be triggered at a time less than the current time, which also indicates that all threads are probably busy running Goroutine, System Monitor will start a new thread to trigger the timer to avoid a large deviation in the timer&rsquo;s expiration time.</p>
+<h3 id="polling-the-network">Polling the network</h3>
+<p>If 10ms have passed since the last polling of the network, the system monitor also polls the network in a loop to check for pending file descriptors.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">sysmon</span><span class="p">()</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="o">...</span>
+		<span class="nx">lastpoll</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">atomic</span><span class="p">.</span><span class="nf">Load64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lastpoll</span><span class="p">))</span>
+		<span class="k">if</span> <span class="nf">netpollinited</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="nx">lastpoll</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">lastpoll</span><span class="o">+</span><span class="mi">10</span><span class="o">*</span><span class="mi">1000</span><span class="o">*</span><span class="mi">1000</span> <span class="p">&lt;</span> <span class="nx">now</span> <span class="p">{</span>
+			<span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lastpoll</span><span class="p">,</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">lastpoll</span><span class="p">),</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">now</span><span class="p">))</span>
+			<span class="nx">list</span> <span class="o">:=</span> <span class="nf">netpoll</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+			<span class="k">if</span> <span class="p">!</span><span class="nx">list</span><span class="p">.</span><span class="nf">empty</span><span class="p">()</span> <span class="p">{</span>
+				<span class="nf">incidlelocked</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+				<span class="nf">injectglist</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">list</span><span class="p">)</span>
+				<span class="nf">incidlelocked</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="o">...</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The above function non-blockingly calls runtime.netpoll to check for pending file descriptors and adds all ready Goroutines to the global run queue via runtime.injectglist.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">injectglist</span><span class="p">(</span><span class="nx">glist</span> <span class="o">*</span><span class="nx">gList</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">glist</span><span class="p">.</span><span class="nf">empty</span><span class="p">()</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+	<span class="kd">var</span> <span class="nx">n</span> <span class="kt">int</span>
+	<span class="k">for</span> <span class="nx">n</span> <span class="p">=</span> <span class="mi">0</span><span class="p">;</span> <span class="p">!</span><span class="nx">glist</span><span class="p">.</span><span class="nf">empty</span><span class="p">();</span> <span class="nx">n</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">gp</span> <span class="o">:=</span> <span class="nx">glist</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+		<span class="nf">casgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Gwaiting</span><span class="p">,</span> <span class="nx">_Grunnable</span><span class="p">)</span>
+		<span class="nf">globrunqput</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+	<span class="k">for</span> <span class="p">;</span> <span class="nx">n</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">sched</span><span class="p">.</span><span class="nx">npidle</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">n</span><span class="o">--</span> <span class="p">{</span>
+		<span class="nf">startm</span><span class="p">(</span><span class="kc">nil</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="o">*</span><span class="nx">glist</span> <span class="p">=</span> <span class="nx">gList</span><span class="p">{}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This function switches the state of all Goroutines from _Gwaiting to _Grunnable and adds them to the global run queue waiting to run, and if there are free processors in the current program, it will start threads to execute those tasks via runtime.startm.</p>
+<h3 id="preempting-processors">Preempting processors</h3>
+<p>The system monitor calls runtime.retake in a loop to seize a processor that is running or in a system call. This function iterates through the global processors at runtime, each of which stores a runtime.sysmontick.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">sysmontick</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">schedtick</span>   <span class="kt">uint32</span>
+	<span class="nx">schedwhen</span>   <span class="kt">int64</span>
+	<span class="nx">syscalltick</span> <span class="kt">uint32</span>
+	<span class="nx">syscallwhen</span> <span class="kt">int64</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The four fields in this structure store the number of times the processor was scheduled, the last time the processor was scheduled, the number of system calls, and the time of the system call. runtime.retake&rsquo;s loop contains two different types of preemption logic.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">retake</span><span class="p">(</span><span class="nx">now</span> <span class="kt">int64</span><span class="p">)</span> <span class="kt">uint32</span> <span class="p">{</span>
+	<span class="nx">n</span> <span class="o">:=</span> <span class="mi">0</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">allp</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">_p_</span> <span class="o">:=</span> <span class="nx">allp</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+		<span class="nx">pd</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">sysmontick</span>
+		<span class="nx">s</span> <span class="o">:=</span> <span class="nx">_p_</span><span class="p">.</span><span class="nx">status</span>
+		<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="nx">_Prunning</span> <span class="o">||</span> <span class="nx">s</span> <span class="o">==</span> <span class="nx">_Psyscall</span> <span class="p">{</span>
+			<span class="nx">t</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">schedtick</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">schedwhen</span><span class="o">+</span><span class="nx">forcePreemptNS</span> <span class="o">&lt;=</span> <span class="nx">now</span> <span class="p">{</span>
+				<span class="nf">preemptone</span><span class="p">(</span><span class="nx">_p_</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+
+		<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="nx">_Psyscall</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nf">runqempty</span><span class="p">(</span><span class="nx">_p_</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">nmspinning</span><span class="p">)</span><span class="o">+</span><span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">npidle</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">syscallwhen</span><span class="o">+</span><span class="mi">10</span><span class="o">*</span><span class="mi">1000</span><span class="o">*</span><span class="mi">1000</span> <span class="p">&gt;</span> <span class="nx">now</span> <span class="p">{</span>
+				<span class="k">continue</span>
+			<span class="p">}</span>
+			<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">status</span><span class="p">,</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">_Pidle</span><span class="p">)</span> <span class="p">{</span>
+				<span class="nx">n</span><span class="o">++</span>
+				<span class="nx">_p_</span><span class="p">.</span><span class="nx">syscalltick</span><span class="o">++</span>
+				<span class="nf">handoffp</span><span class="p">(</span><span class="nx">_p_</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">n</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ol>
+<li>when the processor is in the _Prunning or _Psyscall state, we preempt the current processor with runtime.preemptone if 10ms have elapsed since the last scheduling trigger.</li>
+<li>when the processor is in the _Psyscall state, runtime.handoffp is called to give up the use of the processor when both of the following conditions are met.
+<ol>
+<li>when the processor&rsquo;s run queue is not empty or no free processor exists.</li>
+<li>when the system call time exceeds 10ms.</li>
+</ol>
+</li>
+</ol>
+<p>System monitoring avoids starvation problems caused by the same Goroutine taking up threads for too long by preempting processors in a loop.</p>
+<h3 id="garbage-collection">Garbage collection</h3>
+<p>At the end, the system monitor also determines if a forced garbage collection needs to be triggered. runtime.sysmon builds runtime.gcTrigger and calls the runtime.gcTrigger.test method to determine if a garbage collection needs to be triggered.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">sysmon</span><span class="p">()</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="o">...</span>
+		<span class="k">if</span> <span class="nx">t</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">gcTrigger</span><span class="p">{</span><span class="nx">kind</span><span class="p">:</span> <span class="nx">gcTriggerTime</span><span class="p">,</span> <span class="nx">now</span><span class="p">:</span> <span class="nx">now</span><span class="p">});</span> <span class="nx">t</span><span class="p">.</span><span class="nf">test</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">idle</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+			<span class="nx">forcegc</span><span class="p">.</span><span class="nx">idle</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="kd">var</span> <span class="nx">list</span> <span class="nx">gList</span>
+			<span class="nx">list</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">g</span><span class="p">)</span>
+			<span class="nf">injectglist</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">list</span><span class="p">)</span>
+			<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="o">...</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If garbage collection needs to be triggered, we add the Goroutine used for garbage collection to the global queue and let the scheduler choose the appropriate processor to execute it.</p>
+<h2 id="summary">Summary</h2>
+<p>Runtime system monitoring triggers thread preemption, network polling, and garbage collection to ensure the availability of the Go language runtime. System monitoring is a good solution to the tail latency problem, reducing the scheduler&rsquo;s starvation problem for scheduling Goroutines and ensuring that timers are triggered at the most accurate times possible.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2021-12/whys-the-design-database-data-loss/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Why does the database lose data</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2021-12/whys-the-design-live-streaming-latency/">
+            <span class="next-text nav-default">Why is the latency of live streaming high</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

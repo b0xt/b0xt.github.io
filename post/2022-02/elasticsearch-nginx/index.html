@@ -1,0 +1,695 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Analyzing Nginx logs with Filebeat and Elasticsearch - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article documents the use of Filebeat, Kibana, and Elasticsearch to build a system for collecting and analyzing Nginx logs; Filebeat is responsible for delivering Nginx log data as a data source to Elasticsearch. As an introduction, we will first explain the relationship between the software: Elasticsearch is a distributed full-text search and data analysis engine based on RESTful style; Kibana is a web system for visualizing Elasticsearch data; and" /><meta name="keywords" content="Elasticsearch, Nginx, Filebeat" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-02/elasticsearch-nginx/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Analyzing Nginx logs with Filebeat and Elasticsearch" />
+<meta property="og:description" content="This article documents the use of Filebeat, Kibana, and Elasticsearch to build a system for collecting and analyzing Nginx logs; Filebeat is responsible for delivering Nginx log data as a data source to Elasticsearch. As an introduction, we will first explain the relationship between the software: Elasticsearch is a distributed full-text search and data analysis engine based on RESTful style; Kibana is a web system for visualizing Elasticsearch data; and" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-02/elasticsearch-nginx/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-02-21T10:05:33+08:00" />
+<meta property="article:modified_time" content="2022-02-21T10:05:33+08:00" />
+
+<meta itemprop="name" content="Analyzing Nginx logs with Filebeat and Elasticsearch">
+<meta itemprop="description" content="This article documents the use of Filebeat, Kibana, and Elasticsearch to build a system for collecting and analyzing Nginx logs; Filebeat is responsible for delivering Nginx log data as a data source to Elasticsearch. As an introduction, we will first explain the relationship between the software: Elasticsearch is a distributed full-text search and data analysis engine based on RESTful style; Kibana is a web system for visualizing Elasticsearch data; and"><meta itemprop="datePublished" content="2022-02-21T10:05:33+08:00" />
+<meta itemprop="dateModified" content="2022-02-21T10:05:33+08:00" />
+<meta itemprop="wordCount" content="1083">
+<meta itemprop="keywords" content="elasticsearch,nginx,filebeat," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Analyzing Nginx logs with Filebeat and Elasticsearch"/>
+<meta name="twitter:description" content="This article documents the use of Filebeat, Kibana, and Elasticsearch to build a system for collecting and analyzing Nginx logs; Filebeat is responsible for delivering Nginx log data as a data source to Elasticsearch. As an introduction, we will first explain the relationship between the software: Elasticsearch is a distributed full-text search and data analysis engine based on RESTful style; Kibana is a web system for visualizing Elasticsearch data; and"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Analyzing Nginx logs with Filebeat and Elasticsearch</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-02-21 10:05:33 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1083 words </span>
+          <span class="more-meta"> 3 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#environment-preparation-java">Environment preparation: JAVA</a></li>
+        <li><a href="#elasticsearch">Elasticsearch</a>
+          <ul>
+            <li><a href="#install-elasticsearch">Install Elasticsearch</a></li>
+            <li><a href="#configuring-elasticsearch">Configuring Elasticsearch</a></li>
+            <li><a href="#verify-that-the-elasticsearch-service-is-up">Verify that the Elasticsearch service is up</a></li>
+            <li><a href="#modifying-elasticsearch-memory-size">Modifying Elasticsearch memory size</a></li>
+          </ul>
+        </li>
+        <li><a href="#kibana">Kibana</a></li>
+        <li><a href="#filebeat">Filebeat</a>
+          <ul>
+            <li><a href="#removing-redundant-fields">Removing redundant fields</a></li>
+          </ul>
+        </li>
+        <li><a href="#best-practices">Best Practices</a>
+          <ul>
+            <li><a href="#start-the-service">Start the service</a></li>
+            <li><a href="#nginx-site-configuration-kibana-access">Nginx site configuration kibana access</a></li>
+            <li><a href="#configure-password-for-kibana">Configure password for kibana</a></li>
+            <li><a href="#adding-indexes">Adding indexes</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <blockquote>
+<p>This article documents the use of Filebeat, Kibana, and Elasticsearch to build a system for collecting and analyzing Nginx logs; Filebeat is responsible for delivering Nginx log data as a data source to Elasticsearch.</p>
+</blockquote>
+<p>As an introduction, we will first explain the relationship between the software: Elasticsearch is a distributed full-text search and data analysis engine based on RESTful style; Kibana is a web system for visualizing Elasticsearch data; and Filebeat is responsible for delivering Nginx log data to Elasticsearch as a data source.</p>
+<p>The server environment for this article: Ubuntu 20.04, with only one server node configured.</p>
+<h2 id="environment-preparation-java">Environment preparation: JAVA</h2>
+<p>You need to install Java Runtime Environment (JRE) and Java Development Kit (JDK).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">sudo apt update
+apt install default-jre
+java -version
+
+sudo apt install default-jdk
+javac -version
+</code></pre></td></tr></table>
+</div>
+</div><p>Reference ：<a href="https://www.digitalocean.com/community/tutorials/how-to-install-java-with-apt-on-ubuntu-20-04#installing-the-default-jrejdk%20in%20our%20guide">How To Install Java with Apt on Ubuntu 20.04</a></p>
+<h2 id="elasticsearch">Elasticsearch</h2>
+<h3 id="install-elasticsearch">Install Elasticsearch</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="c1">#将Elasticsearch公共GPG密钥导入APT：</span>
+wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch <span class="p">|</span> sudo apt-key add -
+
+<span class="c1">#添加Elastic源（笔者试验时elasticsearch最新是7.xx版本）：</span>
+<span class="nb">echo</span> <span class="s2">&#34;deb https://artifacts.elastic.co/packages/7.x/apt stable main&#34;</span> <span class="p">|</span> sudo tee -a /etc/apt/sources.list.d/elastic-7.x.list
+
+<span class="c1">#安装elasticsearch</span>
+sudo apt update
+sudo apt install elasticsearch
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="configuring-elasticsearch">Configuring Elasticsearch</h3>
+<p>The configuration file for Elasticsearch is located at:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">sudo vim /etc/elasticsearch/elasticsearch.yml
+
+<span class="c1">#重要配置项：</span>
+<span class="c1">#集群名称，相同网络下相同的集群名的节点为一个集群。</span>
+cluster.name
+
+<span class="c1">#存放数据的目录</span>
+path.data
+
+<span class="c1">#主机地址</span>
+network.host: localhost
+
+<span class="c1">#服务端口号</span>
+http.port: <span class="m">9200</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Managing Elasticsearch.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="c1">#启动/停止/重启</span>
+sudo systemctl start/stop/restart elasticsearch.service
+<span class="c1">#注册开机自启动</span>
+sudo systemctl <span class="nb">enable</span> elasticsearch.service
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="verify-that-the-elasticsearch-service-is-up">Verify that the Elasticsearch service is up</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">root@easeapi:~# curl -X GET localhost:9200
+<span class="o">{</span>
+  <span class="s2">&#34;name&#34;</span> : <span class="s2">&#34;easeapi&#34;</span>,
+  <span class="s2">&#34;cluster_name&#34;</span> : <span class="s2">&#34;elasticsearch&#34;</span>,
+  <span class="s2">&#34;cluster_uuid&#34;</span> : <span class="s2">&#34;easeapi-wDpaWmxXHJ8yu7a&#34;</span>,
+  <span class="s2">&#34;version&#34;</span> : <span class="o">{</span>
+    <span class="s2">&#34;number&#34;</span> : <span class="s2">&#34;7.11.2&#34;</span>,
+    <span class="s2">&#34;build_flavor&#34;</span> : <span class="s2">&#34;default&#34;</span>,
+    <span class="s2">&#34;build_type&#34;</span> : <span class="s2">&#34;deb&#34;</span>,
+    <span class="s2">&#34;build_hash&#34;</span> : <span class="s2">&#34;c4ca4238a0b923820dcc509a6f75849b&#34;</span>,
+    <span class="s2">&#34;build_date&#34;</span> : <span class="s2">&#34;2021-03-01T08:54:38.141101Z&#34;</span>,
+    <span class="s2">&#34;build_snapshot&#34;</span> : false,
+    <span class="s2">&#34;lucene_version&#34;</span> : <span class="s2">&#34;8.7.0&#34;</span>,
+    <span class="s2">&#34;minimum_wire_compatibility_version&#34;</span> : <span class="s2">&#34;6.8.0&#34;</span>,
+    <span class="s2">&#34;minimum_index_compatibility_version&#34;</span> : <span class="s2">&#34;6.0.0-beta1&#34;</span>
+  <span class="o">}</span>,
+  <span class="s2">&#34;tagline&#34;</span> : <span class="s2">&#34;You Know, for Search&#34;</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="modifying-elasticsearch-memory-size">Modifying Elasticsearch memory size</h3>
+<p>Elasticsearch 7.x is configured differently than before and requires a new file with the .options suffix in the /etc/elasticsearch/jvm.options.d directory. Modify the memory usage configuration as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">vim jvm.options.d/jvm.options
+-Xms1g
+-Xmx1g
+</code></pre></td></tr></table>
+</div>
+</div><p>Reference: <a href="https://www.elastic.co/guide/en/elasticsearch/reference/current/jvm-options.html">elasticsearch jvm-options</a></p>
+<h2 id="kibana">Kibana</h2>
+<p>The source was added in the previous step, so you can install it directly. Because of version dependencies, install Elasticsearch first before installing Kibana.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">sudo apt install kibana
+</code></pre></td></tr></table>
+</div>
+</div><p>The Elasticsearch configuration file is located at</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">vim /etc/kibana/kibana.yml
+</code></pre></td></tr></table>
+</div>
+</div><p>Important configuration items.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">server.port: <span class="m">5601</span>
+server.host: <span class="s2">&#34;localhost&#34;</span>
+server.basePath: <span class="s2">&#34;/kibana&#34;</span>//保持和nginx的访问目录配置一致
+server.rewriteBasePath: <span class="nb">true</span>
+elasticsearch.hosts: <span class="o">[</span><span class="s2">&#34;http://localhost:9200&#34;</span><span class="o">]</span>
+
+<span class="c1">#配置为中文</span>
+i18n.locale: <span class="s2">&#34;zh-CN&#34;</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Manage Kibana</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="c1">#启动/停止/重新启动</span>
+sudo systemctl start/stop/restart kibana
+<span class="c1">#加入自启动</span>
+sudo systemctl <span class="nb">enable</span> kibana
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="filebeat">Filebeat</h2>
+<p>Filebeat is a lightweight data collection and processing tool with the advantage of low resource consumption.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">sudo apt install filebeat
+<span class="c1">#配置文件</span>
+sudo vim /etc/filebeat/filebeat.yml
+
+<span class="c1">#主要配置项</span>
+setup.kibana:
+    host: <span class="s2">&#34;localhost:5601&#34;</span>
+
+output.elasticsearch:
+    hosts: <span class="o">[</span><span class="s2">&#34;localhost:9200&#34;</span><span class="o">]</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Manage Filebeat</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="c1">#启动/停止/重新启动</span>
+sudo systemctl start/stop/restart filebeat
+<span class="c1">#加入自启动</span>
+sudo systemctl <span class="nb">enable</span> filebeat
+<span class="c1">#测试连通性</span>
+filebeat <span class="nb">test</span> output
+</code></pre></td></tr></table>
+</div>
+</div><p>Filebeat is extended by Module to support files with different data formats. module-related commands.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="c1">#查看模块状态</span>
+sudo filebeat modules list
+<span class="c1">#启动指定Module</span>
+sudo filebeat modules <span class="nb">enable</span> nginx
+</code></pre></td></tr></table>
+</div>
+</div><p>Take Nginx for example, after starting Nginx&rsquo;s Module, you can see that the file nginx.yml..disabled in the /etc/filebeat/modules.d directory has become nginx.yml.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">vim /etc/filebeat/modules.d/nginx.yml
+
+<span class="c1">#配置nginx的日志路径。</span>
+- module: nginx
+    access:
+        enabled: <span class="nb">true</span>
+        var.paths: <span class="o">[</span><span class="s2">&#34;/var/log/nginx/access.log&#34;</span><span class="o">]</span>
+
+    error:
+        enabled: <span class="nb">true</span>
+        ar.paths: <span class="o">[</span><span class="s2">&#34;/var/log/nginx/error.log&#34;</span><span class="o">]</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Once the configuration is complete, use <code>filebeat setup</code> to write the configuration and then start filebeat.</p>
+<h3 id="removing-redundant-fields">Removing redundant fields</h3>
+<p>Filebeat&rsquo;s default output fields may be useless in some cases, causing redundancy. You can remove the redundant fields.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">sudo vim /etc/filebeat/filebeat.yml
+
+processors:
+        <span class="c1">#- add_host_metadata:</span>
+        <span class="c1">#    when.not.contains.tags: forwarded</span>
+        <span class="c1">#- add_cloud_metadata: ~</span>
+        <span class="c1">#- add_docker_metadata: ~</span>
+        <span class="c1">#- add_kubernetes_metadata: ~</span>
+  - drop_fields:
+          fields: <span class="o">[</span><span class="s2">&#34;agent&#34;</span>, <span class="s2">&#34;nginx&#34;</span>, <span class="s2">&#34;log.offset&#34;</span>, <span class="s2">&#34;fileset&#34;</span>, <span class="s2">&#34;input&#34;</span><span class="o">]</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Add fields that need to be removed as needed.</p>
+<h2 id="best-practices">Best Practices</h2>
+<h3 id="start-the-service">Start the service</h3>
+<p>Start three components in sequence.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">sudo service elasticsearch start
+sudo service kibana start
+sudo service filebeat start
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="nginx-site-configuration-kibana-access">Nginx site configuration kibana access</h3>
+<p>Using the secondary directory of the Nginx site as an access path, for example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">server <span class="o">{</span>
+    ...
+    location /kibana/ <span class="o">{</span>
+            proxy_pass http://127.0.0.1:5601<span class="p">;</span>
+            rewrite ^/kibabna/<span class="o">(</span>.*<span class="o">)</span>$ /<span class="nv">$1</span> break<span class="p">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Access to kibana is available through <code>https://easeapi.com/kibana</code>.</p>
+<h3 id="configure-password-for-kibana">Configure password for kibana</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">apt install apache2-utils
+htpasswd -c /home/htpasswd &lt;username&gt;
+</code></pre></td></tr></table>
+</div>
+</div><p>A password file based on HTTP Basic Authentication authentication will be generated. Add the following configuration to the Nginx site.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">server <span class="o">{</span>
+    auth_basic <span class="s1">&#39;easeapi center&#39;</span><span class="p">;</span>
+    auth_basic_user_file /home/htpasswd<span class="p">;</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When the corresponding page is visited, it will prompt for password verification.</p>
+<h3 id="adding-indexes">Adding indexes</h3>
+<p>After opening the kibana page, click &ldquo;Add Data&rdquo; and select &ldquo;Nginx Logs&rdquo; (there will be instructions for the Filebeat module to parse Nginx logs), and follow the instructions to finish.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/elasticsearch/">elasticsearch</a>
+          <a href="/tags/nginx/">nginx</a>
+          <a href="/tags/filebeat/">filebeat</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-02/linux-does-a-better-job-of-patching-vulnerabilities/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Google Research: Linux does a better job than Apple, Google and Microsoft at patching vulnerabilities</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-02/nsurlprotocol/">
+            <span class="next-text nav-default">IOS NSURLProtocol Explained and Pitfalls of Use</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

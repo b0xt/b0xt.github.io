@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Exploring what are the pitfalls of panic &amp; recover in Go source code? - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Preface The reason for writing this article is that a colleague at work recently wrote a Goroutine directly using the Go keyword, and then had a null pointer problem that caused the whole program to go down because there was no recover. The code looks like this. 1 2 3 4 5 6 7 8 9 10 11 12 13 func main() { defer func() { if err := recover();" /><meta name="keywords" content="golang, Panic Recover, Source Code" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/go-source-code-panic-and-recover/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Exploring what are the pitfalls of panic &amp; recover in Go source code?" />
+<meta property="og:description" content="Preface The reason for writing this article is that a colleague at work recently wrote a Goroutine directly using the Go keyword, and then had a null pointer problem that caused the whole program to go down because there was no recover. The code looks like this. 1 2 3 4 5 6 7 8 9 10 11 12 13 func main() { defer func() { if err := recover();" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/go-source-code-panic-and-recover/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-21T10:06:23+08:00" />
+<meta property="article:modified_time" content="2022-01-21T10:06:23+08:00" />
+
+<meta itemprop="name" content="Exploring what are the pitfalls of panic &amp; recover in Go source code?">
+<meta itemprop="description" content="Preface The reason for writing this article is that a colleague at work recently wrote a Goroutine directly using the Go keyword, and then had a null pointer problem that caused the whole program to go down because there was no recover. The code looks like this. 1 2 3 4 5 6 7 8 9 10 11 12 13 func main() { defer func() { if err := recover();"><meta itemprop="datePublished" content="2022-01-21T10:06:23+08:00" />
+<meta itemprop="dateModified" content="2022-01-21T10:06:23+08:00" />
+<meta itemprop="wordCount" content="3123">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Exploring what are the pitfalls of panic &amp; recover in Go source code?"/>
+<meta name="twitter:description" content="Preface The reason for writing this article is that a colleague at work recently wrote a Goroutine directly using the Go keyword, and then had a null pointer problem that caused the whole program to go down because there was no recover. The code looks like this. 1 2 3 4 5 6 7 8 9 10 11 12 13 func main() { defer func() { if err := recover();"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Exploring what are the pitfalls of panic &amp; recover in Go source code?</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-21 10:06:23 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 3123 words </span>
+          <span class="more-meta"> 7 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#preface">Preface</a></li>
+        <li><a href="#source-code-analysis">Source code analysis</a>
+          <ul>
+            <li><a href="#_panic-struct">_panic struct</a></li>
+            <li><a href="#panic-process">panic process</a></li>
+            <li><a href="#trigger-panic-to-crash-directly">Trigger panic to crash directly</a></li>
+            <li><a href="#triggering-a-panic-recovery">Triggering a panic recovery</a></li>
+          </ul>
+        </li>
+        <li><a href="#what-are-the-pitfalls-in-runtime">What are the pitfalls in runtime?</a>
+          <ul>
+            <li><a href="#uncatchable-exceptions">Uncatchable exceptions</a></li>
+            <li><a href="#exceptions-that-can-be-caught">Exceptions that can be caught</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="preface">Preface</h2>
+<p>The reason for writing this article is that a colleague at work recently wrote a Goroutine directly using the Go keyword, and then had a null pointer problem that caused the whole program to go down because there was no recover. The code looks like this.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span><span class="kc">nil</span><span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;======begin work======&#34;</span><span class="p">)</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="s">&#34;nil pointer exception&#34;</span><span class="p">)</span>
+    <span class="p">}()</span>
+    <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="o">*</span><span class="mi">100</span><span class="p">)</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;======after work======&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Returned results.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="o">======</span><span class="nx">begin</span> <span class="nx">work</span><span class="o">======</span>
+<span class="nx">panic</span><span class="p">:</span> <span class="kc">nil</span> <span class="nx">pointer</span> <span class="nx">exception</span>
+
+<span class="nx">goroutine</span> <span class="mi">18</span> <span class="p">[</span><span class="nx">running</span><span class="p">]:</span>
+<span class="o">...</span>
+<span class="nx">Process</span> <span class="nx">finished</span> <span class="nx">with</span> <span class="nx">the</span> <span class="nx">exit</span> <span class="nx">code</span> <span class="mi">2</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Note that there is a uniform exception handling in the outer layer of Goroutine, but obviously the outer deferer of Goroutine does not cover this exception.</p>
+<p>The reason for this is that we don&rsquo;t know much about the Go source code. panic &amp; recover have their own scope.</p>
+<ul>
+<li>recover only works if called from within a defer.</li>
+<li>panic allows multiple calls to be nested within a defer.</li>
+<li>panic will only work for the current Goroutine defer</li>
+</ul>
+<p>The reason why panic will only work for the current Goroutine&rsquo;s defer is that when the newdefer allocates the <code>_defer</code> structure object, it will chain the allocated object to the head of the current Goroutine&rsquo;s <code>_defer</code> table.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/21/3099f7ba86504a12bd05f657332ecd35.png" alt="sobyte"></p>
+<h2 id="source-code-analysis">Source code analysis</h2>
+<h3 id="_panic-struct">_panic struct</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">_panic</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">argp</span>      <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// pointer to arguments of deferred call run during panic; cannot move - known to liblink
+</span><span class="c1"></span>    <span class="nx">arg</span>       <span class="kd">interface</span><span class="p">{}</span>    <span class="c1">// argument to panic
+</span><span class="c1"></span>    <span class="nx">link</span>      <span class="o">*</span><span class="nx">_panic</span>        <span class="c1">// link to earlier panic
+</span><span class="c1"></span>    <span class="nx">pc</span>        <span class="kt">uintptr</span>        <span class="c1">// where to return to in runtime if this panic is bypassed
+</span><span class="c1"></span>    <span class="nx">sp</span>        <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="c1">// where to return to in runtime if this panic is bypassed
+</span><span class="c1"></span>    <span class="nx">recovered</span> <span class="kt">bool</span>           <span class="c1">// whether this panic is over
+</span><span class="c1"></span>    <span class="nx">aborted</span>   <span class="kt">bool</span>           <span class="c1">// the panic was aborted
+</span><span class="c1"></span>    <span class="nx">goexit</span>    <span class="kt">bool</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>argp is a pointer to the argument to the defer call.</li>
+<li>arg is the argument passed in when we call panic.</li>
+<li>link is a pointer to an earlier call to the <code>runtime._panic</code> structure, i.e. painc can be called consecutively, forming a chain between them.</li>
+<li>recovered indicates whether the current <code>runtime._panic</code> has been recovered.</li>
+<li>aborted indicates whether the current panic has been forcibly terminated.</li>
+</ul>
+<p>The main effect of these three keywords for pc, sp, and goexit is that it is possible for a panic to occur in a defer and then be recovered in an upper-level defer by recovering it, then the recovered process will actually resume normal execution on top of the Goexit framework and therefore abort Goexit.</p>
+<p>A discussion of the pc, sp and goexit fields and code commits can be found here: <a href="https://github.com/golang/go/commit/7dcd343ed641d3b70c09153d3b041ca3fe83b25e">https://github.com/golang/go/commit/7dcd343ed641d3b70c09153d3b041ca3fe83b25e</a> and this discussion <a href="https://github.com/golang/go/issues/29226">runtime: panic + recover can cancel a call to Goexit</a>.</p>
+<h3 id="panic-process">panic process</h3>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/21/808899890098492886300ea17832a912.png" alt="sobyte"></p>
+<ol>
+<li>the compiler converts the keyword panic to <code>runtime.gopanic</code> and calls it, then it keeps fetching deferers from the current Goroutine&rsquo;s defer table in a loop and executing them.</li>
+<li>if the defer function called has recover in it, then <code>runtime.gorecover</code> is called, which modifies the recovered field of <code>runtime._panic</code> to true.</li>
+<li>After calling the defer function and returning to the <code>runtime.gopanic</code> main logic, checking that the recovered field is true will retrieve the program counter <code>pc</code> and stack pointer <code>sp</code> from the <code>runtime._defer</code> structure and call the <code>runtime.recovery</code> function to recover the program. <code>runtime.recvoery</code> sets the return value of the function to 1 during dispatch.</li>
+<li>when the return value of the <code>runtime.deferproc</code> function is 1, the compiler-generated code jumps directly to the caller function before it returns and executes <code>runtime.deferreturn</code>, then the program has recovered from <code>panic</code> and executes the normal logic.</li>
+<li>after <code>runtime.gopanic</code> has executed all the _defer and has not encountered recover either, then <code>runtime.fatalpanic</code> is executed to terminate the program and return error code 2.</li>
+</ol>
+<p>So the whole process is divided into two parts: 1. logic with recover, where the panic can recover, and 2. logic without recover, where the panic simply crashes.</p>
+<h3 id="trigger-panic-to-crash-directly">Trigger panic to crash directly</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gopanic</span><span class="p">(</span><span class="nx">e</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+    <span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+    <span class="o">...</span>
+    <span class="kd">var</span> <span class="nx">p</span> <span class="nx">_panic</span>   
+    <span class="c1">// 创建新的 runtime._panic 并添加到所在 Goroutine 的 _panic 链表的最前面
+</span><span class="c1"></span>    <span class="nx">p</span><span class="p">.</span><span class="nx">link</span> <span class="p">=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span>
+    <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="p">=</span> <span class="p">(</span><span class="o">*</span><span class="nx">_panic</span><span class="p">)(</span><span class="nf">noescape</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">)))</span> 
+
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="c1">// 获取当前gorourine的 defer
+</span><span class="c1"></span>        <span class="nx">d</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_defer</span>
+        <span class="k">if</span> <span class="nx">d</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="k">break</span>
+        <span class="p">}</span>
+        <span class="o">...</span>
+        <span class="nx">d</span><span class="p">.</span><span class="nx">_panic</span> <span class="p">=</span> <span class="p">(</span><span class="o">*</span><span class="nx">_panic</span><span class="p">)(</span><span class="nf">noescape</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">)))</span> 
+        <span class="c1">// 运行defer调用函数
+</span><span class="c1"></span>        <span class="nf">reflectcall</span><span class="p">(</span><span class="kc">nil</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">fn</span><span class="p">),</span> <span class="nf">deferArgs</span><span class="p">(</span><span class="nx">d</span><span class="p">),</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">siz</span><span class="p">),</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">siz</span><span class="p">),</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">siz</span><span class="p">),</span> <span class="o">&amp;</span><span class="nx">regs</span><span class="p">)</span> 
+        <span class="nx">d</span><span class="p">.</span><span class="nx">_panic</span> <span class="p">=</span> <span class="kc">nil</span> 
+        <span class="nx">d</span><span class="p">.</span><span class="nx">fn</span> <span class="p">=</span> <span class="kc">nil</span>
+        <span class="nx">gp</span><span class="p">.</span><span class="nx">_defer</span> <span class="p">=</span> <span class="nx">d</span><span class="p">.</span><span class="nx">link</span>
+        <span class="c1">// 将defer从当前goroutine移除
+</span><span class="c1"></span>        <span class="nf">freedefer</span><span class="p">(</span><span class="nx">d</span><span class="p">)</span> 
+        <span class="c1">// recover 恢复程序
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">recovered</span> <span class="p">{</span>
+            <span class="o">...</span>
+        <span class="p">}</span>
+    <span class="p">}</span> 
+    <span class="c1">// 打印出全部的 panic 消息以及调用时传入的参数
+</span><span class="c1"></span>    <span class="nf">preprintpanics</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">)</span>
+    <span class="c1">// fatalpanic实现了无法被恢复的程序崩溃
+</span><span class="c1"></span>    <span class="nf">fatalpanic</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">)</span>  
+    <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">int</span><span class="p">)(</span><span class="kc">nil</span><span class="p">)</span> <span class="p">=</span> <span class="mi">0</span>       
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s look at the logic first.</p>
+<ol>
+<li>it first fetches the current Goroutine, creates a new <code>runtime._panic</code> and adds it to the top of the _panic chain of the Goroutine it&rsquo;s in.</li>
+<li>then it goes into a loop to get the current Goroutine&rsquo;s defer table and calls reflectcall to run the defer function.</li>
+<li>after running it removes the defer from the current Goroutine, as we assume here that there is no recover logic, then fatalpanic will be called to stop the whole program.</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">fatalpanic</span><span class="p">(</span><span class="nx">msgs</span> <span class="o">*</span><span class="nx">_panic</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">pc</span> <span class="o">:=</span> <span class="nf">getcallerpc</span><span class="p">()</span>
+    <span class="nx">sp</span> <span class="o">:=</span> <span class="nf">getcallersp</span><span class="p">()</span>
+    <span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+    <span class="kd">var</span> <span class="nx">docrash</span> <span class="kt">bool</span> 
+    <span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nf">startpanic_m</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="nx">msgs</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span> 
+            <span class="nf">printpanics</span><span class="p">(</span><span class="nx">msgs</span><span class="p">)</span>
+        <span class="p">}</span>
+
+        <span class="nx">docrash</span> <span class="p">=</span> <span class="nf">dopanic_m</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">pc</span><span class="p">,</span> <span class="nx">sp</span><span class="p">)</span>
+    <span class="p">})</span>
+    <span class="k">if</span> <span class="nx">docrash</span> <span class="p">{</span>
+        <span class="nf">crash</span><span class="p">()</span>
+    <span class="p">}</span> 
+    <span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nf">exit</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+    <span class="p">})</span>
+    <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">int</span><span class="p">)(</span><span class="kc">nil</span><span class="p">)</span> <span class="p">=</span> <span class="mi">0</span> <span class="c1">// not reached
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>fatalpanic It prints out the full panic message and the arguments passed in when it is called via printpanics before aborting the program, then calling exit and returning error code 2.</p>
+<h3 id="triggering-a-panic-recovery">Triggering a panic recovery</h3>
+<p>The recover keyword is called in <code>runtime.gorecover</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gorecover</span><span class="p">(</span><span class="nx">argp</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span> 
+    <span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+    <span class="nx">p</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span>
+    <span class="k">if</span> <span class="nx">p</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nx">p</span><span class="p">.</span><span class="nx">goexit</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nx">p</span><span class="p">.</span><span class="nx">recovered</span> <span class="o">&amp;&amp;</span> <span class="nx">argp</span> <span class="o">==</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">p</span><span class="p">.</span><span class="nx">argp</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nx">p</span><span class="p">.</span><span class="nx">recovered</span> <span class="p">=</span> <span class="kc">true</span>
+        <span class="k">return</span> <span class="nx">p</span><span class="p">.</span><span class="nx">arg</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If the current Goroutine does not call panic, then the function will simply return nil; <code>p.Goexit</code> determines if the current one is triggered by goexit, and as the example above says, recover is not able to block goexit.</p>
+<p>If the condition is met, then the recovered field will eventually be modified to ture, and then recovery will be performed in <code>runtime.gopanic</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gopanic</span><span class="p">(</span><span class="nx">e</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+    <span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+    <span class="o">...</span>
+    <span class="kd">var</span> <span class="nx">p</span> <span class="nx">_panic</span>   
+    <span class="c1">// 创建新的 runtime._panic 并添加到所在 Goroutine 的 _panic 链表的最前面
+</span><span class="c1"></span>    <span class="nx">p</span><span class="p">.</span><span class="nx">link</span> <span class="p">=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span>
+    <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="p">=</span> <span class="p">(</span><span class="o">*</span><span class="nx">_panic</span><span class="p">)(</span><span class="nf">noescape</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">)))</span> 
+
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="c1">// 获取当前gorourine的 defer
+</span><span class="c1"></span>        <span class="nx">d</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_defer</span>  
+        <span class="o">...</span>
+        <span class="nx">pc</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nx">pc</span>
+        <span class="nx">sp</span> <span class="o">:=</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nx">sp</span><span class="p">)</span> 
+        <span class="c1">// recover 恢复程序
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">recovered</span> <span class="p">{</span>
+            <span class="c1">// 获取下一个 panic
+</span><span class="c1"></span>            <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">link</span>
+            <span class="c1">// 如果该panic是 goexit 触发的，那么会恢复到 goexit 逻辑代码中执行 exit
+</span><span class="c1"></span>            <span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">.</span><span class="nx">goexit</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">.</span><span class="nx">aborted</span> <span class="p">{</span>
+                <span class="nx">gp</span><span class="p">.</span><span class="nx">sigcode0</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">.</span><span class="nx">sp</span><span class="p">)</span>
+                <span class="nx">gp</span><span class="p">.</span><span class="nx">sigcode1</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">.</span><span class="nx">pc</span><span class="p">)</span>
+                <span class="nf">mcall</span><span class="p">(</span><span class="nx">recovery</span><span class="p">)</span>
+                <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;bypassed recovery failed&#34;</span><span class="p">)</span> <span class="c1">// mcall 会恢复正常的代码逻辑，不会走到这里
+</span><span class="c1"></span>            <span class="p">}</span>
+            <span class="o">...</span>
+
+            <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">link</span>
+            <span class="k">for</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">.</span><span class="nx">aborted</span> <span class="p">{</span>
+                <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="p">=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span><span class="p">.</span><span class="nx">link</span>
+            <span class="p">}</span>
+            <span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">_panic</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span> 
+                <span class="nx">gp</span><span class="p">.</span><span class="nx">sig</span> <span class="p">=</span> <span class="mi">0</span>
+            <span class="p">}</span>
+            <span class="nx">gp</span><span class="p">.</span><span class="nx">sigcode0</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">sp</span><span class="p">)</span>
+            <span class="nx">gp</span><span class="p">.</span><span class="nx">sigcode1</span> <span class="p">=</span> <span class="nx">pc</span>
+            <span class="nf">mcall</span><span class="p">(</span><span class="nx">recovery</span><span class="p">)</span>
+            <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;recovery failed&#34;</span><span class="p">)</span> <span class="c1">// mcall 会恢复正常的代码逻辑，不会走到这里
+</span><span class="c1"></span>        <span class="p">}</span>
+    <span class="p">}</span> 
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Two mcall(recovery) calls to recovery are included here.</p>
+<p>The first part <code>if gp._panic ! = nil &amp;&amp; gp._panic.goexit &amp;&amp; gp._panic.aborted</code> determines mainly for Goexit, ensuring that Goexit will also be recovered to perform an exit when Goexit is executed.</p>
+<p>The second part is to do the panic recovery, taking the program counters pc and sp from <code>runtime._defer</code> and calling recovery to trigger the program recovery.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="n">func</span> <span class="nf">recovery</span><span class="o">(</span><span class="n">gp</span> <span class="o">*</span><span class="n">g</span><span class="o">)</span> <span class="o">{</span> 
+    <span class="n">sp</span> <span class="o">:=</span> <span class="n">gp</span><span class="o">.</span><span class="na">sigcode0</span>
+    <span class="n">pc</span> <span class="o">:=</span> <span class="n">gp</span><span class="o">.</span><span class="na">sigcode1</span>
+    <span class="o">...</span>
+    <span class="n">gp</span><span class="o">.</span><span class="na">sched</span><span class="o">.</span><span class="na">sp</span> <span class="o">=</span> <span class="n">sp</span>
+    <span class="n">gp</span><span class="o">.</span><span class="na">sched</span><span class="o">.</span><span class="na">pc</span> <span class="o">=</span> <span class="n">pc</span>
+    <span class="n">gp</span><span class="o">.</span><span class="na">sched</span><span class="o">.</span><span class="na">lr</span> <span class="o">=</span> <span class="n">0</span>
+    <span class="n">gp</span><span class="o">.</span><span class="na">sched</span><span class="o">.</span><span class="na">ret</span> <span class="o">=</span> <span class="n">1</span>
+    <span class="nf">gogo</span><span class="o">(&amp;</span><span class="n">gp</span><span class="o">.</span><span class="na">sched</span><span class="o">)</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The recovery here sets the return value of the function to 1, and the call to gogo jumps back to where the <code>defer</code> keyword was called, and the Goroutine continues to execute.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">deferproc</span><span class="p">(</span><span class="nx">siz</span> <span class="kt">int32</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">*</span><span class="nx">funcval</span><span class="p">)</span> <span class="p">{</span>  
+    <span class="o">...</span>
+    <span class="c1">// deferproc returns 0 normally.
+</span><span class="c1"></span>    <span class="c1">// a deferred func that stops a panic
+</span><span class="c1"></span>    <span class="c1">// makes the deferproc return 1.
+</span><span class="c1"></span>    <span class="c1">// the code the compiler generates always
+</span><span class="c1"></span>    <span class="c1">// checks the return value and jumps to the
+</span><span class="c1"></span>    <span class="c1">// end of the function if deferproc returns != 0.
+</span><span class="c1"></span>    <span class="nf">return0</span><span class="p">()</span> 
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We know from the comments that when deferproc returns a value of 1, the compiler generates code that jumps directly to the caller&rsquo;s function before it returns and executes <code>runtime.deferreturn</code>.</p>
+<h2 id="what-are-the-pitfalls-in-runtime">What are the pitfalls in runtime?</h2>
+<p>Just because we don&rsquo;t recommend using panic when implementing our business doesn&rsquo;t mean it&rsquo;s not used in runtime, which is a big trap for newcomers who don&rsquo;t know the underlying Go implementation. It is impossible to write robust Go code if you are not familiar with these pitfalls.</p>
+<p>Here I&rsquo;ll categorise the exceptions in runtime, some of which are not caught by recover, and some of which are normal panics that can be caught.</p>
+<h3 id="uncatchable-exceptions">Uncatchable exceptions</h3>
+<h4 id="memory-overflow">memory overflow</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">defer</span> <span class="nf">errorHandler</span><span class="p">()</span>
+    <span class="nx">_</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">int64</span><span class="p">,</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">40</span><span class="p">)</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;can recover&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">errorHandler</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">r</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">r</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">r</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If you call alloc to allocate memory, you will call grow to request new memory from the system. If you call mmap to request memory and return _ENOMEM, you will throw a <code>runtime: out of memory</code> exception, and throw will call exit to cause the whole program to exit.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">sysMap</span><span class="p">(</span><span class="nx">v</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">n</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">sysStat</span> <span class="o">*</span><span class="nx">sysMemStat</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">sysStat</span><span class="p">.</span><span class="nf">add</span><span class="p">(</span><span class="nb">int64</span><span class="p">(</span><span class="nx">n</span><span class="p">))</span>
+
+    <span class="nx">p</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">mmap</span><span class="p">(</span><span class="nx">v</span><span class="p">,</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">_PROT_READ</span><span class="p">|</span><span class="nx">_PROT_WRITE</span><span class="p">,</span> <span class="nx">_MAP_ANON</span><span class="p">|</span><span class="nx">_MAP_FIXED</span><span class="p">|</span><span class="nx">_MAP_PRIVATE</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="nx">_ENOMEM</span> <span class="p">{</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;runtime: out of memory&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">p</span> <span class="o">!=</span> <span class="nx">v</span> <span class="o">||</span> <span class="nx">err</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;runtime: cannot map pages in arena address space&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">throw</span><span class="p">(</span><span class="nx">s</span> <span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="nf">fatalthrow</span><span class="p">()</span>
+    <span class="o">*</span><span class="p">(</span><span class="o">*</span><span class="kt">int</span><span class="p">)(</span><span class="kc">nil</span><span class="p">)</span> <span class="p">=</span> <span class="mi">0</span> <span class="c1">// not reached
+</span><span class="c1"></span><span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">fatalthrow</span><span class="p">()</span> <span class="p">{</span> 
+    <span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span> 
+        <span class="o">...</span>
+        <span class="nf">exit</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span>
+    <span class="p">})</span>
+
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="map-concurrent-read-and-write">map Concurrent read and write</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">defer</span> <span class="nf">errorHandler</span><span class="p">()</span>
+    <span class="nx">m</span> <span class="o">:=</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">int</span><span class="p">{}</span>
+
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="p">{</span>
+            <span class="nx">m</span><span class="p">[</span><span class="s">&#34;x&#34;</span><span class="p">]</span> <span class="p">=</span> <span class="mi">1</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="nx">_</span> <span class="p">=</span> <span class="nx">m</span><span class="p">[</span><span class="s">&#34;x&#34;</span><span class="p">]</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">errorHandler</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">r</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">r</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">r</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Since map is not thread-safe, it throws a <code>concurrent map read and map write</code> exception when it encounters concurrent reads and writes, which causes the program to exit straight away.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mapaccess1_faststr</span><span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">maptype</span><span class="p">,</span> <span class="nx">h</span> <span class="o">*</span><span class="nx">hmap</span><span class="p">,</span> <span class="nx">ky</span> <span class="kt">string</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="k">if</span> <span class="nx">h</span><span class="p">.</span><span class="nx">flags</span><span class="o">&amp;</span><span class="nx">hashWriting</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;concurrent map read and map write&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+<span class="err">｝</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The throw here, like above, will eventually be called to exit.</p>
+<p>I used to work in java, and when I encountered concurrent stateful problems with hashmap, it just threw an exception and didn&rsquo;t cause the program to crash.</p>
+<p>The official explanation for this is as follows.</p>
+<blockquote>
+<p>The runtime has added lightweight, best-effort detection of concurrent misuse of maps. As always, if one goroutine is writing to a map, no other goroutine should be reading or writing the map concurrently. <strong>If the runtime detects this condition, it prints a diagnosis and crashes the program.</strong> The best way to find out more about the problem is to run the program under the <a href="https://blog.golang.org/race-detector">race detector</a>, which will more reliably identify the race and give more detail.</p>
+</blockquote>
+<h4 id="running-out-of-stack-memory">running out of stack memory</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">defer</span> <span class="nf">errorHandler</span><span class="p">()</span>
+    <span class="kd">var</span> <span class="nx">f</span> <span class="kd">func</span><span class="p">(</span><span class="nx">a</span> <span class="p">[</span><span class="mi">1000</span><span class="p">]</span><span class="kt">int64</span><span class="p">)</span>
+    <span class="nx">f</span> <span class="p">=</span> <span class="kd">func</span><span class="p">(</span><span class="nx">a</span> <span class="p">[</span><span class="mi">1000</span><span class="p">]</span><span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nf">f</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nf">f</span><span class="p">([</span><span class="mi">1000</span><span class="p">]</span><span class="kt">int64</span><span class="p">{})</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This example would return.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">runtime</span><span class="p">:</span> <span class="nx">goroutine</span> <span class="nx">stack</span> <span class="nx">exceeds</span> <span class="mi">1000000000</span><span class="o">-</span><span class="kt">byte</span> <span class="nx">limit</span>
+<span class="nx">runtime</span><span class="p">:</span> <span class="nx">sp</span><span class="p">=</span><span class="mh">0xc0200e1be8</span> <span class="nx">stack</span><span class="p">=[</span><span class="mh">0xc0200e0000</span><span class="p">,</span> <span class="mh">0xc0400e0000</span><span class="p">]</span>
+<span class="nx">fatal</span> <span class="kt">error</span><span class="p">:</span> <span class="nx">stack</span> <span class="nx">overflow</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Let me briefly explain the basic mechanics of the stack.</p>
+<p>In Go, Goroutines do not have a fixed stack size. Instead, they start small (say 4KB) and grow/shrink as needed, seemingly giving the impression of an &ldquo;infinite&rdquo; stack. But growth is always finite, but this limit comes not from the call depth limit, but from the stack memory limit, which is 1GB on Linux 64-bit machines.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">maxstacksize</span> <span class="kt">uintptr</span> <span class="p">=</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="mi">20</span> <span class="c1">// enough until runtime.main sets it for real
+</span><span class="c1"></span>
+<span class="kd">func</span> <span class="nf">newstack</span><span class="p">()</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="k">if</span> <span class="nx">newsize</span> <span class="p">&gt;</span> <span class="nx">maxstacksize</span> <span class="o">||</span> <span class="nx">newsize</span> <span class="p">&gt;</span> <span class="nx">maxstackceiling</span> <span class="p">{</span> 
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;stack overflow&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In stack expansion, it is checked that the new stack size exceeds the threshold <code>1 &lt;&lt; 20</code>, and if it does, <code>throw(&quot;stack overflow&quot;)</code> is called and an exit is executed, causing the whole program to crash.</p>
+<h4 id="tries-to-give-the-nil-function-to-goroutine-to-start">tries to give the nil function to goroutine to start</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">defer</span> <span class="nf">errorHandler</span><span class="p">()</span>
+    <span class="kd">var</span> <span class="nx">f</span> <span class="kd">func</span><span class="p">()</span>
+    <span class="k">go</span> <span class="nf">f</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Here too, it will simply crash.</p>
+<h4 id="all-threads-are-hibernating">All threads are hibernating</h4>
+<p>Normally, not all threads in a program will be hibernating, there will always be threads running to handle our tasks, e.g.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">defer</span> <span class="nf">errorHandler</span><span class="p">()</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="kc">true</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;alive&#34;</span><span class="p">)</span>
+            <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="o">*</span><span class="mi">1</span><span class="p">)</span> 
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="o">&lt;-</span><span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">int</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>However, some students have done some &ldquo;interesting&rdquo; things, such as not handling the logic of our code very well and adding some code to the logic that will permanently block.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">defer</span> <span class="nf">errorHandler</span><span class="p">()</span>
+    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="kc">true</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;alive&#34;</span><span class="p">)</span>
+            <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="o">*</span><span class="mi">1</span><span class="p">)</span>
+            <span class="k">select</span> <span class="p">{}</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="o">&lt;-</span><span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">int</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>For example, if you add a select to a goroutine, this will cause a permanent block, and go will crash the program if it detects that there is no goroutine left to run.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">fatal</span> <span class="kt">error</span><span class="p">:</span> <span class="nx">all</span> <span class="nx">goroutines</span> <span class="nx">are</span> <span class="nx">asleep</span> <span class="o">-</span> <span class="nx">deadlock</span><span class="p">!</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="exceptions-that-can-be-caught">Exceptions that can be caught</h3>
+<h4 id="array--slice--subscript-out-of-bounds">array ( slice ) subscript out of bounds</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">foo</span><span class="p">(){</span>
+    <span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">r</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">r</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">r</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="kd">var</span> <span class="nx">bar</span> <span class="p">=</span> <span class="p">[]</span><span class="kt">int</span><span class="p">{</span><span class="mi">1</span><span class="p">}</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">bar</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">(){</span> 
+    <span class="nf">foo</span><span class="p">()</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;exit&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Return.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">runtime error: index out of range <span class="o">[</span>1<span class="o">]</span> with length <span class="m">1</span>
+<span class="nb">exit</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Because of the use of <code>recover</code> in the code, the program resumes with the output <code>exit</code>.</p>
+<h4 id="null-pointer-exception">null pointer exception</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">foo</span><span class="p">(){</span>
+    <span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">r</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">r</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">r</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="kd">var</span> <span class="nx">bar</span> <span class="o">*</span><span class="kt">int</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="o">*</span><span class="nx">bar</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">(){</span>
+    <span class="nf">foo</span><span class="p">()</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;exit&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Return.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">runtime</span> <span class="kt">error</span><span class="p">:</span> <span class="nx">invalid</span> <span class="nx">memory</span> <span class="nx">address</span> <span class="nx">or</span> <span class="kc">nil</span> <span class="nx">pointer</span> <span class="nx">dereference</span>
+<span class="nx">exit</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In addition to the above, another common scenario is that we have a variable that is initialized but left empty, but the Receiver is a pointer.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Shark</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">Name</span> <span class="kt">string</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Shark</span><span class="p">)</span> <span class="nf">SayHello</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;Hi! My name is&#34;</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nx">Name</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">s</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Shark</span><span class="p">{</span><span class="s">&#34;Sammy&#34;</span><span class="p">}</span>
+    <span class="nx">s</span> <span class="p">=</span> <span class="kc">nil</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nf">SayHello</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="sends-data-to-a-chan-that-has-been-closed">sends data to a chan that has been closed</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">foo</span><span class="p">(){</span>
+    <span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">r</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">r</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">r</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="kd">var</span> <span class="nx">bar</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">int</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="nb">close</span><span class="p">(</span><span class="nx">bar</span><span class="p">)</span>
+    <span class="nx">bar</span><span class="o">&lt;-</span><span class="mi">1</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">(){</span>
+    <span class="nf">foo</span><span class="p">()</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;exit&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Results</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">send</span> <span class="nx">on</span> <span class="nx">closed</span> <span class="nx">channel</span>
+<span class="nx">exit</span>
+</code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">chansend</span><span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">hchan</span><span class="p">,</span> <span class="nx">ep</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">,</span> <span class="nx">block</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">callerpc</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="c1">//加锁
+</span><span class="c1"></span>    <span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+    <span class="c1">// 是否关闭的判断
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">closed</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nf">plainError</span><span class="p">(</span><span class="s">&#34;send on closed channel&#34;</span><span class="p">))</span>
+    <span class="p">}</span>
+    <span class="c1">// 从 recvq 中取出一个接收者
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">sg</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">recvq</span><span class="p">.</span><span class="nf">dequeue</span><span class="p">();</span> <span class="nx">sg</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span> 
+        <span class="c1">// 如果接收者存在，直接向该接收者发送数据，绕过buffer
+</span><span class="c1"></span>        <span class="nf">send</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="nx">sg</span><span class="p">,</span> <span class="nx">ep</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span> <span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span> <span class="p">},</span> <span class="mi">3</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">true</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When sending, it is determined whether the chan has been closed.</p>
+<h4 id="type-assertion">Type Assertion</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">foo</span><span class="p">(){</span>
+    <span class="k">defer</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">r</span> <span class="o">:=</span> <span class="nb">recover</span><span class="p">();</span> <span class="nx">r</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">r</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="kd">var</span> <span class="nx">i</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">=</span> <span class="s">&#34;abc&#34;</span>
+    <span class="nx">_</span> <span class="p">=</span> <span class="nx">i</span><span class="p">.([]</span><span class="kt">string</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">(){</span>
+    <span class="nf">foo</span><span class="p">()</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;exit&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Results</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">interface</span> <span class="nx">conversion</span><span class="p">:</span> <span class="kd">interface</span> <span class="p">{}</span> <span class="nx">is</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">not</span> <span class="p">[]</span><span class="kt">string</span>
+<span class="nx">exit</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>So when asserting we need to use an assertion with two return values.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">    <span class="kd">var</span> <span class="nx">i</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">=</span> <span class="s">&#34;hello&#34;</span> 
+
+    <span class="nx">f</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">i</span><span class="p">.(</span><span class="kt">float64</span><span class="p">)</span> <span class="c1">//  no runtime panic
+</span><span class="c1"></span>    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">ok</span><span class="p">)</span>
+
+    <span class="nx">f</span> <span class="p">=</span> <span class="nx">i</span><span class="p">.(</span><span class="kt">float64</span><span class="p">)</span> <span class="c1">// panic
+</span><span class="c1"></span>    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>There are quite a few errors like the one above, so if you want to look deeper, you can do so on <a href="https://stackoverflow.com/search?q=Runtime+Panic+in+Go">stackoverflow</a>.</p>
+<h2 id="summary">Summary</h2>
+<p>This article started with an example and then explained the source code of panic &amp; recover. Some exceptions are not caught by recover, and some are caught by normal panic, so we need to pay attention to them from time to time to prevent the application from crashing.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/go-ycsb/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Exploring Go-YCSB for database benchmarking</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/go-simple-architecture/">
+            <span class="next-text nav-default">Golang Simple Architecture in Action</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

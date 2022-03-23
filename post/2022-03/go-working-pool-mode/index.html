@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go Concurrency-working pool mode - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="I read an article earlier: Handling 1 Million Requests per Minute with Go. Today I stumbled upon another article. The principle of the two articles is similar: there are a number of work tasks (jobs), through the work-pool (worker-pool) way, to achieve the effect of multiple worker concurrent processing job. There are still many differences between them, and the differences in implementation are quite big. Here is a picture, which" /><meta name="keywords" content="golang, Working Pool, concurrency" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/go-working-pool-mode/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go Concurrency-working pool mode" />
+<meta property="og:description" content="I read an article earlier: Handling 1 Million Requests per Minute with Go. Today I stumbled upon another article. The principle of the two articles is similar: there are a number of work tasks (jobs), through the work-pool (worker-pool) way, to achieve the effect of multiple worker concurrent processing job. There are still many differences between them, and the differences in implementation are quite big. Here is a picture, which" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/go-working-pool-mode/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-15T09:41:31+08:00" />
+<meta property="article:modified_time" content="2022-03-15T09:41:31+08:00" />
+
+<meta itemprop="name" content="Go Concurrency-working pool mode">
+<meta itemprop="description" content="I read an article earlier: Handling 1 Million Requests per Minute with Go. Today I stumbled upon another article. The principle of the two articles is similar: there are a number of work tasks (jobs), through the work-pool (worker-pool) way, to achieve the effect of multiple worker concurrent processing job. There are still many differences between them, and the differences in implementation are quite big. Here is a picture, which"><meta itemprop="datePublished" content="2022-03-15T09:41:31+08:00" />
+<meta itemprop="dateModified" content="2022-03-15T09:41:31+08:00" />
+<meta itemprop="wordCount" content="1228">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go Concurrency-working pool mode"/>
+<meta name="twitter:description" content="I read an article earlier: Handling 1 Million Requests per Minute with Go. Today I stumbled upon another article. The principle of the two articles is similar: there are a number of work tasks (jobs), through the work-pool (worker-pool) way, to achieve the effect of multiple worker concurrent processing job. There are still many differences between them, and the differences in implementation are quite big. Here is a picture, which"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go Concurrency-working pool mode</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-15 09:41:31 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1228 words </span>
+          <span class="more-meta"> 3 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents"></nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>I read an article earlier: <code>Handling 1 Million Requests per Minute with Go</code>.</p>
+<p>Today I stumbled upon another article. The principle of the two articles is similar: there are a number of work tasks (jobs), through the work-pool (worker-pool) way, to achieve the effect of multiple <code>worker</code> concurrent processing <code>job</code>.</p>
+<p>There are still many differences between them, and the differences in implementation are quite big.</p>
+<p>Here is a picture, which is roughly the overall workflow in the first article.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/15/5f8a4b6a205c4fe8ab2a892eedb8e012.png" alt="Handling 1 Million Requests per Minute with Go"></p>
+<ul>
+<li>Each <code>worker</code> just processes the task and doesn&rsquo;t care about the result, and doesn&rsquo;t do further processing on the result.</li>
+<li>As long as the request does not stop, the program will not stop, there is no control mechanism, unless it is down.</li>
+</ul>
+<p>The difference in this article is:</p>
+<p>First the data will be aggregated from <code>generate</code> (produce data) -&gt; concurrently process data -&gt; process the result. The flowchart is roughly like this.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/15/03c654668d5a4ffeae7b7ed044d69a86.png" alt="Working Pool"></p>
+<p>Then it can achieve the effect of controlling the work pool to stop working through <code>context.context</code>.</p>
+<p>Finally, through the code, you will see that it is not a <code>worker-pool</code> in the traditional sense, as will be explained later.</p>
+<p>The following diagram clearly shows the overall flow.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/15/44a96c2c021946c392789e1d75ec3f7a.png" alt="Working Pool"></p>
+<p>By the way, the code implemented in this article is much simpler than the code for <code>Handling 1 Million Requests per Minute with Go</code>.</p>
+<p>First look at <code>job</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">wpool</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;context&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">type</span> <span class="nx">JobID</span> <span class="kt">string</span>
+<span class="kd">type</span> <span class="nx">jobType</span> <span class="kt">string</span>
+<span class="kd">type</span> <span class="nx">jobMetadata</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}</span>
+
+<span class="kd">type</span> <span class="nx">ExecutionFn</span> <span class="kd">func</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">args</span> <span class="kd">interface</span><span class="p">{})</span> <span class="p">(</span><span class="kd">interface</span><span class="p">{},</span> <span class="kt">error</span><span class="p">)</span>
+
+<span class="kd">type</span> <span class="nx">JobDescriptor</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">ID</span>       <span class="nx">JobID</span> 
+	<span class="nx">JType</span>    <span class="nx">jobType</span>
+	<span class="nx">Metadata</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">interface</span><span class="p">{}</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">Result</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">Value</span>      <span class="kd">interface</span><span class="p">{}</span>
+	<span class="nx">Err</span>        <span class="kt">error</span>
+	<span class="nx">Descriptor</span> <span class="nx">JobDescriptor</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">Job</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">Descriptor</span> <span class="nx">JobDescriptor</span>
+	<span class="nx">ExecFn</span>     <span class="nx">ExecutionFn</span>
+	<span class="nx">Args</span>       <span class="kd">interface</span><span class="p">{}</span>
+<span class="p">}</span>
+
+<span class="c1">// 处理 job 逻辑,处理结果包装成 Result 结果
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">j</span> <span class="nx">Job</span><span class="p">)</span> <span class="nf">execute</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="nx">Result</span> <span class="p">{</span>
+	<span class="nx">value</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">j</span><span class="p">.</span><span class="nf">ExecFn</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">j</span><span class="p">.</span><span class="nx">Args</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">Result</span><span class="p">{</span>
+			<span class="nx">Err</span><span class="p">:</span>        <span class="nx">err</span><span class="p">,</span>
+			<span class="nx">Descriptor</span><span class="p">:</span> <span class="nx">j</span><span class="p">.</span><span class="nx">Descriptor</span><span class="p">,</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="nx">Result</span><span class="p">{</span>
+		<span class="nx">Value</span><span class="p">:</span>      <span class="nx">value</span><span class="p">,</span>
+		<span class="nx">Descriptor</span><span class="p">:</span> <span class="nx">j</span><span class="p">.</span><span class="nx">Descriptor</span><span class="p">,</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This can be done briefly. Eventually each <code>job</code> will be wrapped into a <code>Result</code> after processing and returned.</p>
+<p>The following section is the core code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">wpool</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;context&#34;</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;sync&#34;</span>
+<span class="p">)</span>
+
+<span class="c1">// 运行中的每个worker
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">worker</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">wg</span> <span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">,</span> <span class="nx">jobs</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">Job</span><span class="p">,</span> <span class="nx">results</span> <span class="kd">chan</span><span class="o">&lt;-</span> <span class="nx">Result</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">defer</span> <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">select</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="nx">job</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">jobs</span><span class="p">:</span>
+			<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+				<span class="k">return</span>
+			<span class="p">}</span>
+			<span class="nx">results</span> <span class="o">&lt;-</span> <span class="nx">job</span><span class="p">.</span><span class="nf">execute</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
+			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;cancelled worker. Error detail: %v\n&#34;</span><span class="p">,</span> <span class="nx">ctx</span><span class="p">.</span><span class="nf">Err</span><span class="p">())</span>
+			<span class="nx">results</span> <span class="o">&lt;-</span> <span class="nx">Result</span><span class="p">{</span>
+				<span class="nx">Err</span><span class="p">:</span> <span class="nx">ctx</span><span class="p">.</span><span class="nf">Err</span><span class="p">(),</span>
+			<span class="p">}</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">WorkerPool</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">workersCount</span> <span class="kt">int</span> <span class="c1">//worker 数量
+</span><span class="c1"></span>	<span class="nx">jobs</span>         <span class="kd">chan</span> <span class="nx">Job</span> <span class="c1">// 存储 job 的 channel 
+</span><span class="c1"></span>	<span class="nx">results</span>      <span class="kd">chan</span> <span class="nx">Result</span> <span class="c1">// 处理完每个 job 对应的 结果集
+</span><span class="c1"></span>	<span class="nx">Done</span>         <span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}</span> <span class="c1">//是否结束
+</span><span class="c1"></span><span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">New</span><span class="p">(</span><span class="nx">wcount</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">WorkerPool</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">WorkerPool</span><span class="p">{</span>
+		<span class="nx">workersCount</span><span class="p">:</span> <span class="nx">wcount</span><span class="p">,</span>
+		<span class="nx">jobs</span><span class="p">:</span>         <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Job</span><span class="p">,</span> <span class="nx">wcount</span><span class="p">),</span>
+		<span class="nx">results</span><span class="p">:</span>      <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Result</span><span class="p">,</span> <span class="nx">wcount</span><span class="p">),</span>
+		<span class="nx">Done</span><span class="p">:</span>         <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}),</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">wp</span> <span class="nx">WorkerPool</span><span class="p">)</span> <span class="nf">Run</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">wp</span><span class="p">.</span><span class="nx">workersCount</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+		<span class="k">go</span> <span class="nf">worker</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">wg</span><span class="p">,</span> <span class="nx">wp</span><span class="p">.</span><span class="nx">jobs</span><span class="p">,</span> <span class="nx">wp</span><span class="p">.</span><span class="nx">results</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+	<span class="nb">close</span><span class="p">(</span><span class="nx">wp</span><span class="p">.</span><span class="nx">Done</span><span class="p">)</span>
+	<span class="nb">close</span><span class="p">(</span><span class="nx">wp</span><span class="p">.</span><span class="nx">results</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">wp</span> <span class="nx">WorkerPool</span><span class="p">)</span> <span class="nf">Results</span><span class="p">()</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">Result</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">wp</span><span class="p">.</span><span class="nx">results</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">wp</span> <span class="nx">WorkerPool</span><span class="p">)</span> <span class="nf">GenerateFrom</span><span class="p">(</span><span class="nx">jobsBulk</span> <span class="p">[]</span><span class="nx">Job</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">jobsBulk</span> <span class="p">{</span>
+		<span class="nx">wp</span><span class="p">.</span><span class="nx">jobs</span> <span class="o">&lt;-</span> <span class="nx">jobsBulk</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+	<span class="p">}</span>
+	<span class="nb">close</span><span class="p">(</span><span class="nx">wp</span><span class="p">.</span><span class="nx">jobs</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The entire <code>WorkerPool</code> structure is simple. <code>jobs</code> is a cache <code>channel</code>. Each task is put into <code>jobs</code> and waits to be processed by <code>woker</code>.</p>
+<p><code>results</code> is also a channel type, and its role is to hold the result <code>Result</code> of each <code>job</code> processing.</p>
+<p>First initialize a <code>worker-pool</code> with <code>New</code>, and then execute <code>Run</code> to start running.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">New</span><span class="p">(</span><span class="nx">wcount</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">WorkerPool</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">WorkerPool</span><span class="p">{</span>
+		<span class="nx">workersCount</span><span class="p">:</span> <span class="nx">wcount</span><span class="p">,</span>
+		<span class="nx">jobs</span><span class="p">:</span>         <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Job</span><span class="p">,</span> <span class="nx">wcount</span><span class="p">),</span>
+		<span class="nx">results</span><span class="p">:</span>      <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Result</span><span class="p">,</span> <span class="nx">wcount</span><span class="p">),</span>
+		<span class="nx">Done</span><span class="p">:</span>         <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{}),</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">wp</span> <span class="nx">WorkerPool</span><span class="p">)</span> <span class="nf">Run</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+
+	<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">wp</span><span class="p">.</span><span class="nx">workersCount</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+		<span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+		<span class="k">go</span> <span class="nf">worker</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">wg</span><span class="p">,</span> <span class="nx">wp</span><span class="p">.</span><span class="nx">jobs</span><span class="p">,</span> <span class="nx">wp</span><span class="p">.</span><span class="nx">results</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+	<span class="nb">close</span><span class="p">(</span><span class="nx">wp</span><span class="p">.</span><span class="nx">Done</span><span class="p">)</span>
+	<span class="nb">close</span><span class="p">(</span><span class="nx">wp</span><span class="p">.</span><span class="nx">results</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When initializing, we pass in the <code>worker</code> number, which corresponds to each <code>g</code> running <code>work(ctx,&amp;wg,wp.jobs,wp.results)</code> , which forms the <code>worker-pool</code>. WaitGroup<code>, we can wait for all</code>worker<code>jobs to finish, which means that the</code>work-pool` is finished, but of course it could be because the job processing is finished, or it could be stopped.</p>
+<p>How does each <code>job</code> data source come from?</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// job数据源，把每个 job 放入到 jobs channel 中
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">wp</span> <span class="nx">WorkerPool</span><span class="p">)</span> <span class="nf">GenerateFrom</span><span class="p">(</span><span class="nx">jobsBulk</span> <span class="p">[]</span><span class="nx">Job</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">i</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">jobsBulk</span> <span class="p">{</span>
+		<span class="nx">wp</span><span class="p">.</span><span class="nx">jobs</span> <span class="o">&lt;-</span> <span class="nx">jobsBulk</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+	<span class="p">}</span>
+	<span class="nb">close</span><span class="p">(</span><span class="nx">wp</span><span class="p">.</span><span class="nx">jobs</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>corresponds to the work of each <code>worker</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">worker</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">wg</span> <span class="o">*</span><span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span><span class="p">,</span> <span class="nx">jobs</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">Job</span><span class="p">,</span> <span class="nx">results</span> <span class="kd">chan</span><span class="o">&lt;-</span> <span class="nx">Result</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">defer</span> <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">select</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="nx">job</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">jobs</span><span class="p">:</span>
+			<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+				<span class="k">return</span>
+			<span class="p">}</span>
+			<span class="nx">results</span> <span class="o">&lt;-</span> <span class="nx">job</span><span class="p">.</span><span class="nf">execute</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
+			<span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;cancelled worker. Error detail: %v\n&#34;</span><span class="p">,</span> <span class="nx">ctx</span><span class="p">.</span><span class="nf">Err</span><span class="p">())</span>
+			<span class="nx">results</span> <span class="o">&lt;-</span> <span class="nx">Result</span><span class="p">{</span>
+				<span class="nx">Err</span><span class="p">:</span> <span class="nx">ctx</span><span class="p">.</span><span class="nf">Err</span><span class="p">(),</span>
+			<span class="p">}</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Each worker tries to fetch data from the same <code>jobs</code>, which is a typical <code>fan-out</code> pattern. When the corresponding <code>g</code> gets the <code>jobs</code> for processing, it sends the result to the same <code>results channel</code>, which is another <code>fan-in</code> pattern. Context<code>allows us to do stop-run control for each</code>worker`.</p>
+<p>Finally, there is the collection of processing results.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 处理结果集
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">wp</span> <span class="nx">WorkerPool</span><span class="p">)</span> <span class="nf">Results</span><span class="p">()</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="nx">Result</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">wp</span><span class="p">.</span><span class="nx">results</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Then the overall test code is :</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">TestWorkerPool</span><span class="p">(</span><span class="nx">t</span> <span class="o">*</span><span class="nx">testing</span><span class="p">.</span><span class="nx">T</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">wp</span> <span class="o">:=</span> <span class="nf">New</span><span class="p">(</span><span class="nx">workerCount</span><span class="p">)</span>
+
+	<span class="nx">ctx</span><span class="p">,</span> <span class="nx">cancel</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithCancel</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">())</span>
+	<span class="k">defer</span> <span class="nf">cancel</span><span class="p">()</span>
+
+	<span class="k">go</span> <span class="nx">wp</span><span class="p">.</span><span class="nf">GenerateFrom</span><span class="p">(</span><span class="nf">testJobs</span><span class="p">())</span>
+
+	<span class="k">go</span> <span class="nx">wp</span><span class="p">.</span><span class="nf">Run</span><span class="p">(</span><span class="nx">ctx</span><span class="p">)</span>
+
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">select</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="nx">r</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">wp</span><span class="p">.</span><span class="nf">Results</span><span class="p">():</span>
+			<span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+				<span class="k">continue</span>
+			<span class="p">}</span>
+
+			<span class="nx">i</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">strconv</span><span class="p">.</span><span class="nf">ParseInt</span><span class="p">(</span><span class="nb">string</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">Descriptor</span><span class="p">.</span><span class="nx">ID</span><span class="p">),</span> <span class="mi">10</span><span class="p">,</span> <span class="mi">64</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">t</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;unexpected error: %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="p">}</span>
+
+			<span class="nx">val</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">Value</span><span class="p">.(</span><span class="kt">int</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">val</span> <span class="o">!=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span><span class="o">*</span><span class="mi">2</span> <span class="p">{</span>
+				<span class="nx">t</span><span class="p">.</span><span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;wrong value %v; expected %v&#34;</span><span class="p">,</span> <span class="nx">val</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span><span class="o">*</span><span class="mi">2</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">wp</span><span class="p">.</span><span class="nx">Done</span><span class="p">:</span>
+			<span class="k">return</span>
+		<span class="k">default</span><span class="p">:</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>After looking at the code, we know that this is not a <code>worker-pool</code> in the traditional sense. It does not initialize a real <code>worker-pool</code> like the <code>Handling 1 Million Requests per Minute with Go</code> article, and once it receives a <code>job</code>, it tries to fetch a <code>worker</code> from the pool, give the corresponding <code>job</code> to the <code>work</code> for processing, wait for the <code>work</code> is processed, it is redirected to the work pool and waits to be utilized next time.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/ads-in-the-windows-11-file-explorer/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Microsoft quietly tests ads in Windows 11 File Explorer</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/go-iota/">
+            <span class="next-text nav-default">Use of iota in Go</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

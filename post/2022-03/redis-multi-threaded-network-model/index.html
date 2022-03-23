@@ -1,0 +1,1151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Redis Multi-Threaded Network Model - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article introduces the Redis network model in a step-by-step manner, and analyzes how it evolved from single-threaded to multi-threaded. In addition, we also analyze the thinking behind many of the choices made in the Redis network model to help the reader understand the design of the Redis network model better." /><meta name="keywords" content="redis, Multi-Threaded, Network Model" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/redis-multi-threaded-network-model/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Redis Multi-Threaded Network Model" />
+<meta property="og:description" content="This article introduces the Redis network model in a step-by-step manner, and analyzes how it evolved from single-threaded to multi-threaded. In addition, we also analyze the thinking behind many of the choices made in the Redis network model to help the reader understand the design of the Redis network model better." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/redis-multi-threaded-network-model/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-17T09:10:04+08:00" />
+<meta property="article:modified_time" content="2022-03-17T09:10:04+08:00" />
+
+<meta itemprop="name" content="Redis Multi-Threaded Network Model">
+<meta itemprop="description" content="This article introduces the Redis network model in a step-by-step manner, and analyzes how it evolved from single-threaded to multi-threaded. In addition, we also analyze the thinking behind many of the choices made in the Redis network model to help the reader understand the design of the Redis network model better."><meta itemprop="datePublished" content="2022-03-17T09:10:04+08:00" />
+<meta itemprop="dateModified" content="2022-03-17T09:10:04+08:00" />
+<meta itemprop="wordCount" content="8038">
+<meta itemprop="keywords" content="redis," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Redis Multi-Threaded Network Model"/>
+<meta name="twitter:description" content="This article introduces the Redis network model in a step-by-step manner, and analyzes how it evolved from single-threaded to multi-threaded. In addition, we also analyze the thinking behind many of the choices made in the Redis network model to help the reader understand the design of the Redis network model better."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Redis Multi-Threaded Network Model</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-17 09:10:04 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 8038 words </span>
+          <span class="more-meta"> 17 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#how-fast-is-redis">How fast is Redis?</a></li>
+        <li><a href="#why-is-redis-fast">Why is Redis fast?</a></li>
+        <li><a href="#why-did-redis-choose-to-be-single-threaded">Why did Redis choose to be single-threaded?</a>
+          <ul>
+            <li><a href="#avoid-excessive-context-switching-overhead">Avoid excessive context switching overhead</a></li>
+            <li><a href="#avoiding-the-overhead-of-synchronization-mechanisms">Avoiding the overhead of synchronization mechanisms</a></li>
+            <li><a href="#simple-and-maintainable">Simple and Maintainable</a></li>
+          </ul>
+        </li>
+        <li><a href="#is-redis-really-single-threaded">Is Redis really single-threaded?</a>
+          <ul>
+            <li><a href="#single-threaded-event-loops">Single-threaded event loops</a></li>
+            <li><a href="#multi-threaded-asynchronous-tasks">Multi-threaded asynchronous tasks</a></li>
+          </ul>
+        </li>
+        <li><a href="#redis-multi-threaded-network-model">Redis Multi-Threaded Network Model</a>
+          <ul>
+            <li><a href="#design-thinking">Design Thinking</a></li>
+            <li><a href="#source-code-dissection">Source code dissection</a></li>
+            <li><a href="#performance-improvements">Performance Improvements</a></li>
+            <li><a href="#model-flaws">Model flaws</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Redis has become the de facto standard for high-performance caching solutions in current technology selection, and as a result, Redis has become one of the basic skill trees for back-end developers, and the underlying principles of Redis are logically a must-learn.</p>
+<p>Redis is essentially a web server, and for a web server, the network model is the essence of it. If you understand the network model of a web server, you will understand the essence of it.</p>
+<p>This article introduces the Redis network model in a step-by-step manner, and analyzes how it evolved from single-threaded to multi-threaded. In addition, we also analyze the thinking behind many of the choices made in the Redis network model to help the reader understand the design of the Redis network model better.</p>
+<h2 id="how-fast-is-redis">How fast is Redis?</h2>
+<p>According to the official benchmark, a single instance of Redis running on a Linux machine with average hardware can typically achieve QPS of 8w+ for simple commands (O(N) or O(log(N)), and up to 100w with pipeline batching.</p>
+<p>Judging by performance alone, Redis can be called a high-performance caching solution.</p>
+<h2 id="why-is-redis-fast">Why is Redis fast?</h2>
+<p>The high performance of Redis is due to the following fundamentals.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/87e4b8ba7b04411c92631376bb57f970.png" alt="Why is Redis fast"></p>
+<ul>
+<li><strong>C implementation</strong>, while C contributes to Redis' performance, the language is not the core factor.</li>
+<li><strong>In-memory-only I/O</strong>, Redis has a natural performance advantage over other disk-based DBs with pure memory operations.</li>
+<li><strong>I/O multiplexing</strong> for high-throughput network I/O based on epoll/select/kqueue and other I/O multiplexing techniques.</li>
+<li><strong>Single-threaded model</strong> , single-threaded can not take advantage of multi-core, but on the other hand, it avoids the frequent context switching of multiple threads, and the overhead of synchronization mechanisms such as locks.</li>
+</ul>
+<h2 id="why-did-redis-choose-to-be-single-threaded">Why did Redis choose to be single-threaded?</h2>
+<p>Redis' core network model is single-threaded, which caused a lot of confusion at the beginning, and the official Redis answer to this is:</p>
+<blockquote>
+<p>It&rsquo;s not very frequent that CPU becomes your bottleneck with Redis, as usually Redis is either memory or network bound. For instance, using pipelining Redis running on an average Linux system can deliver even 1 million requests per second, so if your application mainly uses O(N) or O(log(N)) commands, it is hardly going to use too much CPU.</p>
+</blockquote>
+<p>At its core, this means that CPU is usually not the bottleneck for a DB, because most requests are not CPU-intensive, but rather I/O-intensive. In the case of Redis specifically, if you don&rsquo;t consider persistence schemes like RDB/AOF, Redis is a completely in-memory operation, which is very fast. The real performance bottleneck for Redis is network I/O, which is the latency of network transfers between the client and server, so Redis chooses single-threaded I/O multiplexing to implement its core network model.</p>
+<p>The above is a more general official answer, but in fact the more specific reasons for choosing single-threaded can be summarized as follows.</p>
+<h3 id="avoid-excessive-context-switching-overhead">Avoid excessive context switching overhead</h3>
+<p>In the process of multi-thread scheduling, it is necessary to switch the thread context between CPUs, and the context switch involves a series of register replacement, program stack reset and even CPU cache and TLB fast table retirement such as program counter, stack pointer and program status word. Because multiple threads within a single process share the process address space, the thread context is much smaller than the process context, and in the case of cross-process scheduling, the entire process address space needs to be switched.</p>
+<p>In case of single-threaded scheduling, the frequent thread switching overhead within the process can be avoided because the program always runs within a single thread in the process and there is no multithreaded switching scenario.</p>
+<h3 id="avoiding-the-overhead-of-synchronization-mechanisms">Avoiding the overhead of synchronization mechanisms</h3>
+<p>If Redis chooses a multi-threaded model, and because Redis is a database, it will inevitably involve underlying data synchronization issues, which will inevitably introduce some synchronization mechanisms, such as locks, and we know that Redis provides not only simple key-value data structures, but also lists, sets, hash, and other rich data structures. Different data structures have different granularity of locking for synchronous access, which may lead to a lot of overhead in locking and unlocking during data manipulation, increasing program complexity and reducing performance.</p>
+<h3 id="simple-and-maintainable">Simple and Maintainable</h3>
+<p>The author of Redis, Salvatore Sanfilippo (alias antirez), has an almost paranoid philosophy of simplicity in the design and code of Redis, and you can feel this paranoia when reading the Redis source code or submitting PRs to Redis. So simple and maintainable code was necessarily one of the core guidelines of Redis in its early days, and the introduction of multithreading inevitably led to increased code complexity and decreased maintainability.</p>
+<p>In fact, multi-threaded programming is not perfect. First of all, the introduction of multi-threaded programming will no longer keep the code logically serial, and the order of code execution will become unpredictable, which will lead to various concurrent programming problems if you are not careful; secondly, multi-threaded mode also makes debugging more complicated and troublesome. There is an interesting picture on the web that vividly depicts the dilemma faced by concurrent programming.</p>
+<p>What you expect from multithreaded programming <strong>VS</strong> Actual multithreaded programming.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/5b0a28a886c643c98f509ebc92ce78df.png" alt="What you expect from multithreaded programming VS Actual multithreaded programming"></p>
+<p>If Redis uses a multi-threaded model, then all of the underlying data structures must be implemented as thread-safe. This in turn makes the Redis implementation more complex.</p>
+<p>In short, Redis' choice of single-threaded is a trade-off between keeping the code simple and maintainable while maintaining adequate performance.</p>
+<h2 id="is-redis-really-single-threaded">Is Redis really single-threaded?</h2>
+<p>Before we get to that question, we need to clarify the boundaries of the concept of &lsquo;single-threaded&rsquo;: does it cover the core network model or Redis as a whole? If the former, then the answer is yes. The network model was single-threaded until Redis formally introduced multithreading in v6.0; if the latter, then the answer is no. Redis introduced multithreading as early as v4.0.</p>
+<p>Therefore, when discussing multi-threading in Redis, it is important to delineate two important points in the Redis release.</p>
+<ol>
+<li>Redis v4.0 (which introduced multithreading for asynchronous tasks)</li>
+<li>Redis v6.0 (formally implements I/O multithreading in the network model)</li>
+</ol>
+<h3 id="single-threaded-event-loops">Single-threaded event loops</h3>
+<p>Let&rsquo;s start by dissecting the core network model of Redis. From Redis v1.0 until v6.0, the core network model of Redis has been a typical single Reactor model: using multiplexing techniques such as epoll/select/kqueue to process events (client requests) in a single-threaded event loop, and finally writing back the response data to the client.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/ae9b1d86842e4d08873b70b565695393.png" alt="Single-threaded event loops"></p>
+<p>There are several core concepts to learn here.</p>
+<ul>
+<li><strong>client</strong>: client object, Redis is a typical CS architecture (Client &lt;&ndash;&gt; Server), where the client establishes a network channel with the server via <strong>socket</strong> and then sends the requested command, and the server executes the requested command and replies. <strong>Redis</strong> uses the structure <strong>client</strong> to store all relevant information about the client, including but not limited to <code>wrapped socket connection -- *conn</code>, <code>currently selected database pointer -- *db</code>, <code>read buffer -- querybuf</code>, <code>write buffer -- buf</code>, <code>write data linked list -- reply</code>, etc.</li>
+<li><strong>aeApiPoll</strong> : I/O multiplexing API, is based on epoll_wait/select/kevent and other system calls wrapped, listening for read and write events to trigger, and then processing, it is the core function in the Event Loop (Event Loop), is the basis for the event driver to run.</li>
+<li><strong>acceptTcpHandler</strong> : connection answer processor, the underlying use of the system call <code>accept</code> to accept new connections from the client, and the new connection to register the binding command read processor for subsequent processing of new client TCP connections; in addition to this processor, there is a corresponding <code>acceptUnixHandler</code> for handling Unix Domain Socket and <code>acceptTLSHandler</code> for handling TLS encrypted connections.</li>
+<li><strong>readQueryFromClient</strong> : A command reading processor that parses and executes the client&rsquo;s requested commands.</li>
+<li><strong>beforeSleep</strong> : The function that is executed before the event loop enters aeApiPoll and waits for the event to arrive. It contains some routine tasks, such as writing the response from <code>client-&gt;buf</code> or <code>client-&gt;reply</code> (two buffers are needed here) back to the client, persisting the data in the AOF buffer to disk, etc. There is also an afterSleep function that is executed after aeApiPoll.</li>
+<li><strong>sendReplyToClient</strong>: command reply handler, when there is still data left in the write buffer after an event loop, this handler will be registered and bound to the corresponding connection, and when the connection triggers a write ready event, it will write the remaining data in the write buffer back to the client.</li>
+</ul>
+<p>Redis internally implements a high-performance event library, AE, based on epoll/select/kqueue/evport, to implement a high-performance event loop model for Linux/MacOS/FreeBSD/Solaris. The core network model of Redis is formally built on AE, including I/O multiplexing, and the registration of various processor bindings, all of which are based on it.</p>
+<p>At this point, we can depict the workings of a client requesting a command from Redis.</p>
+<ol>
+<li>the Redis server starts, opens the main thread Event Loop, registers the <code>acceptTcpHandler</code> connection answer processor to the file descriptor corresponding to the user-configured listening port, and waits for a new connection to arrive.</li>
+<li>the establishment of a network connection between the client and the server.</li>
+<li><code>acceptTcpHandler</code> is called and the main thread uses AE&rsquo;s API to bind the <code>readQueryFromClient</code> command read processor to the file descriptor corresponding to the new connection and initialize a <code>client</code> to bind this client connection.</li>
+<li>the client sends the request command, triggering the read-ready event, and the main thread calls <code>readQueryFromClient</code> to read the command sent by the client via socket into the <code>client-&gt;querybuf</code> read buffer.</li>
+<li>next call <code>processInputBuffer</code>, in which <code>processInlineBuffer</code> or <code>processMultibulkBuffer</code> is used to parse the command according to the Redis protocol, and finally call <code>processCommand</code> to execute the command.</li>
+<li>depending on the type of the requested command (SET, GET, DEL, EXEC, etc.), assign the appropriate command executor to execute it, and finally call a series of functions in the <code>addReply</code> family to write the response data to the write buffer of the corresponding <code>client</code>: <code>client-&gt;buf</code> or <code>client-&gt;reply</code>, <code>client-&gt;buf</code> is the preferred write-out buffer, with a fixed size of 16KB, which can generally buffer enough response data, but if the client needs a very large response within the time window, then it will automatically switch to the <code>client-&gt;reply</code> linked list, which can theoretically hold an unlimited amount of data (limited by the physical memory of the machine) Finally, add <code>client</code> to a LIFO queue <code>clients_pending_write</code>.</li>
+<li>In the Event Loop, the main thread executes <code>beforeSleep</code> &ndash;&gt; <code>handleClientsWithPendingWrites</code>, traverses the <code>clients_pending_write</code> queue, and calls <code>writeToClient</code> to return the data in <code>client</code>&rsquo;s write buffer to the client, and if there is any data left in the write buffer, register the <code>sendReplyToClient</code> command to reply to the processor with a write ready event for the connection, and wait for the client to write before continuing to write back the remaining response data in the event loop.</li>
+</ol>
+<p>For those who want to take advantage of multi-core performance, the official Redis solution is simple and brutal: run more Redis instances on the same machine. In fact, to ensure high availability, it is unlikely that an online business will be in standalone mode. It is more common to use Redis distributed clusters with multiple nodes and data sharding to improve performance and ensure high availability.</p>
+<h3 id="multi-threaded-asynchronous-tasks">Multi-threaded asynchronous tasks</h3>
+<p>The above is the core network model of Redis, which was not transformed into a multi-threaded model until Redis v6.0. But that doesn&rsquo;t mean that Redis has always been single-threaded.</p>
+<p>Redis introduced multithreading in v4.0 to do some asynchronous operations, mainly for very time-consuming commands. By making the execution of these commands asynchronous, it avoids blocking the single-threaded event loop.</p>
+<p>We know that the Redis <code>DEL</code> command is used to delete one or more stored values of a key, and it is a blocking command. In most cases, the key you want to delete will not have many values stored in it, at most a few dozen or a few hundred objects, so it can be executed quickly. But if you want to delete a very large key-value pair with millions of objects, then this command may block for at least several seconds, and because the event loop is single-threaded, it will block other events that follow, resulting in reduced throughput.</p>
+<p>Redis author antirez has given a lot of thought to solving this problem. At first, he came up with an incremental solution: using timers and data cursors, he would delete a small amount of data at a time, say 1000 objects, and eventually clear all the data. But this solution had a fatal flaw: if other clients continued to write data to a key that was being progressively deleted at the same time, and the deletion rate could not keep up with the data being written, then memory would be consumed endlessly, which was solved by a clever solution, but this implementation made Redis more complex. Multi-threading seemed like a watertight solution: simple and easy to understand. So, in the end, antirez chose to introduce multithreading to implement this class of non-blocking commands. More of antirez&rsquo;s thoughts on this can be found in his blog: <a href="http://antirez.com/news/93">Lazy Redis is better Redis</a>.</p>
+<p>So, after Redis v4.0, some non-blocking commands like <code>UNLINK</code>, <code>FLUSHALL ASYNC</code>, <code>FLUSHDB ASYNC</code> have been added.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/8c58c421139049439d193f58c495f535.png" alt="async command in redis"></p>
+<p>The <code>UNLINK</code> command is actually an asynchronous version of <code>DEL</code>, it doesn&rsquo;t delete data synchronously, it just removes the key from the keyspace temporarily, then adds the task to an asynchronous queue, and finally the background thread will delete it. But here we need to consider a situation that if we use <code>UNLINK</code> to delete a very small key, it will be more overhead to do it in an asynchronous way, so it will first calculate an overhead threshold, and only when this value is greater than 64 will we use the asynchronous way to delete the key, for the basic data types such as List, Set, and Hash, the threshold is the number of objects stored in them The number of objects stored.</p>
+<h2 id="redis-multi-threaded-network-model">Redis Multi-Threaded Network Model</h2>
+<p>As mentioned earlier Redis originally chose the single-threaded network model for the reason that the CPU is usually not a performance bottleneck, the bottlenecks tend to be <strong>memory</strong> and <strong>network</strong>, so single-threaded is sufficient. So why is Redis now introducing multithreading? The simple fact is that the network I/O bottleneck for Redis is becoming more and more obvious.</p>
+<p>With the rapid growth of the Internet, Internet business systems are handling more and more online traffic, and Redis' single-threaded mode causes the system to consume a lot of CPU time on network I/O, thus reducing throughput. There are two ways to improve the performance of Redis.</p>
+<ul>
+<li>Optimized network I/O modules</li>
+<li>Improving the speed of machine memory reads and writes</li>
+</ul>
+<p>The latter depends on the development of hardware and is temporarily unsolvable. Therefore, we can only start from the former, and the optimization of network I/O can be divided into two directions.</p>
+<ul>
+<li>Zero-copy technology or DPDK technology</li>
+<li>Take advantage of multi-core</li>
+</ul>
+<p>Zero-copy technology has its limitations and cannot be fully adapted to complex network I/O scenarios like Redis. (For more on network I/O consumption of CPU time and Linux zero-copy techniques, read the previous article.) The DPDK technique of bypassing the kernel stack by bypassing NIC I/O is too complex and requires kernel or even hardware support.</p>
+<p>Therefore, taking advantage of multiple cores is the most cost effective way to optimize network I/O.</p>
+<p>After version 6.0, Redis formally introduced multithreading into the core network model, also known as <em>I/O threading</em>, and Redis now has a truly multithreaded model. In the previous section, we learned about the single-threaded event loop model of Redis before 6.0, which is actually a very classic Reactor model.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/dde350e4de6a430fa0e1a77886f53e11.png" alt="multithreaded model"></p>
+<p>Reactor mode is used in most of the mainstream high-performance networking libraries/frameworks on Linux platforms, such as netty, libevent, libuv, POE (Perl), Twisted (Python), etc.</p>
+<p>Reactor pattern essentially refers to the use of <code>I/O multiplexing (I/O multiplexing) + non-blocking I/O (non-blocking I/O)</code> pattern.</p>
+<p>The core network model of Redis, until version 6.0, was a single Reactor model: all events were processed in a single thread, and although multithreading was introduced in version 4.0, it was more of a patch for specific scenarios (removing oversized key values, etc.) and could not be considered multithreading for the core network model.</p>
+<p>In general, the single Reactor model, after the introduction of multi-threading, evolves into the Multi-Reactors model, with the following basic working model.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/a82a717aa7d5451181c4991b243a0a6b.png" alt="multithreaded model"></p>
+<p>Instead of a single-threaded event loop, this pattern has multiple threads (Sub Reactors) each maintaining a separate event loop, with the Main Reactor receiving new connections and distributing them to the Sub Reactors for independent processing, and the Sub Reactors writing back responses to the client.</p>
+<p>The Multiple Reactors pattern can often be equated to the Master-Workers pattern, such as Nginx and Memcached, which use this multi-threaded model, and although the implementation details vary slightly from project to project, the pattern is generally consistent.</p>
+<h3 id="design-thinking">Design Thinking</h3>
+<p>Redis also implements multithreading, but not in the standard Multi-Reactors/Master-Workers pattern, for reasons we will analyze later. For now, let&rsquo;s look at the general design of the Redis multi-threaded network model.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/35522d5906fb40bc8d0fe94911643295.png" alt="multithreaded model in redis"></p>
+<ol>
+<li>the Redis server starts, opens the main thread Event Loop, registers the <code>acceptTcpHandler</code> connection answer processor to the file descriptor corresponding to the user-configured listening port, and waits for a new connection to arrive.</li>
+<li>the establishment of a network connection between the client and the server.</li>
+<li><code>acceptTcpHandler</code> is called and the main thread uses AE&rsquo;s API to bind the <code>readQueryFromClient</code> command read processor to the file descriptor corresponding to the new connection and initialize a <code>client</code> to bind this client connection.</li>
+<li>the client sends a request command, triggering a read-ready event. instead of reading the client&rsquo;s request command through the socket, the server&rsquo;s main thread first puts <code>client</code> into a LIFO queue <code>clients_pending_read</code>.</li>
+<li>In the Event Loop, the main thread executes <code>beforeSleep</code> &ndash;&gt; <code>handleClientsWithPendingReadsUsingThreads</code>, using a Round-Robin polling load balancing strategy to evenly distribute the connections in the <code>clients_pending_read</code> queue between the I/O threads The I/O thread reads the client&rsquo;s requested command via socket, stores it in <code>client-&gt;querybuf</code> and parses the first command, <strong>but does not execute it</strong>, while the main thread is busy polling and waiting for All I/O threads complete the read task.</li>
+<li>When the main thread and all I/O threads have finished reading, the main thread finishes busy polling, traverses the <code>clients_pending_read</code> queue, <strong>executes all client-connected request commands</strong>, and first calls <code>processCommandResetClient</code> to execute the first command that has been parsed. Then call <code>processInputBuffer</code> to parse and execute all commands connected by the client, use <code>processInlineBuffer</code> or <code>processMultibulkBuffer</code> to parse the commands according to the Redis protocol, and finally call <code>processCommand</code> to execute the commands which is called <code>processCommand</code> to execute the command.</li>
+<li>Depending on the type of the requested command (SET, GET, DEL, EXEC, etc.), the corresponding command executor is assigned to execute it, and finally a series of functions in the <code>addReply</code> family are called to write the response data to the corresponding <code>client</code> writeout buffer: <code>client-&gt;buf</code> or <code>client-&gt;reply</code>, <code>client-&gt;buf</code> is the preferred write-out buffer, with a fixed size of 16KB, which generally buffers enough response data, but automatically switches to the <code>client-&gt;reply</code> linked list if the client needs to respond to a very large amount of data within a time window. Theoretically, a linked list can hold an infinite amount of data (limited by the physical memory of the machine), and finally add <code>client</code> to a LIFO queue <code>clients_pending_write</code>.</li>
+<li>In the Event Loop, the main thread executes <code>beforeSleep</code> &ndash;&gt; <code>handleClientsWithPendingWritesUsingThreads</code>, using a Round-Robin polling load balancing strategy to evenly distribute the connections in the <code>clients_pending_write</code> queue to the I/O threads and to the main thread itself. The I/O threads write back the data in <code>client</code>&rsquo;s write buffer to the client by calling <code>writeToClient</code>, and the main thread is busy polling for all I/O threads to complete their write tasks The main thread is busy polling and waiting for all I/O threads to complete their write tasks.</li>
+<li>When the main thread and all I/O threads have finished writing out, the main thread finishes busy polling and traverses the <code>clients_pending_write</code> queue. If there is data left in the <code>client</code> write buffer, it registers <code>sendReplyToClient</code> to the write ready event for that connection and waits for the client to write before continuing to write back the remaining response data in the event loop.</li>
+</ol>
+<p>Most of the logic here is the same as in the previous single-threaded model, the only change is to asynchronize the logic of reading the client request and writing back the response data to the I/O thread. One special note here: <strong>I/O threads only read and parse client commands and do not actually execute them, the execution of client commands is ultimately done on the main thread</strong>.</p>
+<h3 id="source-code-dissection">Source code dissection</h3>
+<blockquote>
+<p>All of the following code is based on the <a href="https://github.com/redis/redis/tree/6.0.10">Redis v6.0.10</a> release.</p>
+</blockquote>
+<h4 id="multi-threaded-initialization">Multi-threaded initialization</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="kt">void</span> <span class="nf">initThreadedIO</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">server</span><span class="p">.</span><span class="n">io_threads_active</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="cm">/* We start with threads not active. */</span>
+
+    <span class="c1">// 如果用户只配置了一个 I/O 线程，则不会创建新线程（效率低），直接在主线程里处理 I/O。
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">io_threads_num</span> <span class="o">==</span> <span class="mi">1</span><span class="p">)</span> <span class="k">return</span><span class="p">;</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">io_threads_num</span> <span class="o">&gt;</span> <span class="n">IO_THREADS_MAX_NUM</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">serverLog</span><span class="p">(</span><span class="n">LL_WARNING</span><span class="p">,</span><span class="s">&#34;Fatal: too many I/O threads configured. &#34;</span>
+                             <span class="s">&#34;The maximum number is %d.&#34;</span><span class="p">,</span> <span class="n">IO_THREADS_MAX_NUM</span><span class="p">);</span>
+        <span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 根据用户配置的 I/O 线程数，启动线程。
+</span><span class="c1"></span>    <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">server</span><span class="p">.</span><span class="n">io_threads_num</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// 初始化 I/O 线程的本地任务队列。
+</span><span class="c1"></span>        <span class="n">io_threads_list</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">listCreate</span><span class="p">();</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">i</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="k">continue</span><span class="p">;</span> <span class="c1">// 线程 0 是主线程。
+</span><span class="c1"></span>
+        <span class="c1">// 初始化 I/O 线程并启动。
+</span><span class="c1"></span>        <span class="n">pthread_t</span> <span class="n">tid</span><span class="p">;</span>
+        <span class="c1">// 每个 I/O 线程会分配一个本地锁，用来休眠和唤醒线程。
+</span><span class="c1"></span>        <span class="n">pthread_mutex_init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">io_threads_mutex</span><span class="p">[</span><span class="n">i</span><span class="p">],</span><span class="nb">NULL</span><span class="p">);</span>
+        <span class="c1">// 每个 I/O 线程分配一个原子计数器，用来记录当前遗留的任务数量。
+</span><span class="c1"></span>       <span class="n">io_threads_pending</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+        <span class="c1">// 主线程在启动 I/O 线程的时候会默认先锁住它，直到有 I/O 任务才唤醒它。
+</span><span class="c1"></span>        <span class="n">pthread_mutex_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">io_threads_mutex</span><span class="p">[</span><span class="n">i</span><span class="p">]);</span>
+        <span class="c1">// 启动线程，进入 I/O 线程的主逻辑函数 IOThreadMain。
+</span><span class="c1"></span>        <span class="k">if</span> <span class="p">(</span><span class="n">pthread_create</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tid</span><span class="p">,</span><span class="nb">NULL</span><span class="p">,</span><span class="n">IOThreadMain</span><span class="p">,(</span><span class="kt">void</span><span class="o">*</span><span class="p">)(</span><span class="kt">long</span><span class="p">)</span><span class="n">i</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">serverLog</span><span class="p">(</span><span class="n">LL_WARNING</span><span class="p">,</span><span class="s">&#34;Fatal: Can&#39;t initialize IO thread.&#34;</span><span class="p">);</span>
+            <span class="n">exit</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+        <span class="p">}</span>
+        <span class="n">io_threads</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">tid</span><span class="p">;</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>initThreadedIO</code> is called at the end of the initialization effort at Redis server startup to initialize the I/O multithreading and start it.</p>
+<p>Redis multithreading mode is turned off by default and needs to be enabled by the user in the <code>redis.conf</code> configuration file.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">io-threads 4
+io-threads-do-reads yes
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="read-request">Read Request</h4>
+<p>When a client sends a request command, it triggers an event loop in the Redis main thread and the command handler <code>readQueryFromClient</code> is called back. In the previous single-threaded model, this method would read and parse the client command directly and execute it. In multi-threaded mode, however, the <code>client</code> is added to the <code>clients_pending_read</code> task queue, and the main thread is then assigned to the I/O thread to read the client&rsquo;s requested command.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="kt">void</span> <span class="nf">readQueryFromClient</span><span class="p">(</span><span class="n">connection</span> <span class="o">*</span><span class="n">conn</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">client</span> <span class="o">*</span><span class="n">c</span> <span class="o">=</span> <span class="n">connGetPrivateData</span><span class="p">(</span><span class="n">conn</span><span class="p">);</span>
+    <span class="kt">int</span> <span class="n">nread</span><span class="p">,</span> <span class="n">readlen</span><span class="p">;</span>
+    <span class="n">size_t</span> <span class="n">qblen</span><span class="p">;</span>
+
+    <span class="c1">// 检查是否开启了多线程，如果是则把 client 加入异步队列之后返回。
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">postponeClientRead</span><span class="p">(</span><span class="n">c</span><span class="p">))</span> <span class="k">return</span><span class="p">;</span>
+    
+    <span class="c1">// 省略代码，下面的代码逻辑和单线程版本几乎是一样的。
+</span><span class="c1"></span>    <span class="p">...</span> 
+<span class="p">}</span>
+
+<span class="kt">int</span> <span class="nf">postponeClientRead</span><span class="p">(</span><span class="n">client</span> <span class="o">*</span><span class="n">c</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 当多线程 I/O 模式开启、主线程没有在处理阻塞任务时，将 client 加入异步队列。
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">io_threads_active</span> <span class="o">&amp;&amp;</span>
+        <span class="n">server</span><span class="p">.</span><span class="n">io_threads_do_reads</span> <span class="o">&amp;&amp;</span>
+        <span class="o">!</span><span class="n">ProcessingEventsWhileBlocked</span> <span class="o">&amp;&amp;</span>
+        <span class="o">!</span><span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">CLIENT_MASTER</span><span class="o">|</span><span class="n">CLIENT_SLAVE</span><span class="o">|</span><span class="n">CLIENT_PENDING_READ</span><span class="p">)))</span>
+    <span class="p">{</span>
+        <span class="c1">// 给 client 打上 CLIENT_PENDING_READ 标识，表示该 client 需要被多线程处理，
+</span><span class="c1"></span>        <span class="c1">// 后续在 I/O 线程中会在读取和解析完客户端命令之后判断该标识并放弃执行命令，让主线程去执行。
+</span><span class="c1"></span>        <span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">|=</span> <span class="n">CLIENT_PENDING_READ</span><span class="p">;</span>
+        <span class="n">listAddNodeHead</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">clients_pending_read</span><span class="p">,</span><span class="n">c</span><span class="p">);</span>
+        <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+       <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The main thread then calls <code>handleClientsWithPendingReadsUsingThreads</code> in the <code>beforeSleep()</code> method of the event loop.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">handleClientsWithPendingReadsUsingThreads</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">server</span><span class="p">.</span><span class="n">io_threads_active</span> <span class="o">||</span> <span class="o">!</span><span class="n">server</span><span class="p">.</span><span class="n">io_threads_do_reads</span><span class="p">)</span> <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">processed</span> <span class="o">=</span> <span class="n">listLength</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">clients_pending_read</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">processed</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">tio_debug</span><span class="p">)</span> <span class="n">printf</span><span class="p">(</span><span class="s">&#34;%d TOTAL READ pending clients</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">processed</span><span class="p">);</span>
+
+    <span class="c1">// 遍历待读取的 client 队列 clients_pending_read，
+</span><span class="c1"></span>    <span class="c1">// 通过 RR 轮询均匀地分配给 I/O 线程和主线程自己（编号 0）。
+</span><span class="c1"></span>    <span class="n">listIter</span> <span class="n">li</span><span class="p">;</span>
+    <span class="n">listNode</span> <span class="o">*</span><span class="n">ln</span><span class="p">;</span>
+    <span class="n">listRewind</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">clients_pending_read</span><span class="p">,</span><span class="o">&amp;</span><span class="n">li</span><span class="p">);</span>
+    <span class="kt">int</span> <span class="n">item_id</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="k">while</span><span class="p">((</span><span class="n">ln</span> <span class="o">=</span> <span class="n">listNext</span><span class="p">(</span><span class="o">&amp;</span><span class="n">li</span><span class="p">)))</span> <span class="p">{</span>
+        <span class="n">client</span> <span class="o">*</span><span class="n">c</span> <span class="o">=</span> <span class="n">listNodeValue</span><span class="p">(</span><span class="n">ln</span><span class="p">);</span>
+        <span class="kt">int</span> <span class="n">target_id</span> <span class="o">=</span> <span class="n">item_id</span> <span class="o">%</span> <span class="n">server</span><span class="p">.</span><span class="n">io_threads_num</span><span class="p">;</span>
+        <span class="n">listAddNodeTail</span><span class="p">(</span><span class="n">io_threads_list</span><span class="p">[</span><span class="n">target_id</span><span class="p">],</span><span class="n">c</span><span class="p">);</span>
+        <span class="n">item_id</span><span class="o">++</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 设置当前 I/O 操作为读取操作，给每个 I/O 线程的计数器设置分配的任务数量，
+</span><span class="c1"></span>    <span class="c1">// 让 I/O 线程可以开始工作：只读取和解析命令，不执行。
+</span><span class="c1"></span>    <span class="n">io_threads_op</span> <span class="o">=</span> <span class="n">IO_THREADS_OP_READ</span><span class="p">;</span>
+    <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">j</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span> <span class="n">j</span> <span class="o">&lt;</span> <span class="n">server</span><span class="p">.</span><span class="n">io_threads_num</span><span class="p">;</span> <span class="n">j</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+        <span class="kt">int</span> <span class="n">count</span> <span class="o">=</span> <span class="n">listLength</span><span class="p">(</span><span class="n">io_threads_list</span><span class="p">[</span><span class="n">j</span><span class="p">]);</span>
+        <span class="n">io_threads_pending</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">count</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 主线程自己也会去执行读取客户端请求命令的任务，以达到最大限度利用 CPU。
+</span><span class="c1"></span>    <span class="n">listRewind</span><span class="p">(</span><span class="n">io_threads_list</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="o">&amp;</span><span class="n">li</span><span class="p">);</span>
+    <span class="k">while</span><span class="p">((</span><span class="n">ln</span> <span class="o">=</span> <span class="n">listNext</span><span class="p">(</span><span class="o">&amp;</span><span class="n">li</span><span class="p">)))</span> <span class="p">{</span>
+        <span class="n">client</span> <span class="o">*</span><span class="n">c</span> <span class="o">=</span> <span class="n">listNodeValue</span><span class="p">(</span><span class="n">ln</span><span class="p">);</span>
+        <span class="n">readQueryFromClient</span><span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">conn</span><span class="p">);</span>
+    <span class="p">}</span>
+    <span class="n">listEmpty</span><span class="p">(</span><span class="n">io_threads_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+
+    <span class="c1">// 忙轮询，累加所有 I/O 线程的原子任务计数器，直到所有计数器的遗留任务数量都是 0，
+</span><span class="c1"></span>    <span class="c1">// 表示所有任务都已经执行完成，结束轮询。
+</span><span class="c1"></span>    <span class="k">while</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+        <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">pending</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+        <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">j</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span> <span class="n">j</span> <span class="o">&lt;</span> <span class="n">server</span><span class="p">.</span><span class="n">io_threads_num</span><span class="p">;</span> <span class="n">j</span><span class="o">++</span><span class="p">)</span>
+            <span class="n">pending</span> <span class="o">+=</span> <span class="n">io_threads_pending</span><span class="p">[</span><span class="n">j</span><span class="p">];</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">pending</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="k">break</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">tio_debug</span><span class="p">)</span> <span class="n">printf</span><span class="p">(</span><span class="s">&#34;I/O READ All threads finshed</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+
+    <span class="c1">// 遍历待读取的 client 队列，清除 CLIENT_PENDING_READ 和 CLIENT_PENDING_COMMAND 标记，
+</span><span class="c1"></span>    <span class="c1">// 然后解析并执行所有 client 的命令。
+</span><span class="c1"></span>    <span class="k">while</span><span class="p">(</span><span class="n">listLength</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">clients_pending_read</span><span class="p">))</span> <span class="p">{</span>
+        <span class="n">ln</span> <span class="o">=</span> <span class="n">listFirst</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">clients_pending_read</span><span class="p">);</span>
+        <span class="n">client</span> <span class="o">*</span><span class="n">c</span> <span class="o">=</span> <span class="n">listNodeValue</span><span class="p">(</span><span class="n">ln</span><span class="p">);</span>
+        <span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;=</span> <span class="o">~</span><span class="n">CLIENT_PENDING_READ</span><span class="p">;</span>
+        <span class="n">listDelNode</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">clients_pending_read</span><span class="p">,</span><span class="n">ln</span><span class="p">);</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;</span> <span class="n">CLIENT_PENDING_COMMAND</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;=</span> <span class="o">~</span><span class="n">CLIENT_PENDING_COMMAND</span><span class="p">;</span>
+            <span class="c1">// client 的第一条命令已经被解析好了，直接尝试执行。
+</span><span class="c1"></span>            <span class="k">if</span> <span class="p">(</span><span class="n">processCommandAndResetClient</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="o">==</span> <span class="n">C_ERR</span><span class="p">)</span> <span class="p">{</span>
+                <span class="cm">/* If the client is no longer valid, we avoid
+</span><span class="cm">                 * processing the client later. So we just go
+</span><span class="cm">                 * to the next. */</span>
+                <span class="k">continue</span><span class="p">;</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+        <span class="n">processInputBuffer</span><span class="p">(</span><span class="n">c</span><span class="p">);</span> <span class="c1">// 继续解析并执行 client 命令。
+</span><span class="c1"></span>
+        <span class="c1">// 命令执行完成之后，如果 client 中有响应数据需要回写到客户端，则将 client 加入到待写出队列 clients_pending_write
+</span><span class="c1"></span>        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;</span> <span class="n">CLIENT_PENDING_WRITE</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="n">clientHasPendingReplies</span><span class="p">(</span><span class="n">c</span><span class="p">))</span>
+            <span class="n">clientInstallWriteHandler</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+    <span class="p">}</span>
+
+    <span class="cm">/* Update processed count on server */</span>
+    <span class="n">server</span><span class="p">.</span><span class="n">stat_io_reads_processed</span> <span class="o">+=</span> <span class="n">processed</span><span class="p">;</span>
+
+    <span class="k">return</span> <span class="n">processed</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The core work here is.</p>
+<ul>
+<li>Iterate over the <code>client</code> queue <code>clients_pending_read</code> to be read, and assign all tasks to I/O threads and the main thread to read and parse client commands via the RR policy.</li>
+<li>Busy polling waiting for all I/O threads to complete their tasks.</li>
+<li>Finally iterate through <code>clients_pending_read</code> and execute all <code>client</code> commands.</li>
+</ul>
+<h4 id="write-back-the-response">Write back the response</h4>
+<p>After reading, parsing and executing the command, the response data of the client command has been stored in <code>client-&gt;buf</code> or <code>client-&gt;reply</code>. Next, you need to write the response data back to the client. Again, in <code>beforeSleep</code>, the main thread calls <code>handleClientsWithPendingWritesUsingThreads</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span><span class="lnt">83
+</span><span class="lnt">84
+</span><span class="lnt">85
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">handleClientsWithPendingWritesUsingThreads</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="n">processed</span> <span class="o">=</span> <span class="n">listLength</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">clients_pending_write</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">processed</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="k">return</span> <span class="mi">0</span><span class="p">;</span> <span class="cm">/* Return ASAP if there are no clients. */</span>
+
+    <span class="c1">// 如果用户设置的 I/O 线程数等于 1 或者当前 clients_pending_write 队列中待写出的 client
+</span><span class="c1"></span>    <span class="c1">// 数量不足 I/O 线程数的两倍，则不用多线程的逻辑，让所有 I/O 线程进入休眠，
+</span><span class="c1"></span>    <span class="c1">// 直接在主线程把所有 client 的相应数据回写到客户端。
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">io_threads_num</span> <span class="o">==</span> <span class="mi">1</span> <span class="o">||</span> <span class="n">stopThreadedIOIfNeeded</span><span class="p">())</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="n">handleClientsWithPendingWrites</span><span class="p">();</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 唤醒正在休眠的 I/O 线程（如果有的话）。
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">server</span><span class="p">.</span><span class="n">io_threads_active</span><span class="p">)</span> <span class="n">startThreadedIO</span><span class="p">();</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">tio_debug</span><span class="p">)</span> <span class="n">printf</span><span class="p">(</span><span class="s">&#34;%d TOTAL WRITE pending clients</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">processed</span><span class="p">);</span>
+
+    <span class="c1">// 遍历待写出的 client 队列 clients_pending_write，
+</span><span class="c1"></span>    <span class="c1">// 通过 RR 轮询均匀地分配给 I/O 线程和主线程自己（编号 0）。
+</span><span class="c1"></span>    <span class="n">listIter</span> <span class="n">li</span><span class="p">;</span>
+    <span class="n">listNode</span> <span class="o">*</span><span class="n">ln</span><span class="p">;</span>
+    <span class="n">listRewind</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">clients_pending_write</span><span class="p">,</span><span class="o">&amp;</span><span class="n">li</span><span class="p">);</span>
+    <span class="kt">int</span> <span class="n">item_id</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="k">while</span><span class="p">((</span><span class="n">ln</span> <span class="o">=</span> <span class="n">listNext</span><span class="p">(</span><span class="o">&amp;</span><span class="n">li</span><span class="p">)))</span> <span class="p">{</span>
+        <span class="n">client</span> <span class="o">*</span><span class="n">c</span> <span class="o">=</span> <span class="n">listNodeValue</span><span class="p">(</span><span class="n">ln</span><span class="p">);</span>
+        <span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;=</span> <span class="o">~</span><span class="n">CLIENT_PENDING_WRITE</span><span class="p">;</span>
+
+        <span class="cm">/* Remove clients from the list of pending writes since
+</span><span class="cm">         * they are going to be closed ASAP. */</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;</span> <span class="n">CLIENT_CLOSE_ASAP</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">listDelNode</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">clients_pending_write</span><span class="p">,</span> <span class="n">ln</span><span class="p">);</span>
+            <span class="k">continue</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="kt">int</span> <span class="n">target_id</span> <span class="o">=</span> <span class="n">item_id</span> <span class="o">%</span> <span class="n">server</span><span class="p">.</span><span class="n">io_threads_num</span><span class="p">;</span>
+        <span class="n">listAddNodeTail</span><span class="p">(</span><span class="n">io_threads_list</span><span class="p">[</span><span class="n">target_id</span><span class="p">],</span><span class="n">c</span><span class="p">);</span>
+        <span class="n">item_id</span><span class="o">++</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 设置当前 I/O 操作为写出操作，给每个 I/O 线程的计数器设置分配的任务数量，
+</span><span class="c1"></span>    <span class="c1">// 让 I/O 线程可以开始工作，把写出缓冲区（client-&gt;buf 或 c-&gt;reply）中的响应数据回写到客户端。
+</span><span class="c1"></span>    <span class="n">io_threads_op</span> <span class="o">=</span> <span class="n">IO_THREADS_OP_WRITE</span><span class="p">;</span>
+    <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">j</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span> <span class="n">j</span> <span class="o">&lt;</span> <span class="n">server</span><span class="p">.</span><span class="n">io_threads_num</span><span class="p">;</span> <span class="n">j</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+        <span class="kt">int</span> <span class="n">count</span> <span class="o">=</span> <span class="n">listLength</span><span class="p">(</span><span class="n">io_threads_list</span><span class="p">[</span><span class="n">j</span><span class="p">]);</span>
+        <span class="n">io_threads_pending</span><span class="p">[</span><span class="n">j</span><span class="p">]</span> <span class="o">=</span> <span class="n">count</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 主线程自己也会去执行读取客户端请求命令的任务，以达到最大限度利用 CPU。
+</span><span class="c1"></span>    <span class="n">listRewind</span><span class="p">(</span><span class="n">io_threads_list</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span><span class="o">&amp;</span><span class="n">li</span><span class="p">);</span>
+    <span class="k">while</span><span class="p">((</span><span class="n">ln</span> <span class="o">=</span> <span class="n">listNext</span><span class="p">(</span><span class="o">&amp;</span><span class="n">li</span><span class="p">)))</span> <span class="p">{</span>
+        <span class="n">client</span> <span class="o">*</span><span class="n">c</span> <span class="o">=</span> <span class="n">listNodeValue</span><span class="p">(</span><span class="n">ln</span><span class="p">);</span>
+        <span class="n">writeToClient</span><span class="p">(</span><span class="n">c</span><span class="p">,</span><span class="mi">0</span><span class="p">);</span>
+    <span class="p">}</span>
+    <span class="n">listEmpty</span><span class="p">(</span><span class="n">io_threads_list</span><span class="p">[</span><span class="mi">0</span><span class="p">]);</span>
+
+    <span class="c1">// 忙轮询，累加所有 I/O 线程的原子任务计数器，直到所有计数器的遗留任务数量都是 0。
+</span><span class="c1"></span>    <span class="c1">// 表示所有任务都已经执行完成，结束轮询。
+</span><span class="c1"></span>    <span class="k">while</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+        <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">pending</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+        <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">j</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span> <span class="n">j</span> <span class="o">&lt;</span> <span class="n">server</span><span class="p">.</span><span class="n">io_threads_num</span><span class="p">;</span> <span class="n">j</span><span class="o">++</span><span class="p">)</span>
+            <span class="n">pending</span> <span class="o">+=</span> <span class="n">io_threads_pending</span><span class="p">[</span><span class="n">j</span><span class="p">];</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">pending</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="k">break</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">tio_debug</span><span class="p">)</span> <span class="n">printf</span><span class="p">(</span><span class="s">&#34;I/O WRITE All threads finshed</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+
+    <span class="c1">// 最后再遍历一次 clients_pending_write 队列，检查是否还有 client 的写出缓冲区中有残留数据，
+</span><span class="c1"></span>    <span class="c1">// 如果有，那就为 client 注册一个命令回复器 sendReplyToClient，等待客户端写就绪再继续把数据回写。
+</span><span class="c1"></span>    <span class="n">listRewind</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">clients_pending_write</span><span class="p">,</span><span class="o">&amp;</span><span class="n">li</span><span class="p">);</span>
+    <span class="k">while</span><span class="p">((</span><span class="n">ln</span> <span class="o">=</span> <span class="n">listNext</span><span class="p">(</span><span class="o">&amp;</span><span class="n">li</span><span class="p">)))</span> <span class="p">{</span>
+        <span class="n">client</span> <span class="o">*</span><span class="n">c</span> <span class="o">=</span> <span class="n">listNodeValue</span><span class="p">(</span><span class="n">ln</span><span class="p">);</span>
+
+        <span class="c1">// 检查 client 的写出缓冲区是否还有遗留数据。
+</span><span class="c1"></span>        <span class="k">if</span> <span class="p">(</span><span class="n">clientHasPendingReplies</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="o">&amp;&amp;</span>
+                <span class="n">connSetWriteHandler</span><span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">conn</span><span class="p">,</span> <span class="n">sendReplyToClient</span><span class="p">)</span> <span class="o">==</span> <span class="n">AE_ERR</span><span class="p">)</span>
+        <span class="p">{</span>
+            <span class="n">freeClientAsync</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="n">listEmpty</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">clients_pending_write</span><span class="p">);</span>
+
+    <span class="cm">/* Update processed count on server */</span>
+    <span class="n">server</span><span class="p">.</span><span class="n">stat_io_writes_processed</span> <span class="o">+=</span> <span class="n">processed</span><span class="p">;</span>
+
+    <span class="k">return</span> <span class="n">processed</span><span class="p">;</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><p>The core work here is to.</p>
+<ul>
+<li>Check the current task load, and if the current number of tasks is not enough to be processed in multi-threaded mode, hibernate the I/O threads and write the response data back to the client directly and synchronously.</li>
+<li>Wake up the I/O threads that are hibernating (if any).</li>
+<li>Iterate through the <code>client</code> queue <code>clients_pending_write</code> and assign all tasks to the I/O threads and the main thread to write the response data back to the client via the RR policy.</li>
+<li>Busy polling waits for all I/O threads to complete their tasks.</li>
+<li>Finally iterate through <code>clients_pending_write</code>, register the command reply handler <code>sendReplyToClient</code> for those <code>clients</code> that still have response data left, and wait for the client to be writable before continuing to write back the remaining response data in the event loop.</li>
+</ul>
+<h4 id="io-thread-main-logic">I/O thread main logic</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="kt">void</span> <span class="o">*</span><span class="nf">IOThreadMain</span><span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="n">myid</span><span class="p">)</span> <span class="p">{</span>
+    <span class="cm">/* The ID is the thread number (from 0 to server.iothreads_num-1), and is
+</span><span class="cm">     * used by the thread to just manipulate a single sub-array of clients. */</span>
+    <span class="kt">long</span> <span class="n">id</span> <span class="o">=</span> <span class="p">(</span><span class="kt">unsigned</span> <span class="kt">long</span><span class="p">)</span><span class="n">myid</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="n">thdname</span><span class="p">[</span><span class="mi">16</span><span class="p">];</span>
+
+    <span class="n">snprintf</span><span class="p">(</span><span class="n">thdname</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">thdname</span><span class="p">),</span> <span class="s">&#34;io_thd_%ld&#34;</span><span class="p">,</span> <span class="n">id</span><span class="p">);</span>
+    <span class="n">redis_set_thread_title</span><span class="p">(</span><span class="n">thdname</span><span class="p">);</span>
+    <span class="c1">// 设置 I/O 线程的 CPU 亲和性，尽可能将 I/O 线程（以及主线程，不在这里设置）绑定到用户配置的
+</span><span class="c1"></span>    <span class="c1">// CPU 列表上。
+</span><span class="c1"></span>    <span class="n">redisSetCpuAffinity</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">server_cpulist</span><span class="p">);</span>
+    <span class="n">makeThreadKillable</span><span class="p">();</span>
+
+    <span class="k">while</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// 忙轮询，100w 次循环，等待主线程分配 I/O 任务。
+</span><span class="c1"></span>        <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">j</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">j</span> <span class="o">&lt;</span> <span class="mi">1000000</span><span class="p">;</span> <span class="n">j</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">io_threads_pending</span><span class="p">[</span><span class="n">id</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span> <span class="k">break</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="c1">// 如果 100w 次忙轮询之后如果还是没有任务分配给它，则通过尝试加锁进入休眠，
+</span><span class="c1"></span>        <span class="c1">// 等待主线程分配任务之后调用 startThreadedIO 解锁，唤醒 I/O 线程去执行。
+</span><span class="c1"></span>        <span class="k">if</span> <span class="p">(</span><span class="n">io_threads_pending</span><span class="p">[</span><span class="n">id</span><span class="p">]</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">pthread_mutex_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">io_threads_mutex</span><span class="p">[</span><span class="n">id</span><span class="p">]);</span>
+            <span class="n">pthread_mutex_unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">io_threads_mutex</span><span class="p">[</span><span class="n">id</span><span class="p">]);</span>
+            <span class="k">continue</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="n">serverAssert</span><span class="p">(</span><span class="n">io_threads_pending</span><span class="p">[</span><span class="n">id</span><span class="p">]</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">);</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">tio_debug</span><span class="p">)</span> <span class="n">printf</span><span class="p">(</span><span class="s">&#34;[%ld] %d to handle</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">id</span><span class="p">,</span> <span class="p">(</span><span class="kt">int</span><span class="p">)</span><span class="n">listLength</span><span class="p">(</span><span class="n">io_threads_list</span><span class="p">[</span><span class="n">id</span><span class="p">]));</span>
+
+
+        <span class="c1">// 注意：主线程分配任务给 I/O 线程之时，
+</span><span class="c1"></span>        <span class="c1">// 会把任务加入每个线程的本地任务队列 io_threads_list[id]，
+</span><span class="c1"></span>        <span class="c1">// 但是当 I/O 线程开始执行任务之后，主线程就不会再去访问这些任务队列，避免数据竞争。
+</span><span class="c1"></span>        <span class="n">listIter</span> <span class="n">li</span><span class="p">;</span>
+        <span class="n">listNode</span> <span class="o">*</span><span class="n">ln</span><span class="p">;</span>
+        <span class="n">listRewind</span><span class="p">(</span><span class="n">io_threads_list</span><span class="p">[</span><span class="n">id</span><span class="p">],</span><span class="o">&amp;</span><span class="n">li</span><span class="p">);</span>
+        <span class="k">while</span><span class="p">((</span><span class="n">ln</span> <span class="o">=</span> <span class="n">listNext</span><span class="p">(</span><span class="o">&amp;</span><span class="n">li</span><span class="p">)))</span> <span class="p">{</span>
+            <span class="n">client</span> <span class="o">*</span><span class="n">c</span> <span class="o">=</span> <span class="n">listNodeValue</span><span class="p">(</span><span class="n">ln</span><span class="p">);</span>
+            <span class="c1">// 如果当前是写出操作，则把 client 的写出缓冲区中的数据回写到客户端。
+</span><span class="c1"></span>            <span class="k">if</span> <span class="p">(</span><span class="n">io_threads_op</span> <span class="o">==</span> <span class="n">IO_THREADS_OP_WRITE</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">writeToClient</span><span class="p">(</span><span class="n">c</span><span class="p">,</span><span class="mi">0</span><span class="p">);</span>
+              <span class="c1">// 如果当前是读取操作，则socket 读取客户端的请求命令并解析第一条命令。
+</span><span class="c1"></span>            <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">io_threads_op</span> <span class="o">==</span> <span class="n">IO_THREADS_OP_READ</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">readQueryFromClient</span><span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">conn</span><span class="p">);</span>
+            <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+                <span class="n">serverPanic</span><span class="p">(</span><span class="s">&#34;io_threads_op value is unknown&#34;</span><span class="p">);</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+        <span class="n">listEmpty</span><span class="p">(</span><span class="n">io_threads_list</span><span class="p">[</span><span class="n">id</span><span class="p">]);</span>
+        <span class="c1">// 所有任务执行完之后把自己的计数器置 0，主线程通过累加所有 I/O 线程的计数器
+</span><span class="c1"></span>        <span class="c1">// 判断是否所有 I/O 线程都已经完成工作。
+</span><span class="c1"></span>        <span class="n">io_threads_pending</span><span class="p">[</span><span class="n">id</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">tio_debug</span><span class="p">)</span> <span class="n">printf</span><span class="p">(</span><span class="s">&#34;[%ld] Done</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">id</span><span class="p">);</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>After the I/O thread is started, it first enters busy polling to determine the number of tasks in the atomic counter. If it is non-zero, the main thread has assigned it a task and starts executing it, otherwise it stays busy polling for a million times and waits. If it is still 0, it tries to add a local lock, because the main thread has already locked the local locks of all I/O threads in advance when it starts them, so the I/O threads will sleep and wait for the main thread to wake up.</p>
+<p>The main thread will try to call <code>startThreadedIO</code> in each event loop to wake up the I/O thread to perform the task. If a client request command is received, the I/O thread will be woken up and start working to perform the task of reading and parsing the command or writing back the response data according to the <code>io_threads_op</code> flag set by the main thread. After receiving notification from the main thread, the I/O thread will iterate through its own local task queue <code>io_threads_list[id]</code> and take out one <code>client</code> to execute the task.</p>
+<ul>
+<li>If the current operation is a write operation, call <code>writeToClient</code> to write the response data from <code>client-&gt;buf</code> or <code>client-&gt;reply</code> back to the client via the socket.</li>
+<li>If the current operation is a read operation, call <code>readQueryFromClient</code> to read the client command via socket, store it in <code>client-&gt;querybuf</code>, and then call <code>processInputBuffer</code> to parse the command, which will only end up with the first command, and then finish without executing it.</li>
+<li>Set its own atomic counter to 0 after all tasks have been executed to tell the main thread that it has finished its work.</li>
+</ul>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="kt">void</span> <span class="nf">processInputBuffer</span><span class="p">(</span><span class="n">client</span> <span class="o">*</span><span class="n">c</span><span class="p">)</span> <span class="p">{</span>
+<span class="c1">// 省略代码
+</span><span class="c1"></span><span class="p">...</span>
+
+    <span class="k">while</span><span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">qb_pos</span> <span class="o">&lt;</span> <span class="n">sdslen</span><span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">querybuf</span><span class="p">))</span> <span class="p">{</span>
+        <span class="cm">/* Return if clients are paused. */</span>
+        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;</span> <span class="n">CLIENT_SLAVE</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="n">clientsArePaused</span><span class="p">())</span> <span class="k">break</span><span class="p">;</span>
+
+        <span class="cm">/* Immediately abort if the client is in the middle of something. */</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;</span> <span class="n">CLIENT_BLOCKED</span><span class="p">)</span> <span class="k">break</span><span class="p">;</span>
+
+        <span class="cm">/* Don&#39;t process more buffers from clients that have already pending
+</span><span class="cm">         * commands to execute in c-&gt;argv. */</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;</span> <span class="n">CLIENT_PENDING_COMMAND</span><span class="p">)</span> <span class="k">break</span><span class="p">;</span>
+        <span class="cm">/* Multibulk processing could see a &lt;= 0 length. */</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">argc</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">resetClient</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="c1">// 判断 client 是否具有 CLIENT_PENDING_READ 标识，如果是处于多线程 I/O 的模式下，
+</span><span class="c1"></span>            <span class="c1">// 那么此前已经在 readQueryFromClient -&gt; postponeClientRead 中为 client 打上该标识，
+</span><span class="c1"></span>            <span class="c1">// 则立刻跳出循环结束，此时第一条命令已经解析完成，但是不执行命令。
+</span><span class="c1"></span>            <span class="k">if</span> <span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;</span> <span class="n">CLIENT_PENDING_READ</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">c</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">|=</span> <span class="n">CLIENT_PENDING_COMMAND</span><span class="p">;</span>
+                <span class="k">break</span><span class="p">;</span>
+            <span class="p">}</span>
+
+            <span class="c1">// 执行客户端命令
+</span><span class="c1"></span>            <span class="k">if</span> <span class="p">(</span><span class="n">processCommandAndResetClient</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="o">==</span> <span class="n">C_ERR</span><span class="p">)</span> <span class="p">{</span>
+                <span class="cm">/* If the client is no longer valid, we avoid exiting this
+</span><span class="cm">                 * loop and trimming the client buffer later. So we return
+</span><span class="cm">                 * ASAP in that case. */</span>
+                <span class="k">return</span><span class="p">;</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+<span class="p">...</span>
+<span class="p">}</span>
+
+</code></pre></td></tr></table>
+</div>
+</div><p>Additional attention should be paid to the CPU affinity of the current thread when the I/O thread is first started, i.e., binding the current thread to the user-configured CPU. The same CPU affinity is set when starting the main Redis server thread, which is the core network model of Redis. Redis itself is an extremely throughput- and latency-sensitive system, so users need Redis to have finer-grained control over CPU resources. There are two main considerations here: the CPU cache and the NUMA architecture.</p>
+<p>First, the CPU cache (we are talking about a hardware architecture where both the L1 Cache and L2 Cache are integrated into the CPU). Imagine a scenario where the main Redis process is running on CPU-1, serving data to clients, and Redis starts a child process for data persistence (BGSAVE or AOF). After system scheduling, the child process takes over CPU-1 of the main process, and the main process is scheduled to run on CPU-2, causing the instructions and data in CPU-1&rsquo;s cache to be eliminated and CPU-2 to reload the instructions and data into its own local cache, wasting CPU resources and reducing performance.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/196eaced35c2426196176a720bd4192b.png" alt="CPU cache"></p>
+<p>Therefore, by setting CPU affinity, Redis can isolate the main process/thread and child processes/threads by binding them to different cores so that they do not interfere with each other, which can effectively improve system performance.</p>
+<p>The second consideration is based on the NUMA architecture. Under the NUMA system, the memory controller chip is integrated inside the processor to form the CPU local memory. Access to local memory is only through the memory channel and not through the system bus, which greatly reduces the access latency, while multiple processors are interconnected by QPI data links, and the memory access overhead across NUMA nodes is much higher than that of local memory access.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/10b5a7fd88a34c7f8aff0735d2fa09c6.png" alt="QuickPath Interconnect"></p>
+<p>Therefore, Redis can also greatly improve performance by setting CPU affinity so that the main process/thread runs on a fixed CPU on a NUMA node as much as possible, using more local memory instead of accessing data across nodes.</p>
+<p>For more information about NUMA, please check it yourself. I&rsquo;ll write a separate article about it later when I have time.</p>
+<p>One final point that readers who have read the source code may wonder is that Redis does not seem to lock data in multi-threaded mode. In fact, Redis' multi-threaded model is lock-free throughout, which is achieved through atomic operations + interleaved access, with three variables shared between the main thread and the I/O thread: <code>io_threads_pending</code> counters, <code>io_threads_op</code> I/O identifiers, and <code>io_threads_list</code> list` thread-local task queue.</p>
+<p><code>io_threads_pending</code> is an atomic variable that does not require lock protection, while <code>io_threads_op</code> and <code>io_threads_list</code> are two variables that circumvent the shared data competition problem by controlling staggered access between the main thread and the I/O thread: the I/O thread starts and waits for a signal from the main thread through busy polling and lock hibernation. After starting, the I/O thread waits for a signal from the main thread through busy polling and lock sleep. It does not access its own local task queue <code>io_threads_list[id]</code> until it has assigned all tasks to the local queue of each I/O thread before waking up the I/O thread to start work, and the main thread will only access its own local task queue <code>io_threads_list[ 0]</code> and will not access the I/O thread&rsquo;s local queue, which ensures that the main thread will always access <code>io_threads_list</code> before the I/O thread and never again, ensuring interleaved access. Similarly for <code>io_threads_op</code>, the main thread sets the value of <code>io_threads_op</code> before waking up the I/O thread and does not access this variable again while the I/O thread is running.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/b36d5eabf74047f6a953a9b538833811.png" alt="Async Command in Redis"></p>
+<h3 id="performance-improvements">Performance Improvements</h3>
+<p>Redis transforms the core network model into multi-threaded mode in pursuit of the ultimate performance improvement, so the benchmark data is the real deal.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/f931ab1c082243c7814f11ac07dfd93e.png" alt="Redis multi-threaded mode benchmark"></p>
+<p>The test data shows that Redis performance is dramatically improved by a factor of two when using multi-threaded mode. More detailed performance crunching data can be found in this article: <a href="https://itnext.io/benchmarking-the-experimental-redis-multi-threaded-i-o-1bb28b69a314">Benchmarking the experimental Redis Multi-Threaded I/O</a>.</p>
+<p>The following is a comparison of the performance of the old and new Redis versions as measured by the Mito technical team, for reference only.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/e3afbed09c9d42b4b5ba9830d392c45a.png" alt="comparison of the performance of the old and new Redis versions as measured"></p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/17/f2c31ab330324c63920d4f20717bebeb.png" alt="comparison of the performance of the old and new Redis versions as measured"></p>
+<h3 id="model-flaws">Model flaws</h3>
+<p>First of all, as I mentioned earlier, Redis' multi-threaded network model is not actually a standard Multi-Reactors/Master-Workers model, and differs from other mainstream open source web server models. Workers model, Sub Reactors/Workers will complete the <code>network read -&gt; data parsing -&gt; command execution -&gt; network write</code> process, and Main Reactor/Master is only responsible for assigning tasks. In Redis' multi-threaded scenario, the I/O threads are only tasked with reading and parsing client requests through the socket, but not actually executing the commands. All client-side commands eventually need to be returned to the main thread for execution, so the utilization of multiple cores is not very high. Moreover, each time the main thread must be busy polling for all I/O threads to complete their tasks before continuing with the rest of the logic.</p>
+<p>I think the main reason why Redis was designed with a multi-threaded network model was to maintain compatibility, because Redis was previously single-threaded and all client commands were executed in a single-threaded event loop, so all data structures in Redis were non-thread-safe. Now with multi-threading, if we follow the standard Multi-Reactors/Master-Workers model, all the built-in data structures would have to be refactored to be thread-safe, which is a huge amount of work and hassle.</p>
+<p>So, in my opinion, Redis' current multi-threading solution is more of a compromise: it maintains the compatibility of the original system while leveraging multiple cores to improve I/O performance.</p>
+<p>Second, the current multi-threaded model of Redis is too simple and brutal in its communication between the main thread and the I/O threads: busy polling and locking, because waiting via spin busy polling causes Redis to have occasional high occupancy caused by brief CPU idle at startup and during runtime. The final implementation of this communication mechanism looks very unintuitive and uncomplicated, and we hope that Redis will improve on the current solution later.</p>
+<h2 id="summary">Summary</h2>
+<p>Redis is the de facto standard for caching systems, and its underlying principles are worth a deep dive. But author antirez, a developer of simplicity, was extremely cautious about adding any new features to Redis, so the core Redis network model was finally converted to a multi-threaded model a decade after the initial release of Redis, during which time a number of Redis multi-threaded alternatives were even born. Although antirez has been postponing the multithreading solution, it has never stopped thinking about the feasibility of multithreading. The transformation of the Redis multithreaded network model did not happen overnight, and involved all aspects of the project, so we can see that the final Redis solution was not perfect, and did not use the mainstream multithreaded design.</p>
+<p>Let&rsquo;s review the design of the Redis multi-threaded network model.</p>
+<ul>
+<li>Multi-threaded network I/O using I/O threads, where I/O threads are only responsible for network I/O and command parsing, and do not execute client commands.</li>
+<li>Implement a lock-free multi-threaded model using atomic operations + interleaved access.</li>
+<li>Isolating the main process from other sub-processes by setting CPU affinity, so that the multi-threaded network model can maximize performance.</li>
+</ul>
+<p>After reading through this article, I believe that readers should be able to understand the various technologies involved in the computer domain to implement a good network system: design patterns, network I/O, concurrent programming, operating system underlays, and even computer hardware. It also requires a careful approach to project iteration and refactoring, and deep thinking about technical solutions, not just the hard part of writing good code.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/redis/">redis</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/docker-in-pod/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Build container images in the pipeline using the docker in pod method</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/python-removes-dead-batteries-from-stdlib/">
+            <span class="next-text nav-default">Python passed a proposal to remove &#34;dead batteries&#34; from the standard library</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

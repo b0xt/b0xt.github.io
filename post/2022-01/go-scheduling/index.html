@@ -1,0 +1,1392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Signal-based preemptive scheduling in Go dissected from source code - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Introduction Prior to 1.14 of Go, preemptive scheduling was collaborative and required self-initiated ceding of execution, but this could not handle edge cases that could not be preempted. Some of these problems were not solved until 1.14 by signal-based preemptive scheduling, such as for loops or garbage collection of long-running threads. Here is an example to verify the difference in preemption between 1.14 and 1.13. 1 2 3 4 5" /><meta name="keywords" content="golang, scheduling" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/go-scheduling/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Signal-based preemptive scheduling in Go dissected from source code" />
+<meta property="og:description" content="Introduction Prior to 1.14 of Go, preemptive scheduling was collaborative and required self-initiated ceding of execution, but this could not handle edge cases that could not be preempted. Some of these problems were not solved until 1.14 by signal-based preemptive scheduling, such as for loops or garbage collection of long-running threads. Here is an example to verify the difference in preemption between 1.14 and 1.13. 1 2 3 4 5" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/go-scheduling/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-23T12:15:10+08:00" />
+<meta property="article:modified_time" content="2022-01-23T12:15:10+08:00" />
+
+<meta itemprop="name" content="Signal-based preemptive scheduling in Go dissected from source code">
+<meta itemprop="description" content="Introduction Prior to 1.14 of Go, preemptive scheduling was collaborative and required self-initiated ceding of execution, but this could not handle edge cases that could not be preempted. Some of these problems were not solved until 1.14 by signal-based preemptive scheduling, such as for loops or garbage collection of long-running threads. Here is an example to verify the difference in preemption between 1.14 and 1.13. 1 2 3 4 5"><meta itemprop="datePublished" content="2022-01-23T12:15:10+08:00" />
+<meta itemprop="dateModified" content="2022-01-23T12:15:10+08:00" />
+<meta itemprop="wordCount" content="4003">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Signal-based preemptive scheduling in Go dissected from source code"/>
+<meta name="twitter:description" content="Introduction Prior to 1.14 of Go, preemptive scheduling was collaborative and required self-initiated ceding of execution, but this could not handle edge cases that could not be preempted. Some of these problems were not solved until 1.14 by signal-based preemptive scheduling, such as for loops or garbage collection of long-running threads. Here is an example to verify the difference in preemption between 1.14 and 1.13. 1 2 3 4 5"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Signal-based preemptive scheduling in Go dissected from source code</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-23 12:15:10 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 4003 words </span>
+          <span class="more-meta"> 8 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#introduction">Introduction</a>
+          <ul>
+            <li><a href="#go113-trace-analysis">Go1.13 trace analysis</a></li>
+            <li><a href="#go-114-trace-analysis">Go 1.14+ trace analysis</a></li>
+          </ul>
+        </li>
+        <li><a href="#analysis">Analysis</a>
+          <ul>
+            <li><a href="#preemption-signal-installation">Preemption signal installation</a></li>
+            <li><a href="#implementing-preemption-signals">Implementing preemption signals</a></li>
+            <li><a href="#preemption-signal-sending">Preemption signal sending</a></li>
+          </ul>
+        </li>
+        <li><a href="#wrap-up">Wrap-up</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="introduction">Introduction</h2>
+<p>Prior to 1.14 of Go, preemptive scheduling was collaborative and required self-initiated ceding of execution, but this could not handle edge cases that could not be preempted. Some of these problems were not solved until 1.14 by signal-based preemptive scheduling, such as for loops or garbage collection of long-running threads.</p>
+<p>Here is an example to verify the difference in preemption between 1.14 and 1.13.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;fmt&#34;</span>
+    <span class="s">&#34;os&#34;</span>
+    <span class="s">&#34;runtime&#34;</span>
+    <span class="s">&#34;runtime/trace&#34;</span>
+    <span class="s">&#34;sync&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">runtime</span><span class="p">.</span><span class="nf">GOMAXPROCS</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+    <span class="nx">f</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Create</span><span class="p">(</span><span class="s">&#34;trace.output&#34;</span><span class="p">)</span>
+    <span class="k">defer</span> <span class="nx">f</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+    <span class="nx">_</span> <span class="p">=</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+    <span class="k">defer</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+    <span class="kd">var</span> <span class="nx">wg</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">30</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">wg</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+            <span class="k">defer</span> <span class="nx">wg</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+            <span class="nx">t</span> <span class="o">:=</span> <span class="mi">0</span>
+            <span class="k">for</span> <span class="nx">i</span><span class="o">:=</span><span class="mi">0</span><span class="p">;</span><span class="nx">i</span><span class="p">&lt;</span><span class="mf">1e8</span><span class="p">;</span><span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+                <span class="nx">t</span><span class="o">+=</span><span class="mi">2</span>
+            <span class="p">}</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;total:&#34;</span><span class="p">,</span> <span class="nx">t</span><span class="p">)</span>
+        <span class="p">}()</span>
+    <span class="p">}</span>
+    <span class="nx">wg</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This example traces the calls made during execution via go trace. Specify <code>runtime.GOMAXPROCS(1)</code> in the code to set the maximum number of CPU cores that can be used simultaneously to 1, using only one P (processor), thus ensuring a single-processor scenario. Then a for loop is called to open 10 goroutines to execute the func function, which is a purely computational and time-consuming function that prevents the goroutines from being idle and giving way to execution.</p>
+<p>Here we compile the program and analyze the trace output.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ go build -gcflags <span class="s2">&#34;-N -l&#34;</span> main.go 
+-N表示禁用优化
+-l禁用内联
+
+$ ./main 
+</code></pre></td></tr></table>
+</div>
+</div><p>Then we get the trace.output file and visualize it.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ go tool trace -http<span class="o">=</span><span class="s2">&#34;:6060&#34;</span> ./trace.output
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="go113-trace-analysis">Go1.13 trace analysis</h3>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/23/84740802eb974332a4f25100e864f916.png" alt="sobyte"></p>
+<p>From this figure above, we can see that.</p>
+<ol>
+<li>there is only one Proc0 in the PROCS column because we have limited it to one P.</li>
+<li>we started 30 goroutines in the for loop, so we can count the color boxes in Proc0 and there are exactly 30 of them.</li>
+<li>the 30 goroutines in Proc0 are executed serially, one after the other, without preemption.</li>
+<li>click on the details column of a goroutines to see that the Wall Duration is about 0.23s, which means that the goroutines have been executed continuously for 0.23s, and the total execution time of 30 goroutines is about 7s.</li>
+<li>cut to the call stack Start Stack Trace is main.main.func1:20, above the code is the func function execution header: <code>go func()</code>.</li>
+<li>cut out the call stack End Stack Trace is main.main.func1:26, in the code is func function last execution print: <code>fmt.Println(&quot;total:&quot;, t)</code>;.</li>
+</ol>
+<p>As you can see from the trace analysis above, Go&rsquo;s collaborative scheduling does nothing for the calcSum function; once execution starts, you have to wait for it to finish. Each goroutine takes as long as 0.23s and cannot seize its execution rights.</p>
+<p>As you can see from the trace analysis above, Go&rsquo;s collaborative scheduling does nothing for the calcSum function; once execution starts, you have to wait for it to finish. Each goroutine takes 0.23s, and it can&rsquo;t seize its execution.</p>
+<h3 id="go-114-trace-analysis">Go 1.14+ trace analysis</h3>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/23/193c183ca3074893878809cec319fda2.png" alt="sobyte"></p>
+<p>After Go 1.14, signal-based preemptive scheduling was introduced. From the above diagram, you can see that the Proc0 column is densely packed with calls to goroutines when switching, and there is no longer a situation where goroutines can only wait for execution to end once execution starts.</p>
+<p>The above run time is about 4s this case can be ignored, because I am running on two machines with different configurations (mainly because I am too much trouble to find two identical machines).</p>
+<p>Let&rsquo;s take a closer look at the breakdown.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/23/e5f1650b26be4ebe8fb8c960d31e75d1.png" alt="sobyte"></p>
+<p>This breakdown shows that</p>
+<ol>
+<li>this goroutine ran for 0.025s before giving way to execution</li>
+<li>the start stack trace is main.main.func1:21, the same as above.</li>
+<li>cut away the call stack End Stack Trace is runtime.asyncPreempt:50, which is the function executed when the preempt signal is received, and it is clear from this place that it is preempted asynchronously.</li>
+</ol>
+<h2 id="analysis">Analysis</h2>
+<h3 id="preemption-signal-installation">Preemption signal installation</h3>
+<p>runtime/signal_unix.go</p>
+<p>Register the <code>SIGURG</code> signal handler function <code>runtime.doSigPreempt</code> in <code>runtime.sighandler</code> when the program starts.</p>
+<p><strong>initsig</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">initsig</span><span class="p">(</span><span class="nx">preinit</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 预初始化
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">!</span><span class="nx">preinit</span> <span class="p">{</span> 
+        <span class="nx">signalsOK</span> <span class="p">=</span> <span class="kc">true</span>
+    <span class="p">}</span> 
+    <span class="c1">//遍历信号数组
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="nb">uint32</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">_NSIG</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">t</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">sigtable</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+        <span class="c1">//略过信号：SIGKILL、SIGSTOP、SIGTSTP、SIGCONT、SIGTTIN、SIGTTOU
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">t</span><span class="p">.</span><span class="nx">flags</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">t</span><span class="p">.</span><span class="nx">flags</span><span class="o">&amp;</span><span class="nx">_SigDefault</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+            <span class="k">continue</span>
+        <span class="p">}</span> 
+        <span class="o">...</span>  
+        <span class="nf">setsig</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nf">funcPC</span><span class="p">(</span><span class="nx">sighandler</span><span class="p">))</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The initsig function iterates through all the semaphores and then calls the setsig function to register them. We can look at the global variable sigtable to see what information is available.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">sigtable</span> <span class="p">=</span> <span class="p">[</span><span class="o">...</span><span class="p">]</span><span class="nx">sigTabT</span><span class="p">{</span>
+    <span class="cm">/* 0 */</span> <span class="p">{</span><span class="mi">0</span><span class="p">,</span> <span class="s">&#34;SIGNONE: no trap&#34;</span><span class="p">},</span>
+    <span class="cm">/* 1 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigKill</span><span class="p">,</span> <span class="s">&#34;SIGHUP: terminal line hangup&#34;</span><span class="p">},</span>
+    <span class="cm">/* 2 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigKill</span><span class="p">,</span> <span class="s">&#34;SIGINT: interrupt&#34;</span><span class="p">},</span>
+    <span class="cm">/* 3 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigThrow</span><span class="p">,</span> <span class="s">&#34;SIGQUIT: quit&#34;</span><span class="p">},</span>
+    <span class="cm">/* 4 */</span> <span class="p">{</span><span class="nx">_SigThrow</span> <span class="o">+</span> <span class="nx">_SigUnblock</span><span class="p">,</span> <span class="s">&#34;SIGILL: illegal instruction&#34;</span><span class="p">},</span>
+    <span class="cm">/* 5 */</span> <span class="p">{</span><span class="nx">_SigThrow</span> <span class="o">+</span> <span class="nx">_SigUnblock</span><span class="p">,</span> <span class="s">&#34;SIGTRAP: trace trap&#34;</span><span class="p">},</span>
+    <span class="cm">/* 6 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigThrow</span><span class="p">,</span> <span class="s">&#34;SIGABRT: abort&#34;</span><span class="p">},</span>
+    <span class="cm">/* 7 */</span> <span class="p">{</span><span class="nx">_SigPanic</span> <span class="o">+</span> <span class="nx">_SigUnblock</span><span class="p">,</span> <span class="s">&#34;SIGBUS: bus error&#34;</span><span class="p">},</span>
+    <span class="cm">/* 8 */</span> <span class="p">{</span><span class="nx">_SigPanic</span> <span class="o">+</span> <span class="nx">_SigUnblock</span><span class="p">,</span> <span class="s">&#34;SIGFPE: floating-point exception&#34;</span><span class="p">},</span>
+    <span class="cm">/* 9 */</span> <span class="p">{</span><span class="mi">0</span><span class="p">,</span> <span class="s">&#34;SIGKILL: kill&#34;</span><span class="p">},</span>
+    <span class="cm">/* 10 */</span> <span class="p">{</span><span class="nx">_SigNotify</span><span class="p">,</span> <span class="s">&#34;SIGUSR1: user-defined signal 1&#34;</span><span class="p">},</span>
+    <span class="cm">/* 11 */</span> <span class="p">{</span><span class="nx">_SigPanic</span> <span class="o">+</span> <span class="nx">_SigUnblock</span><span class="p">,</span> <span class="s">&#34;SIGSEGV: segmentation violation&#34;</span><span class="p">},</span>
+    <span class="cm">/* 12 */</span> <span class="p">{</span><span class="nx">_SigNotify</span><span class="p">,</span> <span class="s">&#34;SIGUSR2: user-defined signal 2&#34;</span><span class="p">},</span>
+    <span class="cm">/* 13 */</span> <span class="p">{</span><span class="nx">_SigNotify</span><span class="p">,</span> <span class="s">&#34;SIGPIPE: write to broken pipe&#34;</span><span class="p">},</span>
+    <span class="cm">/* 14 */</span> <span class="p">{</span><span class="nx">_SigNotify</span><span class="p">,</span> <span class="s">&#34;SIGALRM: alarm clock&#34;</span><span class="p">},</span>
+    <span class="cm">/* 15 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigKill</span><span class="p">,</span> <span class="s">&#34;SIGTERM: termination&#34;</span><span class="p">},</span>
+    <span class="cm">/* 16 */</span> <span class="p">{</span><span class="nx">_SigThrow</span> <span class="o">+</span> <span class="nx">_SigUnblock</span><span class="p">,</span> <span class="s">&#34;SIGSTKFLT: stack fault&#34;</span><span class="p">},</span>
+    <span class="cm">/* 17 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigUnblock</span> <span class="o">+</span> <span class="nx">_SigIgn</span><span class="p">,</span> <span class="s">&#34;SIGCHLD: child status has changed&#34;</span><span class="p">},</span>
+    <span class="cm">/* 18 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigDefault</span> <span class="o">+</span> <span class="nx">_SigIgn</span><span class="p">,</span> <span class="s">&#34;SIGCONT: continue&#34;</span><span class="p">},</span>
+    <span class="cm">/* 19 */</span> <span class="p">{</span><span class="mi">0</span><span class="p">,</span> <span class="s">&#34;SIGSTOP: stop, unblockable&#34;</span><span class="p">},</span>
+    <span class="cm">/* 20 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigDefault</span> <span class="o">+</span> <span class="nx">_SigIgn</span><span class="p">,</span> <span class="s">&#34;SIGTSTP: keyboard stop&#34;</span><span class="p">},</span>
+    <span class="cm">/* 21 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigDefault</span> <span class="o">+</span> <span class="nx">_SigIgn</span><span class="p">,</span> <span class="s">&#34;SIGTTIN: background read from tty&#34;</span><span class="p">},</span>
+    <span class="cm">/* 22 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigDefault</span> <span class="o">+</span> <span class="nx">_SigIgn</span><span class="p">,</span> <span class="s">&#34;SIGTTOU: background write to tty&#34;</span><span class="p">},</span>
+
+    <span class="cm">/* 23 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigIgn</span><span class="p">,</span> <span class="s">&#34;SIGURG: urgent condition on socket&#34;</span><span class="p">},</span>
+    <span class="cm">/* 24 */</span> <span class="p">{</span><span class="nx">_SigNotify</span><span class="p">,</span> <span class="s">&#34;SIGXCPU: cpu limit exceeded&#34;</span><span class="p">},</span>
+    <span class="cm">/* 25 */</span> <span class="p">{</span><span class="nx">_SigNotify</span><span class="p">,</span> <span class="s">&#34;SIGXFSZ: file size limit exceeded&#34;</span><span class="p">},</span>
+    <span class="cm">/* 26 */</span> <span class="p">{</span><span class="nx">_SigNotify</span><span class="p">,</span> <span class="s">&#34;SIGVTALRM: virtual alarm clock&#34;</span><span class="p">},</span>
+    <span class="cm">/* 27 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigUnblock</span><span class="p">,</span> <span class="s">&#34;SIGPROF: profiling alarm clock&#34;</span><span class="p">},</span>
+    <span class="cm">/* 28 */</span> <span class="p">{</span><span class="nx">_SigNotify</span> <span class="o">+</span> <span class="nx">_SigIgn</span><span class="p">,</span> <span class="s">&#34;SIGWINCH: window size change&#34;</span><span class="p">},</span>
+    <span class="cm">/* 29 */</span> <span class="p">{</span><span class="nx">_SigNotify</span><span class="p">,</span> <span class="s">&#34;SIGIO: i/o now possible&#34;</span><span class="p">},</span>
+    <span class="cm">/* 30 */</span> <span class="p">{</span><span class="nx">_SigNotify</span><span class="p">,</span> <span class="s">&#34;SIGPWR: power failure restart&#34;</span><span class="p">},</span>
+    <span class="cm">/* 31 */</span> <span class="p">{</span><span class="nx">_SigThrow</span><span class="p">,</span> <span class="s">&#34;SIGSYS: bad system call&#34;</span><span class="p">},</span>
+    <span class="cm">/* 32 */</span> <span class="p">{</span><span class="nx">_SigSetStack</span> <span class="o">+</span> <span class="nx">_SigUnblock</span><span class="p">,</span> <span class="s">&#34;signal 32&#34;</span><span class="p">},</span> <span class="cm">/* SIGCANCEL; see issue 6997 */</span>
+    <span class="cm">/* 33 */</span> <span class="p">{</span><span class="nx">_SigSetStack</span> <span class="o">+</span> <span class="nx">_SigUnblock</span><span class="p">,</span> <span class="s">&#34;signal 33&#34;</span><span class="p">},</span> <span class="cm">/* SIGSETXID; see issues 3871, 9400, 12498 */</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The specific meaning of the signals can be found in this introduction: <a href="https://zh.wikipedia.org/wiki/Unix%E4%BF%A1%E5%8F%B7">Unix Signals</a></p>
+<p>Note that the preemption signal here is <code>_SigNotify + _SigIgn</code> as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="o">{</span>_SigNotify + _SigIgn, <span class="s2">&#34;SIGURG: urgent condition on socket&#34;</span><span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s look at the setsig function, which is inside the <code>runtime/os_linux.go</code> file.</p>
+<p><strong>setsig</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">setsig</span><span class="p">(</span><span class="nx">i</span> <span class="kt">uint32</span><span class="p">,</span> <span class="nx">fn</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">sa</span> <span class="nx">sigactiont</span>
+    <span class="nx">sa</span><span class="p">.</span><span class="nx">sa_flags</span> <span class="p">=</span> <span class="nx">_SA_SIGINFO</span> <span class="p">|</span> <span class="nx">_SA_ONSTACK</span> <span class="p">|</span> <span class="nx">_SA_RESTORER</span> <span class="p">|</span> <span class="nx">_SA_RESTART</span>
+    <span class="nf">sigfillset</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sa</span><span class="p">.</span><span class="nx">sa_mask</span><span class="p">)</span>
+    <span class="o">...</span>
+    <span class="k">if</span> <span class="nx">fn</span> <span class="o">==</span> <span class="nf">funcPC</span><span class="p">(</span><span class="nx">sighandler</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// CGO 相关
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">iscgo</span> <span class="p">{</span>
+            <span class="nx">fn</span> <span class="p">=</span> <span class="nf">funcPC</span><span class="p">(</span><span class="nx">cgoSigtramp</span><span class="p">)</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="c1">// 替换为调用 sigtramp
+</span><span class="c1"></span>            <span class="nx">fn</span> <span class="p">=</span> <span class="nf">funcPC</span><span class="p">(</span><span class="nx">sigtramp</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="nx">sa</span><span class="p">.</span><span class="nx">sa_handler</span> <span class="p">=</span> <span class="nx">fn</span>
+    <span class="nf">sigaction</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">sa</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Note here that when fn equals sighandler, the function called is replaced with sigtramp. The sigaction function calls the system call functions sys_signal as well as sys_rt_sigaction to implement installation signals under Linux.</p>
+<h3 id="implementing-preemption-signals">Implementing preemption signals</h3>
+<p>Here is the signal processing when the signal occurs, originally it should be after sending the preemption signal, but here I first went down the installation signal first. You can jump to after sending the preemption signal and come back.</p>
+<p>The above analysis shows that when fn is equal to sighandler, the function called will be replaced with sigtramp, which is an assembly implementation, as we see below.</p>
+<p><code>src/runtime/sys_linux_amd64.s</code> :</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">TEXT runtime·sigtramp&lt;ABIInternal&gt;(SB),NOSPLIT,$72
+    ...
+    // We don&#39;t save mxcsr or the x87 control word because sigtrampgo doesn&#39;t
+    // modify them.
+
+    MOVQ    DX, ctx-56(SP)
+    MOVQ    SI, info-64(SP)
+    MOVQ    DI, signum-72(SP)
+    MOVQ    $runtime·sigtrampgo(SB), AX
+    CALL AX
+
+    ...
+    RET
+</code></pre></td></tr></table>
+</div>
+</div><p>This will be called to indicate that the signal has been sent in response, and <code>runtime-sigtramp</code> will do the processing of the signal. <code>runtime-sigtramp</code> will then go on to call <code>runtime-sigtrampgo</code>.</p>
+<p>This function is in the <code>runtime/signal_unix.go</code> file.</p>
+<p><strong>sigtrampgo&amp;sighandler</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">func sigtrampgo(sig uint32, info *siginfo, ctx unsafe.Pointer) {
+    if sigfwdgo(sig, info, ctx) {
+        return
+    }
+    c := &amp;sigctxt{info, ctx}
+    g := sigFetchG(c)
+    ... 
+    sighandler(sig, info, ctx, g)
+    setg(g)
+    if setStack {
+        restoreGsignalStack(&amp;gsignalStack)
+    }
+}
+
+func sighandler(sig uint32, info *siginfo, ctxt unsafe.Pointer, gp *g) {
+    _g_ := getg()
+    c := &amp;sigctxt{info, ctxt}
+    ... 
+  // 如果是一个抢占信号
+    if sig == sigPreempt &amp;&amp; debug.asyncpreemptoff == 0 { 
+        // 处理抢占信号
+        doSigPreempt(gp, c) 
+    }
+
+    ...
+}
+</code></pre></td></tr></table>
+</div>
+</div><p>The sighandler method does a lot of other signal handling inside, we only care about the preemption part of the code, where the preemption will eventually be performed through the doSigPreempt method.</p>
+<p>This function is in the <code> runtime/signal_unix.go</code> file.</p>
+<p><strong>doSigPreempt</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">doSigPreempt</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">,</span> <span class="nx">ctxt</span> <span class="o">*</span><span class="nx">sigctxt</span><span class="p">)</span> <span class="p">{</span> 
+    <span class="c1">// 检查此 G 是否要被抢占并且可以安全地抢占
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nf">wantAsyncPreempt</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span> <span class="p">{</span> 
+        <span class="c1">// 检查是否能安全的进行抢占
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">ok</span><span class="p">,</span> <span class="nx">newpc</span> <span class="o">:=</span> <span class="nf">isAsyncSafePoint</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">ctxt</span><span class="p">.</span><span class="nf">sigpc</span><span class="p">(),</span> <span class="nx">ctxt</span><span class="p">.</span><span class="nf">sigsp</span><span class="p">(),</span> <span class="nx">ctxt</span><span class="p">.</span><span class="nf">siglr</span><span class="p">());</span> <span class="nx">ok</span> <span class="p">{</span>
+            <span class="c1">// 修改寄存器,并执行抢占调用
+</span><span class="c1"></span>            <span class="nx">ctxt</span><span class="p">.</span><span class="nf">pushCall</span><span class="p">(</span><span class="nf">funcPC</span><span class="p">(</span><span class="nx">asyncPreempt</span><span class="p">),</span> <span class="nx">newpc</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 更新一下抢占相关字段
+</span><span class="c1"></span>    <span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">preemptGen</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">signalPending</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span> 
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>function handles the preempt signal, gets the current SP and PC registers and calls <code>ctxt.pushCall</code> to modify them, and calls the asyncPreempt function in <code>runtime/preempt.go</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 保存用户态寄存器后调用asyncPreempt2
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">asyncPreempt</span><span class="p">()</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The assembly code for asyncPreempt is in <code> src/runtime/preempt_amd64.s</code>, which saves the user state registers and then calls the asyncPreempt2 function in <code>runtime/preempt.go</code>.</p>
+<p><strong>asyncPreempt2</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">asyncPreempt2</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+    <span class="nx">gp</span><span class="p">.</span><span class="nx">asyncSafePoint</span> <span class="p">=</span> <span class="kc">true</span>
+    <span class="c1">// 该 G 是否可以被抢占 
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">preemptStop</span> <span class="p">{</span> 
+        <span class="nf">mcall</span><span class="p">(</span><span class="nx">preemptPark</span><span class="p">)</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span> 
+        <span class="c1">// 让 G 放弃当前在 M 上的执行权利,将 G 放入全局队列等待后续调度
+</span><span class="c1"></span>        <span class="nf">mcall</span><span class="p">(</span><span class="nx">gopreempt_m</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">gp</span><span class="p">.</span><span class="nx">asyncSafePoint</span> <span class="p">=</span> <span class="kc">false</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This function will get the current G and determine the preemptStop value of the G. The preemptStop will mark the <code>_Grunning</code> state of the Goroutine as preemptable when the suspendG function of <code>runtime/preempt.go</code> is called <code>gp.preemptStop = true</code>, indicating that the G can be preempted.</p>
+<p>Let&rsquo;s look at the preemptPark function in <code>runtime/proc.go</code>, which is called to execute the preempt task.</p>
+<p><strong>preemptPark</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">preemptPark</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">)</span> <span class="p">{</span>
+
+    <span class="nx">status</span> <span class="o">:=</span> <span class="nf">readgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">status</span><span class="o">&amp;^</span><span class="nx">_Gscan</span> <span class="o">!=</span> <span class="nx">_Grunning</span> <span class="p">{</span>
+        <span class="nf">dumpgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+        <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;bad g status&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">gp</span><span class="p">.</span><span class="nx">waitreason</span> <span class="p">=</span> <span class="nx">waitReasonPreempted</span> 
+    <span class="nf">casGToPreemptScan</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">,</span> <span class="nx">_Gscan</span><span class="p">|</span><span class="nx">_Gpreempted</span><span class="p">)</span>
+    <span class="c1">// 使当前 m 放弃 g，让出线程
+</span><span class="c1"></span>    <span class="nf">dropg</span><span class="p">()</span>
+    <span class="c1">// 修改当前 Goroutine 的状态到 _Gpreempted
+</span><span class="c1"></span>    <span class="nf">casfrom_Gscanstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Gscan</span><span class="p">|</span><span class="nx">_Gpreempted</span><span class="p">,</span> <span class="nx">_Gpreempted</span><span class="p">)</span>
+    <span class="c1">// 并继续执行调度
+</span><span class="c1"></span>    <span class="nf">schedule</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>preemptPark modifies the status of the current Goroutine to <code>_Gpreempted</code>, calls dropg to let out the thread, and finally calls the schedule function to continue the task loop scheduling of the other Goroutines.</p>
+<p><strong>gopreempt_m</strong></p>
+<p>The gopreempt_m method is more of an active cession than a preemption, and then rejoins the execution queue to wait for scheduling.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gopreempt_m</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">)</span> <span class="p">{</span> 
+    <span class="nf">goschedImpl</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">goschedImpl</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">status</span> <span class="o">:=</span> <span class="nf">readgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+    <span class="o">...</span>
+  <span class="c1">// 更新状态为 _Grunnable
+</span><span class="c1"></span>    <span class="nf">casgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">,</span> <span class="nx">_Grunnable</span><span class="p">)</span>
+  <span class="c1">// 使当前 m 放弃 g，让出线程
+</span><span class="c1"></span>    <span class="nf">dropg</span><span class="p">()</span>
+    <span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+  <span class="c1">// 重新加入到全局执行队列中
+</span><span class="c1"></span>    <span class="nf">globrunqput</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+    <span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+    <span class="c1">// 并继续执行调度
+</span><span class="c1"></span>    <span class="nf">schedule</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="preemption-signal-sending">Preemption signal sending</h3>
+<p>Preemption signaling is performed by preemptM.</p>
+<p>This function is in the <code>runtime/signal_unix.go</code> file.</p>
+<p><strong>preemptM</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="nx">sigPreempt</span> <span class="p">=</span> <span class="nx">_SIGURG</span>
+
+<span class="kd">func</span> <span class="nf">preemptM</span><span class="p">(</span><span class="nx">mp</span> <span class="o">*</span><span class="nx">m</span><span class="p">)</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">mp</span><span class="p">.</span><span class="nx">signalPending</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="p">{</span> 
+
+        <span class="c1">// preemptM 向 M 发送抢占请求。
+</span><span class="c1"></span>        <span class="c1">// 接收到该请求后，如果正在运行的 G 或 P 被标记为抢占，并且 Goroutine 处于异步安全点，
+</span><span class="c1"></span>        <span class="c1">// 它将抢占 Goroutine。
+</span><span class="c1"></span>        <span class="nf">signalM</span><span class="p">(</span><span class="nx">mp</span><span class="p">,</span> <span class="nx">sigPreempt</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>preemptM This function calls signalM to send the <code>_SIGURG</code> signal installed at initialization to the specified M.</p>
+<p>The main places where preemptM is used to send preemption signals are as follows.</p>
+<ol>
+<li>the Go backend monitor runtime.sysmon detects timeouts to send preempt signals.</li>
+<li>the Go GC stack scan sends a preempt signal.</li>
+<li>calling preemptall when Go GC STW to preempt all P&rsquo;s and make them pause.</li>
+</ol>
+<h4 id="go-background-monitoring-execution-preemption">Go background monitoring execution preemption</h4>
+<p>System Monitor <code>runtime.sysmon</code> calls <code>runtime.retake</code> in a loop to seize a processor that is running or in a system call, and this function traverses the global processor at runtime.</p>
+<p>The main reason for system monitoring by preemption in a loop is to avoid starvation caused by G taking up M for too long.</p>
+<p><code>runtime.retake</code> is divided into two main parts.</p>
+<ol>
+<li>a call to preemptone to preempt the current processor.</li>
+<li>call handoffp to give up access to the processor; <strong>preempt the current processor</strong></li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">retake</span><span class="p">(</span><span class="nx">now</span> <span class="kt">int64</span><span class="p">)</span> <span class="kt">uint32</span> <span class="p">{</span>
+    <span class="nx">n</span> <span class="o">:=</span> <span class="mi">0</span>
+
+    <span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">allpLock</span><span class="p">)</span> 
+    <span class="c1">// 遍历 allp 数组
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">allp</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">_p_</span> <span class="o">:=</span> <span class="nx">allp</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nx">_p_</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span> 
+            <span class="k">continue</span>
+        <span class="p">}</span>
+        <span class="nx">pd</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">sysmontick</span>
+        <span class="nx">s</span> <span class="o">:=</span> <span class="nx">_p_</span><span class="p">.</span><span class="nx">status</span>
+        <span class="nx">sysretake</span> <span class="o">:=</span> <span class="kc">false</span>
+        <span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="nx">_Prunning</span> <span class="o">||</span> <span class="nx">s</span> <span class="o">==</span> <span class="nx">_Psyscall</span> <span class="p">{</span>
+            <span class="c1">// 调度次数
+</span><span class="c1"></span>            <span class="nx">t</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">schedtick</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">pd</span><span class="p">.</span><span class="nx">schedtick</span><span class="p">)</span> <span class="o">!=</span> <span class="nx">t</span> <span class="p">{</span>
+                <span class="nx">pd</span><span class="p">.</span><span class="nx">schedtick</span> <span class="p">=</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
+                <span class="c1">// 处理器上次调度时间
+</span><span class="c1"></span>                <span class="nx">pd</span><span class="p">.</span><span class="nx">schedwhen</span> <span class="p">=</span> <span class="nx">now</span>
+            <span class="c1">// 抢占 G 的执行，如果上一次触发调度的时间已经过去了 10ms
+</span><span class="c1"></span>            <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">schedwhen</span><span class="o">+</span><span class="nx">forcePreemptNS</span> <span class="o">&lt;=</span> <span class="nx">now</span> <span class="p">{</span>
+                <span class="nf">preemptone</span><span class="p">(</span><span class="nx">_p_</span><span class="p">)</span>
+                <span class="nx">sysretake</span> <span class="p">=</span> <span class="kc">true</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+        <span class="o">...</span>
+    <span class="p">}</span>
+    <span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">allpLock</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">n</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This process will get the current state of P. If it is in <code>_Prunning</code> or <code>_Psyscall</code> state, and 10ms have passed since the last trigger time, then preemptone will be called to send the preemption signal. preemptone has been discussed above, so we will not repeat it here.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/23/1b19a44055204caf936764b04adf4338.png" alt="sobyte"></p>
+<p><strong>call handoffp to give up access to the processor</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">retake</span><span class="p">(</span><span class="nx">now</span> <span class="kt">int64</span><span class="p">)</span> <span class="kt">uint32</span> <span class="p">{</span>
+    <span class="nx">n</span> <span class="o">:=</span> <span class="mi">0</span>
+    <span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">allpLock</span><span class="p">)</span> 
+    <span class="c1">// 遍历 allp 数组
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">allp</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">_p_</span> <span class="o">:=</span> <span class="nx">allp</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+        <span class="k">if</span> <span class="nx">_p_</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span> 
+            <span class="k">continue</span>
+        <span class="p">}</span>
+        <span class="nx">pd</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">sysmontick</span>
+        <span class="nx">s</span> <span class="o">:=</span> <span class="nx">_p_</span><span class="p">.</span><span class="nx">status</span>
+        <span class="nx">sysretake</span> <span class="o">:=</span> <span class="kc">false</span>
+        <span class="o">...</span>
+        <span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="nx">_Psyscall</span> <span class="p">{</span> 
+            <span class="c1">// 系统调用的次数
+</span><span class="c1"></span>            <span class="nx">t</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">syscalltick</span><span class="p">)</span>
+            <span class="k">if</span> <span class="p">!</span><span class="nx">sysretake</span> <span class="o">&amp;&amp;</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">pd</span><span class="p">.</span><span class="nx">syscalltick</span><span class="p">)</span> <span class="o">!=</span> <span class="nx">t</span> <span class="p">{</span>
+                <span class="nx">pd</span><span class="p">.</span><span class="nx">syscalltick</span> <span class="p">=</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
+                <span class="c1">// 系统调用的时间
+</span><span class="c1"></span>                <span class="nx">pd</span><span class="p">.</span><span class="nx">syscallwhen</span> <span class="p">=</span> <span class="nx">now</span>
+                <span class="k">continue</span>
+            <span class="p">}</span> 
+            <span class="k">if</span> <span class="nf">runqempty</span><span class="p">(</span><span class="nx">_p_</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">nmspinning</span><span class="p">)</span><span class="o">+</span><span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">npidle</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">pd</span><span class="p">.</span><span class="nx">syscallwhen</span><span class="o">+</span><span class="mi">10</span><span class="o">*</span><span class="mi">1000</span><span class="o">*</span><span class="mi">1000</span> <span class="p">&gt;</span> <span class="nx">now</span> <span class="p">{</span>
+                <span class="k">continue</span>
+            <span class="p">}</span> 
+            <span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">allpLock</span><span class="p">)</span> 
+            <span class="nf">incidlelocked</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">status</span><span class="p">,</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">_Pidle</span><span class="p">)</span> <span class="p">{</span> 
+                <span class="nx">n</span><span class="o">++</span>
+                <span class="nx">_p_</span><span class="p">.</span><span class="nx">syscalltick</span><span class="o">++</span>
+                <span class="c1">// 让出处理器的使用权
+</span><span class="c1"></span>                <span class="nf">handoffp</span><span class="p">(</span><span class="nx">_p_</span><span class="p">)</span>
+            <span class="p">}</span>
+            <span class="nf">incidlelocked</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+            <span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">allpLock</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">allpLock</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">n</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This process determines if the state of P is in the <code>_Psyscall</code> state, a judgment is made, and if one is not satisfied, handoffp is called to give up the use of P:</p>
+<ol>
+<li><code>runqempty(_p_)</code>: determines whether P&rsquo;s task queue is empty.</li>
+<li><code>atomic.Load(&amp;sched.nmspinning)+atomic.Load(&amp;sched.npidle)</code> : nmspinning indicates the number of G being stolen and npidle indicates the number of idle P. Determine if there is an idle P and a P that is being scheduled to steal G.</li>
+<li><code>pd.syscallwhen+10*1000*1000 &gt; now</code> : determine if the system call time is longer than 10ms.</li>
+</ol>
+<h4 id="go-gc-stack-scan-sends-preemption-signal">Go GC stack scan sends preemption signal</h4>
+<p>Go scans the stack of G when marking the GC Root at GC time, and calls suspendG to suspend the execution of G before scanning, and then calls resumeG again to resume execution after scanning.</p>
+<p>This function is in: <code>runtime/mgcmark.go</code> :</p>
+<p><strong>markroot</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">markroot</span><span class="p">(</span><span class="nx">gcw</span> <span class="o">*</span><span class="nx">gcWork</span><span class="p">,</span> <span class="nx">i</span> <span class="kt">uint32</span><span class="p">)</span> <span class="p">{</span> 
+    <span class="o">...</span>
+    <span class="k">switch</span> <span class="p">{</span> 
+    <span class="o">...</span>
+    <span class="c1">// 扫描各个 G 的栈
+</span><span class="c1"></span>    <span class="k">default</span><span class="p">:</span> 
+        <span class="c1">// 获取需要扫描的 G
+</span><span class="c1"></span>        <span class="kd">var</span> <span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span>
+        <span class="k">if</span> <span class="nx">baseStacks</span> <span class="o">&lt;=</span> <span class="nx">i</span> <span class="o">&amp;&amp;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">end</span> <span class="p">{</span>
+            <span class="nx">gp</span> <span class="p">=</span> <span class="nx">allgs</span><span class="p">[</span><span class="nx">i</span><span class="o">-</span><span class="nx">baseStacks</span><span class="p">]</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;markroot: bad index&#34;</span><span class="p">)</span>
+        <span class="p">}</span> 
+        <span class="o">...</span>
+        <span class="c1">// 转交给g0进行扫描
+</span><span class="c1"></span>        <span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>  
+            <span class="o">...</span>
+            <span class="c1">// 挂起 G，让对应的 G 停止运行
+</span><span class="c1"></span>            <span class="nx">stopped</span> <span class="o">:=</span> <span class="nf">suspendG</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nx">stopped</span><span class="p">.</span><span class="nx">dead</span> <span class="p">{</span>
+                <span class="nx">gp</span><span class="p">.</span><span class="nx">gcscandone</span> <span class="p">=</span> <span class="kc">true</span>
+                <span class="k">return</span>
+            <span class="p">}</span>
+            <span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">gcscandone</span> <span class="p">{</span>
+                <span class="nf">throw</span><span class="p">(</span><span class="s">&#34;g already scanned&#34;</span><span class="p">)</span>
+            <span class="p">}</span>
+            <span class="c1">// 扫描g的栈
+</span><span class="c1"></span>            <span class="nf">scanstack</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">gcw</span><span class="p">)</span>
+            <span class="nx">gp</span><span class="p">.</span><span class="nx">gcscandone</span> <span class="p">=</span> <span class="kc">true</span>
+            <span class="c1">// 恢复该 G 的执行
+</span><span class="c1"></span>            <span class="nf">resumeG</span><span class="p">(</span><span class="nx">stopped</span><span class="p">)</span> 
+        <span class="p">})</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>markroot switches to G0 before scanning the stack and then calls suspendG to determine the running state of G. If the G is running <code>_Grunning</code>, then it sets preemptStop to true and sends a preempt signal.</p>
+<p>This function is in: <code>runtime/preempt.go</code> :</p>
+<p><strong>suspendG</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">suspendG</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">)</span> <span class="nx">suspendGState</span> <span class="p">{</span>
+    <span class="o">...</span>
+    <span class="kd">const</span> <span class="nx">yieldDelay</span> <span class="p">=</span> <span class="mi">10</span> <span class="o">*</span> <span class="mi">1000</span>
+
+    <span class="kd">var</span> <span class="nx">nextPreemptM</span> <span class="kt">int64</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="k">switch</span> <span class="nx">s</span> <span class="o">:=</span> <span class="nf">readgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">);</span> <span class="nx">s</span> <span class="p">{</span> 
+        <span class="o">...</span> 
+        <span class="k">case</span> <span class="nx">_Grunning</span><span class="p">:</span>
+            <span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">preemptStop</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">preempt</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">stackguard0</span> <span class="o">==</span> <span class="nx">stackPreempt</span> <span class="o">&amp;&amp;</span> <span class="nx">asyncM</span> <span class="o">==</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">asyncM</span><span class="p">.</span><span class="nx">preemptGen</span><span class="p">)</span> <span class="o">==</span> <span class="nx">asyncGen</span> <span class="p">{</span>
+                <span class="k">break</span>
+            <span class="p">}</span>
+            <span class="k">if</span> <span class="p">!</span><span class="nf">castogscanstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">,</span> <span class="nx">_Gscanrunning</span><span class="p">)</span> <span class="p">{</span>
+                <span class="k">break</span>
+            <span class="p">}</span>
+            <span class="c1">// 设置抢占字段
+</span><span class="c1"></span>            <span class="nx">gp</span><span class="p">.</span><span class="nx">preemptStop</span> <span class="p">=</span> <span class="kc">true</span>
+            <span class="nx">gp</span><span class="p">.</span><span class="nx">preempt</span> <span class="p">=</span> <span class="kc">true</span>
+            <span class="nx">gp</span><span class="p">.</span><span class="nx">stackguard0</span> <span class="p">=</span> <span class="nx">stackPreempt</span>
+
+            <span class="nx">asyncM2</span> <span class="o">:=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">m</span>
+            <span class="nx">asyncGen2</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">asyncM2</span><span class="p">.</span><span class="nx">preemptGen</span><span class="p">)</span>
+            <span class="c1">// asyncM 与 asyncGen 标记的是循环里 上次抢占的信息，用来校验不能重复抢占
+</span><span class="c1"></span>            <span class="nx">needAsync</span> <span class="o">:=</span> <span class="nx">asyncM</span> <span class="o">!=</span> <span class="nx">asyncM2</span> <span class="o">||</span> <span class="nx">asyncGen</span> <span class="o">!=</span> <span class="nx">asyncGen2</span>
+            <span class="nx">asyncM</span> <span class="p">=</span> <span class="nx">asyncM2</span>
+            <span class="nx">asyncGen</span> <span class="p">=</span> <span class="nx">asyncGen2</span>
+
+            <span class="nf">casfrom_Gscanstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Gscanrunning</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">)</span>
+
+            <span class="k">if</span> <span class="nx">preemptMSupported</span> <span class="o">&amp;&amp;</span> <span class="nx">debug</span><span class="p">.</span><span class="nx">asyncpreemptoff</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">needAsync</span> <span class="p">{</span> 
+                <span class="nx">now</span> <span class="o">:=</span> <span class="nf">nanotime</span><span class="p">()</span>
+                <span class="c1">// 限制抢占的频率
+</span><span class="c1"></span>                <span class="k">if</span> <span class="nx">now</span> <span class="o">&gt;=</span> <span class="nx">nextPreemptM</span> <span class="p">{</span>
+                    <span class="nx">nextPreemptM</span> <span class="p">=</span> <span class="nx">now</span> <span class="o">+</span> <span class="nx">yieldDelay</span><span class="o">/</span><span class="mi">2</span>
+                    <span class="c1">// 执行抢占信号发送
+</span><span class="c1"></span>                    <span class="nf">preemptM</span><span class="p">(</span><span class="nx">asyncM</span><span class="p">)</span>
+                <span class="p">}</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+        <span class="o">...</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>For the suspendG function I only truncated the processing of G in the <code>_Grunning</code> state. This state sets preemptStop to true, and is the only place where it is set to true. preemptStop is related to the execution of the preempt signal, so if you forgot, you can go to the asyncPreempt2 function above.</p>
+<h4 id="go-gc-stoptheworld-preempts-all-p">Go GC StopTheWorld preempts all P</h4>
+<p>Go GC STW is executed with the stopTheWorldWithSema function, which is in <code>runtime/proc.go</code> :</p>
+<p><strong>stopTheWorldWithSema</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">stopTheWorldWithSema</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">_g_</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span> 
+
+    <span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+    <span class="nx">sched</span><span class="p">.</span><span class="nx">stopwait</span> <span class="p">=</span> <span class="nx">gomaxprocs</span>
+    <span class="c1">// 标记 gcwaiting，调度时看见此标记会进入等待
+</span><span class="c1"></span>    <span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">gcwaiting</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="c1">// 发送抢占信号
+</span><span class="c1"></span>    <span class="nf">preemptall</span><span class="p">()</span> 
+    <span class="c1">// 暂停当前 P
+</span><span class="c1"></span>    <span class="nx">_g_</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">p</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">status</span> <span class="p">=</span> <span class="nx">_Pgcstop</span> <span class="c1">// Pgcstop is only diagnostic.
+</span><span class="c1"></span>    <span class="o">...</span>
+    <span class="nx">wait</span> <span class="o">:=</span> <span class="nx">sched</span><span class="p">.</span><span class="nx">stopwait</span> <span class="p">&gt;</span> <span class="mi">0</span>
+    <span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">wait</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="p">{</span>
+            <span class="c1">//  等待 100 us
+</span><span class="c1"></span>            <span class="k">if</span> <span class="nf">notetsleep</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">stopnote</span><span class="p">,</span> <span class="mi">100</span><span class="o">*</span><span class="mi">1000</span><span class="p">)</span> <span class="p">{</span>
+                <span class="nf">noteclear</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">stopnote</span><span class="p">)</span>
+                <span class="k">break</span>
+            <span class="p">}</span>
+            <span class="c1">// 再次进行发送抢占信号
+</span><span class="c1"></span>            <span class="nf">preemptall</span><span class="p">()</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The stopTheWorldWithSema function will call preemptall to send preemption signals to all P&rsquo;s.</p>
+<p>The file location of the preemptall function is in <code>runtime/proc.go</code> :</p>
+<p><strong>preemptall</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">preemptall</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+   <span class="nx">res</span> <span class="o">:=</span> <span class="kc">false</span>
+   <span class="c1">// 遍历所有的 P
+</span><span class="c1"></span>   <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">_p_</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">allp</span> <span class="p">{</span>
+      <span class="k">if</span> <span class="nx">_p_</span><span class="p">.</span><span class="nx">status</span> <span class="o">!=</span> <span class="nx">_Prunning</span> <span class="p">{</span>
+         <span class="k">continue</span>
+      <span class="p">}</span>
+      <span class="c1">// 对正在运行的 P 发送抢占信号
+</span><span class="c1"></span>      <span class="k">if</span> <span class="nf">preemptone</span><span class="p">(</span><span class="nx">_p_</span><span class="p">)</span> <span class="p">{</span>
+         <span class="nx">res</span> <span class="p">=</span> <span class="kc">true</span>
+      <span class="p">}</span>
+   <span class="p">}</span>
+   <span class="k">return</span> <span class="nx">res</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The preemptone called by preemptall takes the executing G in M corresponding to P and marks it as being preempted; finally it calls preemptM to send a preempt signal to M.</p>
+<p>The file location of this function is in <code>runtime/proc.go</code> :</p>
+<p><strong>preemptone</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">preemptone</span><span class="p">(</span><span class="nx">_p_</span> <span class="o">*</span><span class="nx">p</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+    <span class="c1">// 获取 P 对应的 M
+</span><span class="c1"></span>    <span class="nx">mp</span> <span class="o">:=</span> <span class="nx">_p_</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">mp</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">mp</span> <span class="o">==</span> <span class="nf">getg</span><span class="p">().</span><span class="nx">m</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="kc">false</span>
+    <span class="p">}</span>
+    <span class="c1">// 获取 M 正在执行的 G
+</span><span class="c1"></span>    <span class="nx">gp</span> <span class="o">:=</span> <span class="nx">mp</span><span class="p">.</span><span class="nx">curg</span>
+    <span class="k">if</span> <span class="nx">gp</span> <span class="o">==</span> <span class="kc">nil</span> <span class="o">||</span> <span class="nx">gp</span> <span class="o">==</span> <span class="nx">mp</span><span class="p">.</span><span class="nx">g0</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="kc">false</span>
+    <span class="p">}</span>
+    <span class="c1">// 将 G 标记为抢占
+</span><span class="c1"></span>    <span class="nx">gp</span><span class="p">.</span><span class="nx">preempt</span> <span class="p">=</span> <span class="kc">true</span>
+
+    <span class="c1">// 在栈扩张的时候会检测是否被抢占
+</span><span class="c1"></span>    <span class="nx">gp</span><span class="p">.</span><span class="nx">stackguard0</span> <span class="p">=</span> <span class="nx">stackPreempt</span>
+
+    <span class="c1">// 请求该 P 的异步抢占
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">preemptMSupported</span> <span class="o">&amp;&amp;</span> <span class="nx">debug</span><span class="p">.</span><span class="nx">asyncpreemptoff</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nx">_p_</span><span class="p">.</span><span class="nx">preempt</span> <span class="p">=</span> <span class="kc">true</span>
+        <span class="nf">preemptM</span><span class="p">(</span><span class="nx">mp</span><span class="p">)</span>
+    <span class="p">}</span> 
+    <span class="k">return</span> <span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/23/8999c3a2e58d493a8ccfadbfa6b71de1.png" alt="sobyte"></p>
+<h2 id="wrap-up">Wrap-up</h2>
+<p>Up to this point, we have taken a complete look at the signal-based preemption scheduling process. To summarize the specific logic.</p>
+<ol>
+<li>when the program starts, it registers the <code>_SIGURG</code> signal handler function <code>runtime.doSigPreempt</code> ;</li>
+<li>at this point an M1 sends an interrupt signal <code>_SIGURG</code> to M2 via the signalM function;</li>
+<li>M2 receives the signal, the OS interrupts its execution code and switches to the signal handling function <code>runtime.doSigPreempt</code>;</li>
+<li>M2 calls <code>runtime.asyncPreempt</code> to modify the execution context and re-enter the scheduling loop to schedule other Gs.</li>
+</ol>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/23/6d4c19de7a414d559c8764375c82b3de.png" alt="sobyte"></p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/go-gc/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go language GC implementation principle and source code analysis</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/startpage-privacy-protection-extension/">
+            <span class="next-text nav-default">Startpage Search Engine Launches Open Source Browser Extension to Protect Users&#39; Private Data</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Analysis and resolution of memory cgroup leaks - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Memory cgroup leaks are a common problem in K8s (Kubernetes) clusters, resulting in nodes being stretched for memory resources, or nodes becoming unresponsive and having to restart the server to recover. Most developers use regular drop cache or disable kernel kmem accounting to circumvent this problem. This paper analyses the root cause of memory cgroup leaks and provides a solution to fix the problem at the kernel level, based on a practical example from the NetEase Digital Sail kernel team." /><meta name="keywords" content="k8s, Memory Cgroup, leak" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/memory-cgroup/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Analysis and resolution of memory cgroup leaks" />
+<meta property="og:description" content="Memory cgroup leaks are a common problem in K8s (Kubernetes) clusters, resulting in nodes being stretched for memory resources, or nodes becoming unresponsive and having to restart the server to recover. Most developers use regular drop cache or disable kernel kmem accounting to circumvent this problem. This paper analyses the root cause of memory cgroup leaks and provides a solution to fix the problem at the kernel level, based on a practical example from the NetEase Digital Sail kernel team." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/memory-cgroup/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-13T09:44:29+08:00" />
+<meta property="article:modified_time" content="2022-01-13T09:44:29+08:00" />
+
+<meta itemprop="name" content="Analysis and resolution of memory cgroup leaks">
+<meta itemprop="description" content="Memory cgroup leaks are a common problem in K8s (Kubernetes) clusters, resulting in nodes being stretched for memory resources, or nodes becoming unresponsive and having to restart the server to recover. Most developers use regular drop cache or disable kernel kmem accounting to circumvent this problem. This paper analyses the root cause of memory cgroup leaks and provides a solution to fix the problem at the kernel level, based on a practical example from the NetEase Digital Sail kernel team."><meta itemprop="datePublished" content="2022-01-13T09:44:29+08:00" />
+<meta itemprop="dateModified" content="2022-01-13T09:44:29+08:00" />
+<meta itemprop="wordCount" content="1852">
+<meta itemprop="keywords" content="k8s," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Analysis and resolution of memory cgroup leaks"/>
+<meta name="twitter:description" content="Memory cgroup leaks are a common problem in K8s (Kubernetes) clusters, resulting in nodes being stretched for memory resources, or nodes becoming unresponsive and having to restart the server to recover. Most developers use regular drop cache or disable kernel kmem accounting to circumvent this problem. This paper analyses the root cause of memory cgroup leaks and provides a solution to fix the problem at the kernel level, based on a practical example from the NetEase Digital Sail kernel team."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Analysis and resolution of memory cgroup leaks</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-13 09:44:29 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1852 words </span>
+          <span class="more-meta"> 9 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#background">Background</a>
+          <ul>
+            <li><a href="#problem-location">Problem location</a></li>
+            <li><a href="#phenomenon-analysis">Phenomenon analysis</a></li>
+            <li><a href="#identifying-the-root-cause">Identifying the root cause</a></li>
+            <li><a href="#reproducing-the-problem">Reproducing the problem</a></li>
+          </ul>
+        </li>
+        <li><a href="#solution">Solution</a>
+          <ul>
+            <li><a href="#option-1-drop-cache">Option 1: drop cache</a></li>
+            <li><a href="#option-2-nokmem">Option 2: nokmem</a></li>
+            <li><a href="#option-3-eliminate-the-trigger-source">Option 3: Eliminate the trigger source</a></li>
+            <li><a href="#solutions-in-the-kernel">Solutions in the kernel</a></li>
+            <li><a href="#general-solutions">General solutions</a></li>
+            <li><a href="#kernel-recycling-threads">Kernel recycling threads</a></li>
+            <li><a href="#functional-verification">Functional verification</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Memory cgroup leaks are a common problem in K8s (Kubernetes) clusters, resulting in nodes being stretched for memory resources, or nodes becoming unresponsive and having to restart the server to recover. Most developers use regular drop cache or disable kernel kmem accounting to circumvent this problem. This paper analyses the root cause of memory cgroup leaks and provides a solution to fix the problem at the kernel level, based on a practical example from the NetEase Digital Sail kernel team.</p>
+<h2 id="background">Background</h2>
+<p>The O&amp;M monitoring found that some cloud host computing nodes and K8s (Kubernetes) nodes were experiencing abnormally high load, specifically the system was running very stuck, load was constantly at 40+, some of the kworker threads had high cpu usage or were in D status, which had affected the business and needed to be analyzed for specific reasons.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/adc6f227253b4fe7a87283a142bb1a18.png" alt="image"></p>
+<h3 id="problem-location">Problem location</h3>
+<h3 id="phenomenon-analysis">Phenomenon analysis</h3>
+<p>perf is an essential tool for cpu usage anomalies. Looking at hotspot functions via perf top, we find that the kernel function cache_reap has intermittent high usage.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/07734e45091e4da7b67990aa1041e628.png" alt="image"></p>
+<p>Looking at the corresponding kernel code, the cache_reap function is implemented as follows</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/f00178e54ae2465490e3b6ac575e23ed.png" alt="image"></p>
+<p>It is easy to see that this function iterates through a global chain of slab_caches, which records information about all slab memory objects on the system.</p>
+<p>Analysis of the code flow associated with the slab_caches variable shows that each memory cgroup corresponds to a memory.kmem.slabinfo file.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/c4a39ce64e234faaabae832b341aa41f.png" alt="image"></p>
+<p>This file records information about the slabs requested by each memory cgroup group, and the slab objects of that memory cgroup are also added to the global slab_caches chain, could it be that there are too many slab_caches chains, which causes a long traversal time, and thus a high CPU charge?</p>
+<p>If there are too many slab_caches chains, then the number of memory cgroups must be very large, so naturally we have to count how many memory cgroups exist on the system. Each memory cgroup contains at most a few dozen records in the memory.kmem.slabinfo file, so the number of members of the slab_caches chain does not exceed 10,000 at most, so there is no problem at all.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/2ab03642388b4acfabde56f0ee1a969d.png" alt="image"></p>
+<p>In the end, we started with the original function, cache_reap, and since this function consumes more CPU, we traced it directly to analyse what was taking longer to execute in the code.</p>
+<h3 id="identifying-the-root-cause">Identifying the root cause</h3>
+<p>Tracing the cache_reap function through a series of tools shows that the number of slab_caches chain table members is in the millions, a number that differs significantly from the number we actually calculated.</p>
+<p>The number of memory cgroups had already accumulated to 20w+ when we checked the current cgroup information by cat /proc/cgroup. This number of cgroups on a cloud host compute node is clearly not normal, and even on a K8s (Kubernetes) node, this number of cgroups is not likely to be generated by the container business.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/6ca73b08e98d40f1ace9b38e11670bf3.png" alt="image"></p>
+<p>So why is there such a big difference between the number of memory cgroups counted in the /sys/fs/cgroup/memory directory and the number recorded in the /proc/cgroups file? Because of a memory cgroup leak!</p>
+<p>For a detailed explanation, see the following.</p>
+<p>Many operations on the system (e.g. creating and destroying containers/cloud hosts, logging into hosts, cron timed tasks, etc.) trigger the creation of temporary memory cgroups. When a process in a memory cgroup exits, the cgroup&rsquo;s directory in the /sys/fs/cgroup/memory directory will be deleted. However, the cache memory generated by the memory cgroup is not actively reclaimed, and the memory cgroup objects in memory are not deleted because there is cache memory still referencing the memory cgroup objects.</p>
+<p>In the process of locating the memory cgroup, we found that the cumulative number of memory cgroups per day was still growing slowly, so we tracked the creation and deletion of the node&rsquo;s memory cgroup directory and found that the following two main triggers could cause memory cgroup leaks.</p>
+<ol>
+<li>the execution of specific cron timed tasks</li>
+<li>frequent user logins and logouts from the node</li>
+</ol>
+<p>Both of these triggers are related to the systemd-logind login service, which causes memory cgroup leaks. The systemd-logind service creates a temporary memory cgroup when a cron task is executed or when a user logs out of the host, and deletes the temporary memory cgroup when the cron task is executed or when the user logs out.</p>
+<p>This can lead to memory cgroup leaks in the event of file operations.</p>
+<h3 id="reproducing-the-problem">Reproducing the problem</h3>
+<p>Once the trigger scenario for a memory cgroup leak has been analyzed, it is much easier to reproduce the problem.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/47536445a9f64112836a5f13834264ec.png" alt="image"></p>
+<p>The core recovery logic is to create a temporary memory cgroup, perform file operations to generate cache memory, and then delete the temporary memory cgroup directory. By doing this, the 40w memory cgroup residue was quickly reproduced in the test environment.</p>
+<h2 id="solution">Solution</h2>
+<p>By analyzing the memory cgroup leak, we have basically figured out the root cause of the problem and the trigger scenario, so how do we solve the leak problem?</p>
+<h3 id="option-1-drop-cache">Option 1: drop cache</h3>
+<p>Since cgroup leaks are caused by unrecoverable cache memory, the most straightforward solution is to clean up the system cache with &ldquo;echo 3 &gt; /proc/sys/vm/drop_caches&rdquo;.</p>
+<p>However, this will only alleviate the problem and will still result in cgroup leaks. On the one hand, you need to configure a daily task to drop cache, and on the other hand, the drop cache action itself will consume a lot of cpu, which will affect the business. For nodes that already have a lot of cgroup leaks, the drop cache action may get stuck in the process of cleaning up the cache, causing new problems.</p>
+<h3 id="option-2-nokmem">Option 2: nokmem</h3>
+<p>The kernel provides the cgroup.memory = nokmem parameter to disable the kmem accounting function. After configuring this parameter, the memory cgroup will not have a separate slabinfo file, so that even if there is a memory cgroup leak, it will not cause the kworker thread to have a high CPU.</p>
+<p>However, this solution requires a reboot to take effect, which will have some impact on the business. Moreover, this solution cannot completely solve the fundamental problem of memory cgroup leakage, but can only alleviate the problem to a certain extent.</p>
+<h3 id="option-3-eliminate-the-trigger-source">Option 3: Eliminate the trigger source</h3>
+<p>The 2 triggers found in the above analysis that cause cgroup leaks can both be eliminated.</p>
+<p>In the first case, we can confirm that the cron task can be disabled by communicating with the corresponding business module.</p>
+<p>In the second case, you can use loginctl enable-linger username to set the corresponding user as a resident user in the background.</p>
+<p>Once set as a resident user, the systemd-logind service will create a permanent memory cgroup for the user when he logs in, and the user can reuse this memory cgroup every time he logs in. It will not be deleted when the user logs out, so there will be no leaks.</p>
+<p>At this point, it looks like the memory cgroup leak has been solved perfectly, but in fact the above solution only covers the 2 known trigger scenarios, and does not solve the problem of cgroup resources not being completely cleaned up and recycled, and new memory cgroup leak trigger scenarios may occur in the future.</p>
+<h3 id="solutions-in-the-kernel">Solutions in the kernel</h3>
+<h3 id="general-solutions">General solutions</h3>
+<p>In the process of locating the problem, Google has identified many container scenarios where cgroup leaks have been reported in the centos7 series and 4.x kernels, mainly due to imperfect kernel support for the cgroup kernel memory accounting feature, when K8s( Kubernetes)/RunC has a memory cgroup leak problem when using this feature.</p>
+<p>The main solutions to this problem are the following:</p>
+<ol>
+<li>execute drop cache at regular intervals</li>
+<li>configure nokmem in the kernel to disable the kmem accounting feature</li>
+<li>disable KernelMemoryAccounting in K8s (Kubernetes)</li>
+<li>docker/runc to disable KernelMemoryAccounting</li>
+</ol>
+<p>We are considering whether there is a better solution to &ldquo;completely&rdquo; solve the cgroup leakage problem at the kernel level?</p>
+<h3 id="kernel-recycling-threads">Kernel recycling threads</h3>
+<p>After a deeper analysis of the memoy cgroup leak, we see that the core problem is that the cgroup directory created temporarily by systemd-logind is automatically destroyed, but the cache memory and associated slab memory generated by the file reads and writes is not immediately reclaimed, and because of the existence of these memory pages, the cgroup management structure&rsquo;s reference count cannot be cleared due to the existence of these memory pages. So although the cgroup-mounted directories are deleted, the associated kernel data structures remain in the kernel.</p>
+<p>Based on our analysis of the community&rsquo;s solutions to this problem, and the ideas provided by Ali cloud linux, we implement a simple and straightforward solution.</p>
+<p>Run a kernel thread in the kernel to do separate memory reclamation for these residual memory cgroups, releasing the memory pages they hold to the system so that these residual memory cgroups can be reclaimed by the system normally.</p>
+<p>This kernel thread has the following characteristics.</p>
+<ol>
+<li>only residual memory cgroups are reclaimed</li>
+<li>the priority of the kernel thread is set to the lowest level</li>
+<li>cond_resched() is active every time a memory cgroup is reclaimed to prevent prolonged cpu usage</li>
+</ol>
+<p>The core process of a recycle thread is as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/0326a288b0964e4cb3d3c7be43949b4a.png" alt="image"></p>
+<h3 id="functional-verification">Functional verification</h3>
+<p>Functional and performance tests were performed on kernels that were merged into the kernel recycling thread, with the following results.</p>
+<ul>
+<li>The system residual memory cgroups can be cleaned up in a timely manner when the recycle thread is opened in the test environment.</li>
+<li>Simulated cleanup of 40w leaked memory cgroups, with the maximum cpu usage of the recovery thread not exceeding 5%, with acceptable resource usage.</li>
+<li>Tested against a residual memory cgroup of very large size, recovering a memory cgroup holding 20G of memory, the execution time distribution of the core recovery function, basically not exceeding 64us; no impact on other services.</li>
+</ul>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/13/8b568961169647c5a9faac0d7a6e4d5f.png" alt="image"></p>
+<p>After the kernel recycling thread is enabled, it passes the kernel LTP stability test normally and does not increase the risk of kernel stability.</p>
+<p>We can see that by adding a new kernel thread to recycle the residual memory cgroup, we can effectively solve the problem of cgroup leakage with a smaller resource usage. This solution is already in use in NetEase Private Cloud and has effectively improved the stability of NetEase&rsquo;s container business.</p>
+<h2 id="summary">Summary</h2>
+<p>The above is our analysis of the memory cgroup leak problem, the solution to the problem, and a way of thinking to solve the problem at the kernel level.</p>
+<p>In our long-term business practice, we have learned that the use and requirements of the Linux kernel for K8s (Kubernetes)/container scenarios are comprehensive. On the one hand, the whole container technology is mainly built on the capabilities provided by the kernel, so it is essential to improve the stability of the kernel and the ability to locate and fix bugs in the relevant modules; on the other hand, the kernel has a lot of optimisations/new features for the container scenario. We also continue to pay attention to the development of related technologies, such as the use of ebpf to optimize the container network, enhance kernel monitoring capabilities, and the use of cgroup v2/PSI to improve the resource isolation and monitoring capabilities of containers, which are also the main directions to promote the internal implementation of NetEase in the future.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/k8s/">k8s</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/android-12-widgets/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Building more modern app widgets in Android 12</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/running-ubuntu-desktop-on-a-2gb-raspberry-pi-4/">
+            <span class="next-text nav-default">Ubuntu lowers the hardware barrier even further - support for running on a Raspberry Pi 4 with 2GB of RAM</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

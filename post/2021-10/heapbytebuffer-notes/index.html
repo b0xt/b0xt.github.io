@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Notes on using HeapByteBuffer for in-heap memory - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Today we share a pitfall that many people tend to step in: the use of HeapByteBuffer.
+ByteBuffer has two main implementation classes
+ HeapByteBuffer In-heap memory DirectByteBuffer Off-heap memory  In my personal experience, I tend to use DirectByteBuffer in most cases, both for read and write operations, mainly because HeapByteBuffer may have some unexpected internal operations when interacting with FileChannel, which is the caveat mentioned in the title of this article, so let&amp;rsquo;s sell it here." /><meta name="keywords" content="Java, HeapByteBuffer" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2021-10/heapbytebuffer-notes/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Notes on using HeapByteBuffer for in-heap memory" />
+<meta property="og:description" content="Today we share a pitfall that many people tend to step in: the use of HeapByteBuffer.
+ByteBuffer has two main implementation classes
+ HeapByteBuffer In-heap memory DirectByteBuffer Off-heap memory  In my personal experience, I tend to use DirectByteBuffer in most cases, both for read and write operations, mainly because HeapByteBuffer may have some unexpected internal operations when interacting with FileChannel, which is the caveat mentioned in the title of this article, so let&rsquo;s sell it here." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2021-10/heapbytebuffer-notes/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-10-08T17:44:55+08:00" />
+<meta property="article:modified_time" content="2021-10-08T17:44:55+08:00" />
+
+<meta itemprop="name" content="Notes on using HeapByteBuffer for in-heap memory">
+<meta itemprop="description" content="Today we share a pitfall that many people tend to step in: the use of HeapByteBuffer.
+ByteBuffer has two main implementation classes
+ HeapByteBuffer In-heap memory DirectByteBuffer Off-heap memory  In my personal experience, I tend to use DirectByteBuffer in most cases, both for read and write operations, mainly because HeapByteBuffer may have some unexpected internal operations when interacting with FileChannel, which is the caveat mentioned in the title of this article, so let&rsquo;s sell it here."><meta itemprop="datePublished" content="2021-10-08T17:44:55+08:00" />
+<meta itemprop="dateModified" content="2021-10-08T17:44:55+08:00" />
+<meta itemprop="wordCount" content="1181">
+<meta itemprop="keywords" content="java," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Notes on using HeapByteBuffer for in-heap memory"/>
+<meta name="twitter:description" content="Today we share a pitfall that many people tend to step in: the use of HeapByteBuffer.
+ByteBuffer has two main implementation classes
+ HeapByteBuffer In-heap memory DirectByteBuffer Off-heap memory  In my personal experience, I tend to use DirectByteBuffer in most cases, both for read and write operations, mainly because HeapByteBuffer may have some unexpected internal operations when interacting with FileChannel, which is the caveat mentioned in the title of this article, so let&rsquo;s sell it here."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Notes on using HeapByteBuffer for in-heap memory</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-10-08 17:44:55 </span>
+        <div class="post-category">
+            <a href="/categories/skills/"> skills </a>
+            <a href="/categories/implementation-details/"> implementation-details </a>
+            </div>
+          <span class="more-meta"> 1181 words </span>
+          <span class="more-meta"> 6 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#copy-problem-of-heapbytebuffer">Copy problem of HeapByteBuffer</a></li>
+        <li><a href="#why-heapbytebuffer-needs-to-be-copied-to-directbytebuffer-during-io">Why HeapByteBuffer needs to be copied to DirectByteBuffer during IO</a></li>
+        <li><a href="#solutions">Solutions</a></li>
+        <li><a href="#other-notes">Other Notes</a></li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Today we share a pitfall that many people tend to step in: the use of HeapByteBuffer.</p>
+<p>ByteBuffer has two main implementation classes</p>
+<ul>
+<li>HeapByteBuffer In-heap memory</li>
+<li>DirectByteBuffer Off-heap memory</li>
+</ul>
+<p>In my personal experience, I tend to use DirectByteBuffer in most cases, both for read and write operations, mainly because HeapByteBuffer may have some unexpected internal operations when interacting with FileChannel, which is the caveat mentioned in the title of this article, so let&rsquo;s sell it here.</p>
+<h2 id="copy-problem-of-heapbytebuffer">Copy problem of HeapByteBuffer</h2>
+<p>Without further ado, let&rsquo;s look directly at where the pitfalls of HeapByteBuffer lie.</p>
+<p>Using code that describes the file IO operation of HeapByteBuffer, the probability is that the following code will be written.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kt">void</span> <span class="nf">readInOneThread</span><span class="o">()</span> <span class="kd">throws</span> <span class="n">Exception</span> <span class="o">{</span>
+    <span class="kt">int</span> <span class="n">bufferSize</span> <span class="o">=</span> <span class="n">50</span> <span class="o">*</span> <span class="n">1024</span> <span class="o">*</span> <span class="n">1024</span><span class="o">;</span>
+    <span class="n">File</span> <span class="n">file</span> <span class="o">=</span> <span class="k">new</span> <span class="n">File</span><span class="o">(</span><span class="s">&#34;/essd&#34;</span><span class="o">);</span>
+    <span class="n">FileChannel</span> <span class="n">fileChannel</span> <span class="o">=</span> <span class="k">new</span> <span class="n">RandomAccessFile</span><span class="o">(</span><span class="n">file</span><span class="o">,</span> <span class="s">&#34;rw&#34;</span><span class="o">).</span><span class="na">getChannel</span><span class="o">();</span>
+    <span class="n">ByteBuffer</span> <span class="n">byteBuffer</span> <span class="o">=</span> <span class="n">ByteBuffer</span><span class="o">.</span><span class="na">allocate</span><span class="o">(</span><span class="n">bufferSize</span><span class="o">);</span>
+    <span class="n">fileChannel</span><span class="o">.</span><span class="na">read</span><span class="o">(</span><span class="n">byteBuffer</span><span class="o">);</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The above code, caches the data in the file into memory, and this behavior is usually multi-threaded in both competition and production scenarios. For example, under the Cloud Native Programming Challenge evaluation, there are 40 threads for reading and writing, and if caching is done according to the thread dimension, there is naturally no problem to allocate 50M per thread for memory caching.</p>
+<p>If you use the above code directly, you may get a memory overflow related exception directly in the evaluation. I actually mentioned this in my previous article on out-of-heap memory leaks, but from a different perspective. The reason is simple, just look at the source code directly.</p>
+<p>FileChannel is using IOUtil for read and write operations</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="kd">static</span> <span class="kt">int</span> <span class="nf">read</span><span class="o">(</span><span class="n">FileDescriptor</span> <span class="n">var0</span><span class="o">,</span> <span class="n">ByteBuffer</span> <span class="n">var1</span><span class="o">,</span> <span class="kt">long</span> <span class="n">var2</span><span class="o">,</span> <span class="n">NativeDispatcher</span> <span class="n">var4</span><span class="o">)</span> <span class="kd">throws</span> <span class="n">IOException</span> <span class="o">{</span>
+    <span class="k">if</span> <span class="o">(</span><span class="n">var1</span><span class="o">.</span><span class="na">isReadOnly</span><span class="o">())</span> <span class="o">{</span>
+        <span class="k">throw</span> <span class="k">new</span> <span class="n">IllegalArgumentException</span><span class="o">(</span><span class="s">&#34;Read-only buffer&#34;</span><span class="o">);</span>
+    <span class="o">}</span> <span class="k">else</span> <span class="k">if</span> <span class="o">(</span><span class="n">var1</span> <span class="k">instanceof</span> <span class="n">DirectBuffer</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">return</span> <span class="n">readIntoNativeBuffer</span><span class="o">(</span><span class="n">var0</span><span class="o">,</span> <span class="n">var1</span><span class="o">,</span> <span class="n">var2</span><span class="o">,</span> <span class="n">var4</span><span class="o">);</span>
+    <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+        <span class="n">ByteBuffer</span> <span class="n">var5</span> <span class="o">=</span> <span class="n">Util</span><span class="o">.</span><span class="na">getTemporaryDirectBuffer</span><span class="o">(</span><span class="n">var1</span><span class="o">.</span><span class="na">remaining</span><span class="o">());</span>
+        <span class="kt">int</span> <span class="n">var7</span><span class="o">;</span>
+        <span class="k">try</span> <span class="o">{</span>
+            <span class="kt">int</span> <span class="n">var6</span> <span class="o">=</span> <span class="n">readIntoNativeBuffer</span><span class="o">(</span><span class="n">var0</span><span class="o">,</span> <span class="n">var5</span><span class="o">,</span> <span class="n">var2</span><span class="o">,</span> <span class="n">var4</span><span class="o">);</span>
+            <span class="n">var5</span><span class="o">.</span><span class="na">flip</span><span class="o">();</span>
+            <span class="k">if</span> <span class="o">(</span><span class="n">var6</span> <span class="o">&gt;</span> <span class="n">0</span><span class="o">)</span> <span class="o">{</span>
+                <span class="n">var1</span><span class="o">.</span><span class="na">put</span><span class="o">(</span><span class="n">var5</span><span class="o">);</span>
+            <span class="o">}</span>
+            <span class="n">var7</span> <span class="o">=</span> <span class="n">var6</span><span class="o">;</span>
+        <span class="o">}</span> <span class="k">finally</span> <span class="o">{</span>
+            <span class="n">Util</span><span class="o">.</span><span class="na">offerFirstTemporaryDirectBuffer</span><span class="o">(</span><span class="n">var5</span><span class="o">);</span>
+        <span class="o">}</span>
+        <span class="k">return</span> <span class="n">var7</span><span class="o">;</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>You can see that when using HeapByteBuffer, it goes to the following branch</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="n">Util</span><span class="o">.</span><span class="na">getTemporaryDirectBuffer</span><span class="o">(</span><span class="n">var1</span><span class="o">.</span><span class="na">remaining</span><span class="o">());</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This Util encapsulates some of the more underlying IO logic</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="kn">package</span> <span class="nn">sun.nio.ch</span><span class="o">;</span>
+<span class="kd">public</span> <span class="kd">class</span> <span class="nc">Util</span> <span class="o">{</span>
+    <span class="kd">private</span> <span class="kd">static</span> <span class="n">ThreadLocal</span><span class="o">&lt;</span><span class="n">Util</span><span class="o">.</span><span class="na">BufferCache</span><span class="o">&gt;</span> <span class="n">bufferCache</span><span class="o">;</span>
+    
+    <span class="kd">public</span> <span class="kd">static</span> <span class="n">ByteBuffer</span> <span class="nf">getTemporaryDirectBuffer</span><span class="o">(</span><span class="kt">int</span> <span class="n">var0</span><span class="o">)</span> <span class="o">{</span>
+        <span class="k">if</span> <span class="o">(</span><span class="n">isBufferTooLarge</span><span class="o">(</span><span class="n">var0</span><span class="o">))</span> <span class="o">{</span>
+            <span class="k">return</span> <span class="n">ByteBuffer</span><span class="o">.</span><span class="na">allocateDirect</span><span class="o">(</span><span class="n">var0</span><span class="o">);</span>
+        <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+            <span class="c1">// FOUCS ON THIS LINE
+</span><span class="c1"></span>            <span class="n">Util</span><span class="o">.</span><span class="na">BufferCache</span> <span class="n">var1</span> <span class="o">=</span> <span class="o">(</span><span class="n">Util</span><span class="o">.</span><span class="na">BufferCache</span><span class="o">)</span><span class="n">bufferCache</span><span class="o">.</span><span class="na">get</span><span class="o">();</span>
+            <span class="n">ByteBuffer</span> <span class="n">var2</span> <span class="o">=</span> <span class="n">var1</span><span class="o">.</span><span class="na">get</span><span class="o">(</span><span class="n">var0</span><span class="o">);</span>
+            <span class="k">if</span> <span class="o">(</span><span class="n">var2</span> <span class="o">!=</span> <span class="kc">null</span><span class="o">)</span> <span class="o">{</span>
+                <span class="k">return</span> <span class="n">var2</span><span class="o">;</span>
+            <span class="o">}</span> <span class="k">else</span> <span class="o">{</span>
+                <span class="k">if</span> <span class="o">(!</span><span class="n">var1</span><span class="o">.</span><span class="na">isEmpty</span><span class="o">())</span> <span class="o">{</span>
+                    <span class="n">var2</span> <span class="o">=</span> <span class="n">var1</span><span class="o">.</span><span class="na">removeFirst</span><span class="o">();</span>
+                    <span class="n">free</span><span class="o">(</span><span class="n">var2</span><span class="o">);</span>
+                <span class="o">}</span>
+
+                <span class="k">return</span> <span class="n">ByteBuffer</span><span class="o">.</span><span class="na">allocateDirect</span><span class="o">(</span><span class="n">var0</span><span class="o">);</span>
+            <span class="o">}</span>
+        <span class="o">}</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The isBufferTooLarge method determines how to allocate out-of-heap memory based on the size of the incoming Buffer; if it is too large, it directly allocates a large buffer; if it is not too large, it uses the bufferCache ThreadLocal variable for caching and thus multiplexing (in fact, this value is so large that it almost never goes into the branch of directly allocating out-of-heap memory branch). This seems to reveal two remarkable conclusions.</p>
+<ol>
+<li>
+<p>using HeapByteBuffer, both reads and writes go through DirectByteBuffer, and the flow of data for writes is actually: HeapByteBuffer -&gt; DirectByteBuffer -&gt; PageCache -&gt; Disk, and the flow of data for reads is exactly the opposite.</p>
+</li>
+<li>
+<p>This means that the more threads there are, the more space the temporary DirectByteBuffer will take up.</p>
+</li>
+</ol>
+<p>Based on these two conclusions, let&rsquo;s go back to the problem. If we read and write directly as described above, each of the 40 threads holds a 50M heap memory, and at the same time, because of the internal behavior of IOUtil, an additional 40*50M out-of-heap memory is allocated, and the out-of-heap memory is inadvertently used up! It is not surprising that there is an out-of-heap memory overflow exception.</p>
+<h2 id="why-heapbytebuffer-needs-to-be-copied-to-directbytebuffer-during-io">Why HeapByteBuffer needs to be copied to DirectByteBuffer during IO</h2>
+<p>The summary is as follows.</p>
+<ul>
+<li>To facilitate GC implementation, the native memory pointed to by DirectByteBuffer is not governed by GC.</li>
+<li>The HeapByteBuffer uses byte arrays, which may not occupy contiguous memory, making it less convenient for JNI method calls.</li>
+<li>Array implementations may vary from JVM to JVM</li>
+</ul>
+<h2 id="solutions">Solutions</h2>
+<p>In fact, we are essentially maintaining a HeapByteBuffer for each thread to cache data, and there is no need to use the size of the ByteBuffer as a dimension for IO. you can optimize this process by borrowing the idea of replicating the DirectByteBuffer in IOUtil. The code example is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="kd">public</span> <span class="kt">void</span> <span class="nf">directBufferCopy</span><span class="o">()</span> <span class="kd">throws</span> <span class="n">Exception</span> <span class="o">{</span>
+    <span class="n">File</span> <span class="n">file</span> <span class="o">=</span> <span class="k">new</span> <span class="n">File</span><span class="o">(</span><span class="s">&#34;/essd&#34;</span><span class="o">);</span>
+    <span class="n">FileChannel</span> <span class="n">fileChannel</span> <span class="o">=</span> <span class="k">new</span> <span class="n">RandomAccessFile</span><span class="o">(</span><span class="n">file</span><span class="o">,</span> <span class="s">&#34;rw&#34;</span><span class="o">).</span><span class="na">getChannel</span><span class="o">();</span>
+    <span class="n">ByteBuffer</span> <span class="n">byteBuffer</span> <span class="o">=</span> <span class="n">ByteBuffer</span><span class="o">.</span><span class="na">allocate</span><span class="o">(</span><span class="n">50</span> <span class="o">*</span> <span class="n">1024</span> <span class="o">*</span> <span class="n">1024</span><span class="o">);</span>
+    <span class="n">ByteBuffer</span> <span class="n">directByteBuffer</span> <span class="o">=</span> <span class="n">ByteBuffer</span><span class="o">.</span><span class="na">allocateDirect</span><span class="o">(</span><span class="n">4</span> <span class="o">*</span> <span class="n">1024</span><span class="o">);</span>
+    <span class="k">for</span> <span class="o">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="n">0</span><span class="o">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">12800</span><span class="o">;</span> <span class="n">i</span><span class="o">++)</span> <span class="o">{</span>
+        <span class="n">directByteBuffer</span><span class="o">.</span><span class="na">clear</span><span class="o">();</span>
+        <span class="n">fileChannel</span><span class="o">.</span><span class="na">read</span><span class="o">(</span><span class="n">directByteBuffer</span><span class="o">,</span> <span class="n">i</span> <span class="o">*</span> <span class="n">4</span> <span class="o">*</span> <span class="n">1024</span><span class="o">);</span>
+        <span class="n">directByteBuffer</span><span class="o">.</span><span class="na">flip</span><span class="o">();</span>
+        <span class="n">byteBuffer</span><span class="o">.</span><span class="na">put</span><span class="o">(</span><span class="n">directByteBuffer</span><span class="o">);</span>
+    <span class="o">}</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In Java, it must not be possible to omit the copying of out-of-heap memory from disk to in-heap memory, but we can make our own copies, thus making the process more intuitively manipulated by ourselves rather than by the internal logic of the FileChannel.</p>
+<p>Note also here that</p>
+<ul>
+<li>The DirectByteBuffer used for a single IO should not be too large, but simply act as a transport carrier, serving as a transport for the data. This way, in multi-threaded scenarios, it does not take up too much off-heap memory</li>
+<li>The DirectByteBuffer used for a single IO should not be too small, otherwise it will have the problem of read/write amplification, and it is generally recommended to set an integer multiple of 4kb, depending on the actual test results.</li>
+</ul>
+<h2 id="other-notes">Other Notes</h2>
+<p>The HeapByteBuffer read-write replication problem is the main focus of this article, but there are some other issues to be aware of when using HeapByteBuffer as a cache. For example, in a competition scenario, you may want to open up a large HeapByteBuffer, 6G of internal heap memory, and allocate 4G for caching, right? If you are interested, you can test whether it is feasible or not. You also need to consider the GC situation, and you need to take into account the ratio of old generation to new generation.</p>
+<p>Also, if the HeapByteBuffer takes up too much memory, there will be very little PageCache left for the OS, and both are using the same block of memory! If your application takes advantage of the PageCache feature, you may run out of PageCache space, resulting in slower IO speeds.</p>
+<h2 id="summary">Summary</h2>
+<p>This article describes the considerations for using HeapByteBuffer in file IO, taking into account the internal copy of the FileChannel, and realizing that there is an out-of-heap memory copy overhead for this process. In real-world scenarios, I recommend using DirectByteBuffer directly for IO operations. If for some reason you need to use HeapByteBuffer storage as a cache, you can refer to the article on using DirectByteBuffer for IO and replication in batches.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/java/">java</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2021-10/filechannel-force/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">How to ensure no data loss during power down in File IO</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2021-10/stream-of-jdk/">
+            <span class="next-text nav-default">More than 100,000 words of detailed analysis of the implementation principle of Stream in the JDK</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

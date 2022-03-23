@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Resolving CoreDNS custom domain name failure issues - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="A few days ago we used NodeLocal DNSCache to solve the 5 second timeout problem with CoreDNS, and the cluster DNS resolution performance was significantly improved. However, today we encountered a major pitfall, when we were doing DevOps experiments, the tools were using custom domains, so we needed to add custom domain name resolution to access each other, which we could solve by adding hostAlias to Pods, but when using" /><meta name="keywords" content="k8s, CoreDNS, failure" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2021-12/resolve-coredns-hosts-invalid/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Resolving CoreDNS custom domain name failure issues" />
+<meta property="og:description" content="A few days ago we used NodeLocal DNSCache to solve the 5 second timeout problem with CoreDNS, and the cluster DNS resolution performance was significantly improved. However, today we encountered a major pitfall, when we were doing DevOps experiments, the tools were using custom domains, so we needed to add custom domain name resolution to access each other, which we could solve by adding hostAlias to Pods, but when using" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2021-12/resolve-coredns-hosts-invalid/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-12-13T16:23:50+08:00" />
+<meta property="article:modified_time" content="2021-12-13T16:23:50+08:00" />
+
+<meta itemprop="name" content="Resolving CoreDNS custom domain name failure issues">
+<meta itemprop="description" content="A few days ago we used NodeLocal DNSCache to solve the 5 second timeout problem with CoreDNS, and the cluster DNS resolution performance was significantly improved. However, today we encountered a major pitfall, when we were doing DevOps experiments, the tools were using custom domains, so we needed to add custom domain name resolution to access each other, which we could solve by adding hostAlias to Pods, but when using"><meta itemprop="datePublished" content="2021-12-13T16:23:50+08:00" />
+<meta itemprop="dateModified" content="2021-12-13T16:23:50+08:00" />
+<meta itemprop="wordCount" content="1046">
+<meta itemprop="keywords" content="k8s," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Resolving CoreDNS custom domain name failure issues"/>
+<meta name="twitter:description" content="A few days ago we used NodeLocal DNSCache to solve the 5 second timeout problem with CoreDNS, and the cluster DNS resolution performance was significantly improved. However, today we encountered a major pitfall, when we were doing DevOps experiments, the tools were using custom domains, so we needed to add custom domain name resolution to access each other, which we could solve by adding hostAlias to Pods, but when using"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Resolving CoreDNS custom domain name failure issues</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-12-13 16:23:50 </span>
+        <div class="post-category">
+            <a href="/categories/skills/"> skills </a>
+            </div>
+          <span class="more-meta"> 1046 words </span>
+          <span class="more-meta"> 3 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents"></nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>A few days ago we used <code>NodeLocal DNSCache</code> to solve the 5 second timeout problem with CoreDNS, and the cluster DNS resolution performance was significantly improved. However, today we encountered a major pitfall, when we were doing DevOps experiments, the tools were using custom domains, so we needed to add custom domain name resolution to access each other, which we could solve by adding <code>hostAlias</code> to Pods, but when using Jenkins' Kubernetes plugin, this parameter was not supported. This parameter is not supported when using Jenkins' Kubernetes plugin and needs to be defined using YAML, which is a bit of a pain, so we thought we&rsquo;d add an A record via CoreDNS to solve this problem.</p>
+<p>Normally we just need to add the hosts plugin to the ConfigMap of CoreDNS and it will work.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">hosts {
+  10.151.30.11 git.k8s.local
+  fallthrough
+}
+</code></pre></td></tr></table>
+</div>
+</div><p>However, after the configuration is complete, the custom domain name never resolves.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ kubectl run -it --image busybox:1.28.4 <span class="nb">test</span> --restart<span class="o">=</span>Never --rm /bin/sh
+If you don<span class="s1">&#39;t see a command prompt, try pressing enter.
+</span><span class="s1">/ # nslookup git.k8s.local
+</span><span class="s1">Server:    169.254.20.10
+</span><span class="s1">Address 1: 169.254.20.10
+</span><span class="s1">
+</span><span class="s1">nslookup: can&#39;</span>t resolve <span class="s1">&#39;git.k8s.local&#39;</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This is a bit strange, doesn&rsquo;t the <code>hosts</code> plugin work this way? After some checking, I was convinced that this was the right way to configure it. Then I turned on <code>CoreDNS</code> logging to filter the resolution logs for the above domain name.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/13/5078b491f84d41848b55b4b9ca97af71.png" alt=""></p>
+<p>We can see that we walked through the search field, but did not get the correct parsing result, which is a bit puzzling. After tossing around a bit, it occurred to me that we have <code>NodeLocal DNSCache</code> enabled in the cluster, could this be the cause of the problem? Isn&rsquo;t this the component that forwards queries to CoreDNS when the resolution doesn&rsquo;t hit?</p>
+<p>To verify this, let&rsquo;s test the resolution directly using the CoreDNS address: <code>NodeLocal DNSCache</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">/ <span class="c1"># nslookup git.k8s.local 10.96.0.10</span>
+Server:    10.96.0.10
+Address 1: 10.96.0.10 kube-dns.kube-system.svc.cluster.local
+
+Name:      git.k8s.local
+Address 1: 10.151.30.11 git.k8s.local
+</code></pre></td></tr></table>
+</div>
+</div><p>It was found to be correct, which means that there is nothing wrong with the CoreDNS configuration, and the problem must be caused by the <code>NodeLocal DNSCache</code>, which was found to be a direct failure using the LocalDNS address (169.254.20.10).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">/ <span class="c1"># nslookup git.k8s.local 169.254.20.10</span>
+Server:    169.254.20.10
+Address 1: 169.254.20.10
+
+nslookup: can<span class="s1">&#39;t resolve &#39;</span>git.k8s.local<span class="err">&#39;</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>At this point it&rsquo;s time to look at the LocalDNS Pod logs:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ kubectl logs -f node-local-dns-bb84m -n kube-system
+......
+2020/05/14 05:30:21 <span class="o">[</span>INFO<span class="o">]</span> Updated Corefile with <span class="m">0</span> custom stubdomains and upstream servers /etc/resolv.conf
+2020/05/14 05:30:21 <span class="o">[</span>INFO<span class="o">]</span> Using config file:
+cluster.local:53 <span class="o">{</span>
+    errors
+    cache <span class="o">{</span>
+            success <span class="m">9984</span> <span class="m">30</span>
+            denial <span class="m">9984</span> <span class="m">5</span>
+    <span class="o">}</span>
+    reload
+    loop
+    <span class="nb">bind</span> 169.254.20.10 10.96.0.10
+    forward . 10.96.207.156 <span class="o">{</span>
+            force_tcp
+    <span class="o">}</span>
+    prometheus :9253
+    health 169.254.20.10:8080
+    <span class="o">}</span>
+in-addr.arpa:53 <span class="o">{</span>
+    errors
+    cache <span class="m">30</span>
+    reload
+    loop
+    <span class="nb">bind</span> 169.254.20.10 10.96.0.10
+    forward . 10.96.207.156 <span class="o">{</span>
+            force_tcp
+    <span class="o">}</span>
+    prometheus :9253
+    <span class="o">}</span>
+ip6.arpa:53 <span class="o">{</span>
+    errors
+    cache <span class="m">30</span>
+    reload
+    loop
+    <span class="nb">bind</span> 169.254.20.10 10.96.0.10
+    forward . 10.96.207.156 <span class="o">{</span>
+            force_tcp
+    <span class="o">}</span>
+    prometheus :9253
+    <span class="o">}</span>
+.:53 <span class="o">{</span>
+    errors
+    cache <span class="m">30</span>
+    reload
+    loop
+    <span class="nb">bind</span> 169.254.20.10 10.96.0.10
+    forward . /etc/resolv.conf <span class="o">{</span>
+            force_tcp
+    <span class="o">}</span>
+    prometheus :9253
+    <span class="o">}</span>
+......
+<span class="o">[</span>INFO<span class="o">]</span> plugin/reload: Running configuration <span class="nv">MD5</span> <span class="o">=</span> 3e3833f9361872f1d34bc97155f952ca
+CoreDNS-1.6.7
+linux/amd64, go1.11.13,
+</code></pre></td></tr></table>
+</div>
+</div><p>Analyzing the LocalDNS configuration information above, 10.96.0.10 is the Service ClusterIP of CoreDNS, 169.254.20.10 is the IP address of LocalDNS, and 10.96.207.156 is a new Service ClusterIP created by LocalDNS This Service is associated with the same list of CoreDNS Endpoints as CoreDNS.</p>
+<p>A closer look reveals that <code>cluster.local</code>, <code>in-addr.arpa</code> and <code>ip6.arpa</code> are forwarded to 10.96.207.156 via <code>forward</code>, i.e. to CoreDNS for resolution, while the others are <code>forward . /etc/resolv.conf</code> through the <code>resolv.conf</code> file, which reads as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">nameserver 169.254.20.10
+search default.svc.cluster.local svc.cluster.local cluster.local
+options ndots:5
+</code></pre></td></tr></table>
+</div>
+</div><p>So when we resolve the domain <code>git.k8s.local</code> we need to go through the search domain, while the domain <code>cluster.local</code> is directly forwarded to CoreDNS for resolution, CoreDNS naturally does not resolve these days records. So isn&rsquo;t it natural to think that we can just configure the <code>hosts</code> plugin on the LocalDNS side? This should be exactly the right idea:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ kubectl edit cm node-local-dns -n kube-system
+......
+.:53 <span class="o">{</span>
+    errors
+    hosts <span class="o">{</span>  <span class="c1"># 添加 A 记录</span>
+      10.151.30.11 git.k8s.local
+      fallthrough
+    <span class="o">}</span>
+    cache <span class="m">30</span>
+    reload
+    loop
+    <span class="nb">bind</span> 169.254.20.10 10.96.0.10
+    forward . __PILLAR__UPSTREAM__SERVERS__ <span class="o">{</span>
+            force_tcp
+    <span class="o">}</span>
+    prometheus :9253
+<span class="o">}</span>
+......
+</code></pre></td></tr></table>
+</div>
+</div><p>After the update is complete, we can manually rebuild the NodeLocalDNS Pod and find that the NodeLocalDNS Pod fails to start, with the following error message.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">no action found <span class="k">for</span> directive <span class="s1">&#39;hosts&#39;</span> with server <span class="nb">type</span> <span class="s1">&#39;dns&#39;</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>It turns out that the <code>hosts</code> plugin is not supported at all. Then we have to go to CoreDNS to resolve it, so this time we need to change <code>forward . /etc/resolv.conf</code> to <code>forward . 10.96.207.156</code>, which will go to CoreDNS, and make the following changes in the ConfigMap of NodeLocalDNS.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ kubectl edit cm node-local-dns -n kube-system
+......
+.:53 <span class="o">{</span>
+    errors
+    cache <span class="m">30</span>
+    reload
+    loop
+    <span class="nb">bind</span> 169.254.20.10 10.96.0.10
+    forward . __PILLAR__CLUSTER__DNS__ <span class="o">{</span>
+            force_tcp
+    <span class="o">}</span>
+    prometheus :9253
+<span class="o">}</span>
+......
+</code></pre></td></tr></table>
+</div>
+</div><p>Once the same changes are made, the NodeLocalDNS pod will need to be rebuilt for the changes to take effect.</p>
+<blockquote>
+<p>The <code>__PILLAR__CLUSTER__DNS__</code> and <code>__PILLAR__UPSTREAM__SERVERS__</code> parameters are automatically configured in mirror 1.15.6 and above, and the corresponding values are derived from kube-dns ConfigMap and the custom Upstream Server address.</p>
+</blockquote>
+<p>Now let&rsquo;s go back and test that the custom domain name resolves properly.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">/ <span class="c1"># nslookup git.k8s.local</span>
+Server:    169.254.20.10
+Address 1: 169.254.20.10
+
+Name:      git.k8s.local
+Address 1: 10.151.30.11 git.k8s.local
+</code></pre></td></tr></table>
+</div>
+</div><p>For those using NodeLocalDNS be aware of this issue, if the hosts or rewrite plugins are not working, this is basically the cause of the problem. The best way to troubleshoot problems is always to analyze them through logs.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/k8s/">k8s</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2021-12/learn-about-lambda-serialization/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Serialization of Lambda expressions in the JDK and the clever use of SerializedLambda</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2021-12/jenkins-shared-library-demo/">
+            <span class="next-text nav-default">Jenkins Shared Library Example</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

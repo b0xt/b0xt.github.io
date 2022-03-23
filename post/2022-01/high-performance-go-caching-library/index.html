@@ -1,0 +1,1179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How to build a high-performance Go caching library - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="I was looking at some excellent open source libraries when I saw an interesting cache library fastcache, in its introduction mainly has the following characteristics: read and write data to be fast, even under concurrency. maintain good performance even in a cache of several gigabytes, as well as minimize the number of GCs. the design should be as simple as possible. This article will examine how its kernel achieves such" /><meta name="keywords" content="golang, Caching Library, High Performance, fastcache" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/high-performance-go-caching-library/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="How to build a high-performance Go caching library" />
+<meta property="og:description" content="I was looking at some excellent open source libraries when I saw an interesting cache library fastcache, in its introduction mainly has the following characteristics: read and write data to be fast, even under concurrency. maintain good performance even in a cache of several gigabytes, as well as minimize the number of GCs. the design should be as simple as possible. This article will examine how its kernel achieves such" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/high-performance-go-caching-library/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-22T12:01:16+08:00" />
+<meta property="article:modified_time" content="2022-01-22T12:01:16+08:00" />
+
+<meta itemprop="name" content="How to build a high-performance Go caching library">
+<meta itemprop="description" content="I was looking at some excellent open source libraries when I saw an interesting cache library fastcache, in its introduction mainly has the following characteristics: read and write data to be fast, even under concurrency. maintain good performance even in a cache of several gigabytes, as well as minimize the number of GCs. the design should be as simple as possible. This article will examine how its kernel achieves such"><meta itemprop="datePublished" content="2022-01-22T12:01:16+08:00" />
+<meta itemprop="dateModified" content="2022-01-22T12:01:16+08:00" />
+<meta itemprop="wordCount" content="4365">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How to build a high-performance Go caching library"/>
+<meta name="twitter:description" content="I was looking at some excellent open source libraries when I saw an interesting cache library fastcache, in its introduction mainly has the following characteristics: read and write data to be fast, even under concurrency. maintain good performance even in a cache of several gigabytes, as well as minimize the number of GCs. the design should be as simple as possible. This article will examine how its kernel achieves such"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How to build a high-performance Go caching library</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-22 12:01:16 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 4365 words </span>
+          <span class="more-meta"> 9 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#design-thinking">Design Thinking</a></li>
+        <li><a href="#source-code-implementation">Source code implementation</a>
+          <ul>
+            <li><a href="#api">API</a></li>
+            <li><a href="#structs">Structs</a></li>
+            <li><a href="#initialization">Initialization</a></li>
+            <li><a href="#chunk-operation">Chunk operation</a></li>
+            <li><a href="#set">Set</a></li>
+            <li><a href="#get">Get</a></li>
+            <li><a href="#benchmark">Benchmark</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>I was looking at some excellent open source libraries when I saw an interesting cache library fastcache, in its introduction mainly has the following characteristics:</p>
+<ol>
+<li>read and write data to be fast, even under concurrency.</li>
+<li>maintain good performance even in a cache of several gigabytes, as well as minimize the number of GCs.</li>
+<li>the design should be as simple as possible.</li>
+</ol>
+<p>This article will examine how its kernel achieves such goals by writing a simple cache library that mimics it. I hope you will find it useful.</p>
+<h2 id="design-thinking">Design Thinking</h2>
+<p>In our projects, we often use Go cache libraries like the <code>patrickmn/go-cache</code> library. However, many cache libraries actually use a simple Map to store data, which is fine when the concurrency is low and the amount of data is small, but when the amount of data is high and the concurrency is high, it will prolong the GC time and increase the number of memory allocations.</p>
+<p>For example, let&rsquo;s use a simple example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">a</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kt">string</span><span class="p">,</span> <span class="mf">1e9</span><span class="p">)</span> 
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">10</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">runtime</span><span class="p">.</span><span class="nf">GC</span><span class="p">()</span>
+    <span class="p">}</span> 
+    <span class="nx">runtime</span><span class="p">.</span><span class="nf">KeepAlive</span><span class="p">(</span><span class="nx">a</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In this example, a map of size <code>1 billion (1e9)</code> is preallocated, and then we output the GC situation via <code>gctrace</code>.</p>
+<blockquote>
+<p>The environment for the experiment is Linux, and the machine configuration is 16C 8G</p>
+</blockquote>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="p">[</span><span class="nx">root</span><span class="err">@</span><span class="nx">localhost</span> <span class="nx">gotest</span><span class="p">]</span><span class="err">#</span> <span class="nx">GODEBUG</span><span class="p">=</span><span class="nx">gctrace</span><span class="p">=</span><span class="mi">1</span> <span class="k">go</span> <span class="nx">run</span> <span class="nx">main</span><span class="p">.</span><span class="k">go</span> 
+<span class="o">...</span>
+<span class="nx">gc</span> <span class="mi">6</span> <span class="err">@</span><span class="mf">13.736</span><span class="nx">s</span> <span class="mi">17</span><span class="o">%</span><span class="p">:</span> <span class="mf">0.010</span><span class="o">+</span><span class="mi">1815</span><span class="o">+</span><span class="mf">0.004</span> <span class="nx">ms</span> <span class="nx">clock</span><span class="p">,</span> <span class="mf">0.17</span><span class="o">+</span><span class="mi">0</span><span class="o">/</span><span class="mi">7254</span><span class="o">/</span><span class="mi">21744</span><span class="o">+</span><span class="mf">0.067</span> <span class="nx">ms</span> <span class="nx">cpu</span><span class="p">,</span> <span class="mi">73984</span><span class="o">-</span><span class="p">&gt;</span><span class="mi">73984</span><span class="o">-</span><span class="p">&gt;</span><span class="mi">73984</span> <span class="nx">MB</span><span class="p">,</span> <span class="mi">147968</span> <span class="nx">MB</span> <span class="nx">goal</span><span class="p">,</span> <span class="mi">16</span> <span class="nf">P</span> <span class="p">(</span><span class="nx">forced</span><span class="p">)</span>
+<span class="nx">gc</span> <span class="mi">7</span> <span class="err">@</span><span class="mf">15.551</span><span class="nx">s</span> <span class="mi">18</span><span class="o">%</span><span class="p">:</span> <span class="mf">0.012</span><span class="o">+</span><span class="mi">1796</span><span class="o">+</span><span class="mf">0.005</span> <span class="nx">ms</span> <span class="nx">clock</span><span class="p">,</span> <span class="mf">0.20</span><span class="o">+</span><span class="mi">0</span><span class="o">/</span><span class="mi">7184</span><span class="o">/</span><span class="mi">21537</span><span class="o">+</span><span class="mf">0.082</span> <span class="nx">ms</span> <span class="nx">cpu</span><span class="p">,</span> <span class="mi">73984</span><span class="o">-</span><span class="p">&gt;</span><span class="mi">73984</span><span class="o">-</span><span class="p">&gt;</span><span class="mi">73984</span> <span class="nx">MB</span><span class="p">,</span> <span class="mi">147968</span> <span class="nx">MB</span> <span class="nx">goal</span><span class="p">,</span> <span class="mi">16</span> <span class="nf">P</span> <span class="p">(</span><span class="nx">forced</span><span class="p">)</span>
+<span class="nx">gc</span> <span class="mi">8</span> <span class="err">@</span><span class="mf">17.348</span><span class="nx">s</span> <span class="mi">19</span><span class="o">%</span><span class="p">:</span> <span class="mf">0.008</span><span class="o">+</span><span class="mi">1794</span><span class="o">+</span><span class="mf">0.004</span> <span class="nx">ms</span> <span class="nx">clock</span><span class="p">,</span> <span class="mf">0.14</span><span class="o">+</span><span class="mi">0</span><span class="o">/</span><span class="mi">7176</span><span class="o">/</span><span class="mi">21512</span><span class="o">+</span><span class="mf">0.070</span> <span class="nx">ms</span> <span class="nx">cpu</span><span class="p">,</span> <span class="mi">73984</span><span class="o">-</span><span class="p">&gt;</span><span class="mi">73984</span><span class="o">-</span><span class="p">&gt;</span><span class="mi">73984</span> <span class="nx">MB</span><span class="p">,</span> <span class="mi">147968</span> <span class="nx">MB</span> <span class="nx">goal</span><span class="p">,</span> <span class="mi">16</span> <span class="nf">P</span> <span class="p">(</span><span class="nx">forced</span><span class="p">)</span>
+<span class="nx">gc</span> <span class="mi">9</span> <span class="err">@</span><span class="mf">19.143</span><span class="nx">s</span> <span class="mi">19</span><span class="o">%</span><span class="p">:</span> <span class="mf">0.010</span><span class="o">+</span><span class="mi">1819</span><span class="o">+</span><span class="mf">0.005</span> <span class="nx">ms</span> <span class="nx">clock</span><span class="p">,</span> <span class="mf">0.16</span><span class="o">+</span><span class="mi">0</span><span class="o">/</span><span class="mi">7275</span><span class="o">/</span><span class="mi">21745</span><span class="o">+</span><span class="mf">0.085</span> <span class="nx">ms</span> <span class="nx">cpu</span><span class="p">,</span> <span class="mi">73984</span><span class="o">-</span><span class="p">&gt;</span><span class="mi">73984</span><span class="o">-</span><span class="p">&gt;</span><span class="mi">73984</span> <span class="nx">MB</span><span class="p">,</span> <span class="mi">147968</span> <span class="nx">MB</span> <span class="nx">goal</span><span class="p">,</span> <span class="mi">16</span> <span class="nf">P</span> <span class="p">(</span><span class="nx">forced</span><span class="p">)</span>
+<span class="nx">gc</span> <span class="mi">10</span> <span class="err">@</span><span class="mf">20.963</span><span class="nx">s</span> <span class="mi">19</span><span class="o">%</span><span class="p">:</span> <span class="mf">0.011</span><span class="o">+</span><span class="mi">1844</span><span class="o">+</span><span class="mf">0.004</span> <span class="nx">ms</span> <span class="nx">clock</span><span class="p">,</span> <span class="mf">0.18</span><span class="o">+</span><span class="mi">0</span><span class="o">/</span><span class="mi">7373</span><span class="o">/</span><span class="mi">22057</span><span class="o">+</span><span class="mf">0.076</span> <span class="nx">ms</span> <span class="nx">cpu</span><span class="p">,</span> <span class="mi">73984</span><span class="o">-</span><span class="p">&gt;</span><span class="mi">73984</span><span class="o">-</span><span class="p">&gt;</span><span class="mi">73984</span> <span class="nx">MB</span><span class="p">,</span> <span class="mi">147968</span> <span class="nx">MB</span> <span class="nx">goal</span><span class="p">,</span> <span class="mi">16</span> <span class="nf">P</span> <span class="p">(</span><span class="nx">forced</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The above shows the last 5 GCs, let&rsquo;s see what it means in detail.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">gc <span class="m">1</span> @0.004s 4%: 0.22+1.4+0.021 ms clock, 1.7+0.009/0.40/0.073+0.16 ms cpu, 4-&gt;5-&gt;1 MB, <span class="m">5</span> MB goal, <span class="m">8</span> P
+
+gc <span class="m">10</span> @20.963s 19%: 0.011+1844+0.004 ms clock, 0.18+0/7373/22057+0.076 ms cpu, 73984-&gt;73984-&gt;73984 MB, <span class="m">147968</span> MB goal, <span class="m">16</span> P <span class="o">(</span>forced<span class="o">)</span>
+
+gc <span class="m">10</span> ：程序启动以来第10次GC
+@20.963s：距离程序启动到现在的时间
+19%：当目前为止，GC 的标记工作所用的CPU时间占总CPU的百分比
+
+垃圾回收的时间
+0.011 ms：标记开始 STW 时间
+<span class="m">1844</span> ms：并发标记时间
+0.004 ms：标记终止 STW 时间
+
+垃圾回收占用cpu时间
+0.18 ms：标记开始 STW 时间
+<span class="m">0</span> ms：mutator assists占用的时间
+<span class="m">7373</span> ms：标记线程占用的时间
+<span class="m">22057</span> ms：idle mark workers占用的时间
+0.076 ms：标记终止 STW 时间
+
+内存
+<span class="m">73984</span> MB：标记开始前堆占用大小
+<span class="m">73984</span> MB：标记结束后堆占用大小
+<span class="m">73984</span> MB：标记完成后存活堆的大小
+<span class="m">147968</span> MB goal：标记完成后正在使用的堆内存的目标大小
+
+<span class="m">16</span> P：使用了多少处理器
+</code></pre></td></tr></table>
+</div>
+</div><p>You can see from the above output that each GC takes a very long time to process and consumes a lot of CPU resources. So what is the reason for this?</p>
+<p>The underlying data structure of <code>string</code> actually consists of two parts, which include a pointer to a byte array and the size of the array.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">StringHeader</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">Data</span> <span class="kt">uintptr</span>
+    <span class="nx">Len</span>  <span class="kt">int</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Since the <code>StringHeader</code> contains pointers, each pointer is scanned every time it is GC&rsquo;d, so there are a lot of pointers in the huge <code>map</code>, which causes a huge consumption of resources.</p>
+<p>In the above example, the data in <code>map a</code> is stored roughly like this.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/9ac9014a34264f45a6718eee28d62c93.png" alt="map"></p>
+<p>There are multiple <code>buckets</code> inside a map, and a <code>bmap</code> array inside the <code>bucket</code> to hold data, but since <code>key</code> and <code>value</code> are both of type <code>string</code>, you also need to scan the <code>string</code> data according to the <code>Data</code> pointer in the <code>StringHeader</code> at GC time.</p>
+<p>For this case, if all the string bytes are in a single memory segment, we can track where a string starts and ends in that segment by offset. By tracking the offset, we don&rsquo;t need to store the pointer in our large array, and GC won&rsquo;t be bothered. As follows:</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/345055705498421f8f0ed106c3173c54.png" alt="sobyte"></p>
+<p>As shown above, if we copy the byte data in the string to a contiguous byte array <code>chunks</code> and allocate memory for this byte array in advance and store only the offset of the string in the array instead of the pointer.</p>
+<p>Is there any other way to do this than the optimization described above?</p>
+<p>Actually, we can also call <code>mmap syscall</code> directly from the system OS to allocate memory, so that the GC will never do memory management on this memory, and therefore will not scan it. As follows:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span> 
+    <span class="nx">test</span> <span class="o">:=</span> <span class="s">&#34;hello syscall&#34;</span>
+    <span class="nx">data</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">syscall</span><span class="p">.</span><span class="nf">Mmap</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">13</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">PROT_READ</span><span class="p">|</span><span class="nx">syscall</span><span class="p">.</span><span class="nx">PROT_WRITE</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">MAP_ANON</span><span class="p">|</span><span class="nx">syscall</span><span class="p">.</span><span class="nx">MAP_PRIVATE</span><span class="p">)</span>
+    <span class="nx">p</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="mi">13</span><span class="p">]</span><span class="kt">byte</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">data</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">13</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">p</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nx">test</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+    <span class="p">}</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nb">string</span><span class="p">(</span><span class="nx">p</span><span class="p">[:]))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The system call requests 13bytes of memory directly from the OS, and then writes a string to the requested memory array.</p>
+<p>So we can also improve performance by requesting a block of memory from the OS in advance, instead of requesting memory when it is needed, to reduce frequent memory allocations.</p>
+<h2 id="source-code-implementation">Source code implementation</h2>
+<h3 id="api">API</h3>
+<p>Let&rsquo;s define the API of this library before we develop it.</p>
+<h4 id="func-new">func New</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">New</span><span class="p">(</span><span class="nx">maxBytes</span> <span class="kt">int</span><span class="p">)</span> <span class="o">*</span><span class="nx">Cache</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Create a Cache structure and pass in the preset cache size in bytes.</p>
+<h4 id="func-cache-get">func (*Cache) Get</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Cache</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">k</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">[]</span><span class="kt">byte</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Gets the value in the Cache, passed in as a byte array.</p>
+<h4 id="func-cache-set">func (*Cache) Set</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Cache</span><span class="p">)</span> <span class="nf">Set</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">v</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Set the key-value pair to the cache, k is the key, v is the value, and the parameters are byte arrays.</p>
+<h3 id="structs">Structs</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="nx">bucketsCount</span> <span class="p">=</span> <span class="mi">512</span>
+
+<span class="kd">type</span> <span class="nx">Cache</span> <span class="kd">struct</span> <span class="p">{</span> 
+    <span class="nx">buckets</span> <span class="p">[</span><span class="nx">bucketsCount</span><span class="p">]</span><span class="nx">bucket</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">bucket</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="c1">// 读写锁
+</span><span class="c1"></span>    <span class="nx">mu</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
+
+    <span class="c1">// 二维数组，存放数据的地方，是一个环形链表
+</span><span class="c1"></span>    <span class="nx">chunks</span> <span class="p">[][]</span><span class="kt">byte</span>
+
+    <span class="c1">// 索引字典
+</span><span class="c1"></span>    <span class="nx">m</span> <span class="kd">map</span><span class="p">[</span><span class="kt">uint64</span><span class="p">]</span><span class="kt">uint64</span>
+
+    <span class="c1">// 索引值
+</span><span class="c1"></span>    <span class="nx">idx</span> <span class="kt">uint64</span>
+
+    <span class="c1">// chunks 被重写的次数，用来校验环形链表中数据有效性
+</span><span class="c1"></span>    <span class="nx">gen</span> <span class="kt">uint64</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Through our analysis above, we can see that the real place to store data is the chunks two-dimensional array, which is implemented by m field to map the index paths and build a circular chain according to the chunks and gen fields, and the circular chain will add one for each turn of gen.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/5170060528a7480a95e52060add99a1d.png" alt="sobyte"></p>
+<h3 id="initialization">Initialization</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">New</span><span class="p">(</span><span class="nx">maxBytes</span> <span class="kt">int</span><span class="p">)</span> <span class="o">*</span><span class="nx">Cache</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">maxBytes</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;maxBytes must be greater than 0; got %d&#34;</span><span class="p">,</span> <span class="nx">maxBytes</span><span class="p">))</span>
+    <span class="p">}</span>
+    <span class="kd">var</span> <span class="nx">c</span> <span class="nx">Cache</span>
+    <span class="c1">// 算出每个桶的大小 
+</span><span class="c1"></span>    <span class="nx">maxBucketBytes</span> <span class="o">:=</span> <span class="nb">uint64</span><span class="p">((</span><span class="nx">maxBytes</span> <span class="o">+</span> <span class="nx">bucketsCount</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="nx">bucketsCount</span><span class="p">)</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">c</span><span class="p">.</span><span class="nx">buckets</span><span class="p">[:]</span> <span class="p">{</span>
+    <span class="c1">// 对桶进行初始化
+</span><span class="c1"></span>        <span class="nx">c</span><span class="p">.</span><span class="nx">buckets</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nf">Init</span><span class="p">(</span><span class="nx">maxBucketBytes</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">c</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We will set up a New function to initialize our Cache structure, where the size of the cached data will be distributed equally to each bucket, and then initialize each bucket.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="nx">bucketSizeBits</span> <span class="p">=</span> <span class="mi">40</span>
+<span class="kd">const</span> <span class="nx">maxBucketSize</span> <span class="kt">uint64</span> <span class="p">=</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="nx">bucketSizeBits</span>
+<span class="kd">const</span> <span class="nx">chunkSize</span> <span class="p">=</span> <span class="mi">64</span> <span class="o">*</span> <span class="mi">1024</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">bucket</span><span class="p">)</span> <span class="nf">Init</span><span class="p">(</span><span class="nx">maxBytes</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">maxBytes</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;maxBytes cannot be zero&#34;</span><span class="p">))</span>
+    <span class="p">}</span>
+  <span class="c1">// 我们这里限制每个桶最大的大小是 1024 GB
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">maxBytes</span> <span class="o">&gt;=</span> <span class="nx">maxBucketSize</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;too big maxBytes=%d; should be smaller than %d&#34;</span><span class="p">,</span> <span class="nx">maxBytes</span><span class="p">,</span> <span class="nx">maxBucketSize</span><span class="p">))</span>
+    <span class="p">}</span>
+    <span class="c1">// 初始化 Chunks 中每个 Chunk 大小为 64 KB，计算 chunk 数量
+</span><span class="c1"></span>    <span class="nx">maxChunks</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">maxBytes</span> <span class="o">+</span> <span class="nx">chunkSize</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="nx">chunkSize</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nx">chunks</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([][]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">maxChunks</span><span class="p">)</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nx">m</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="kt">uint64</span><span class="p">]</span><span class="kt">uint64</span><span class="p">)</span>
+    <span class="c1">// 初始化 bucket 结构体
+</span><span class="c1"></span>    <span class="nx">b</span><span class="p">.</span><span class="nf">Reset</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Here the memory inside the bucket is allocated by chunk, each chunk occupies about 64 KB of memory. at the end the reset method of the bucket is called to initialize the bucket structure.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">bucket</span><span class="p">)</span> <span class="nf">Reset</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="nx">chunks</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">chunks</span>
+    <span class="c1">// 遍历 chunks
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">chunks</span> <span class="p">{</span>
+        <span class="c1">// 将 chunk 中的内存归还到缓存中
+</span><span class="c1"></span>        <span class="nf">putChunk</span><span class="p">(</span><span class="nx">chunks</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+        <span class="nx">chunks</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="kc">nil</span>
+    <span class="p">}</span>
+    <span class="c1">// 删除索引字典中所有的数据
+</span><span class="c1"></span>    <span class="nx">bm</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">m</span>
+    <span class="k">for</span> <span class="nx">k</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">bm</span> <span class="p">{</span>
+        <span class="nb">delete</span><span class="p">(</span><span class="nx">bm</span><span class="p">,</span> <span class="nx">k</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nx">idx</span> <span class="p">=</span> <span class="mi">0</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nx">gen</span> <span class="p">=</span> <span class="mi">1</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The Reset method is very simple, it mainly clears the chunks array, deletes all the data in the index dictionary and resets the index idx and gen values.</p>
+<p>In the above method, there is a putChunk, which is actually a direct manipulation of the memory we requested from the OS in advance, and there is a getChunk method accordingly. Let&rsquo;s look at the operation of Chunk in detail.</p>
+<h3 id="chunk-operation">Chunk operation</h3>
+<h4 id="getchunk">getChunk</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="nx">chunksPerAlloc</span> <span class="p">=</span> <span class="mi">1024</span>
+<span class="kd">const</span> <span class="nx">chunkSize</span> <span class="p">=</span> <span class="mi">64</span> <span class="o">*</span> <span class="mi">1024</span>
+
+<span class="kd">var</span> <span class="p">(</span>
+    <span class="nx">freeChunks</span>     <span class="p">[]</span><span class="o">*</span><span class="p">[</span><span class="nx">chunkSize</span><span class="p">]</span><span class="kt">byte</span>
+    <span class="nx">freeChunksLock</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Mutex</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">getChunk</span><span class="p">()</span> <span class="p">[]</span><span class="kt">byte</span> <span class="p">{</span>
+    <span class="nx">freeChunksLock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">freeChunks</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="c1">// 分配  64 * 1024 * 1024 = 64 MB 内存
+</span><span class="c1"></span>        <span class="nx">data</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">syscall</span><span class="p">.</span><span class="nf">Mmap</span><span class="p">(</span><span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">chunkSize</span><span class="o">*</span><span class="nx">chunksPerAlloc</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">PROT_READ</span><span class="p">|</span><span class="nx">syscall</span><span class="p">.</span><span class="nx">PROT_WRITE</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">MAP_ANON</span><span class="p">|</span><span class="nx">syscall</span><span class="p">.</span><span class="nx">MAP_PRIVATE</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nb">panic</span><span class="p">(</span><span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;cannot allocate %d bytes via mmap: %s&#34;</span><span class="p">,</span> <span class="nx">chunkSize</span><span class="o">*</span><span class="nx">chunksPerAlloc</span><span class="p">,</span> <span class="nx">err</span><span class="p">))</span>
+        <span class="p">}</span>
+        <span class="c1">// 循环遍历 data 数据
+</span><span class="c1"></span>        <span class="k">for</span> <span class="nb">len</span><span class="p">(</span><span class="nx">data</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+            <span class="c1">//将从系统分配的内存分为 64 * 1024 = 64 KB 大小，存放到 freeChunks中
+</span><span class="c1"></span>            <span class="nx">p</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="nx">chunkSize</span><span class="p">]</span><span class="kt">byte</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">data</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+            <span class="nx">freeChunks</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">freeChunks</span><span class="p">,</span> <span class="nx">p</span><span class="p">)</span>
+            <span class="nx">data</span> <span class="p">=</span> <span class="nx">data</span><span class="p">[</span><span class="nx">chunkSize</span><span class="p">:]</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="c1">//从 freeChunks 获取最后一个元素
+</span><span class="c1"></span>    <span class="nx">n</span> <span class="o">:=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">freeChunks</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+    <span class="nx">p</span> <span class="o">:=</span> <span class="nx">freeChunks</span><span class="p">[</span><span class="nx">n</span><span class="p">]</span>
+    <span class="nx">freeChunks</span><span class="p">[</span><span class="nx">n</span><span class="p">]</span> <span class="p">=</span> <span class="kc">nil</span>
+    <span class="nx">freeChunks</span> <span class="p">=</span> <span class="nx">freeChunks</span><span class="p">[:</span><span class="nx">n</span><span class="p">]</span>
+    <span class="nx">freeChunksLock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nx">p</span><span class="p">[:]</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The initial call to the getChunk function uses a system call to allocate 64MB of memory, and then recursively chops the memory into 1024 copies of 64KB each into the freeChunks free list. Then it fetches the last element of the freeChunks free list each time and returns 64KB of memory. Note that getChunk will be used in the set method of the Cache, which will be described below, so it needs to take into account concurrency issues, so a lock is added here.</p>
+<h4 id="putchunk">putChunk</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">putChunk</span><span class="p">(</span><span class="nx">chunk</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">chunk</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="nx">chunk</span> <span class="p">=</span> <span class="nx">chunk</span><span class="p">[:</span><span class="nx">chunkSize</span><span class="p">]</span>
+    <span class="nx">p</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="p">[</span><span class="nx">chunkSize</span><span class="p">]</span><span class="kt">byte</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">chunk</span><span class="p">[</span><span class="mi">0</span><span class="p">]))</span>
+
+    <span class="nx">freeChunksLock</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="nx">freeChunks</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">freeChunks</span><span class="p">,</span> <span class="nx">p</span><span class="p">)</span>
+    <span class="nx">freeChunksLock</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The putChunk function is to return the memory data to the freeChunks free list and will be called in the reset method of the bucket.</p>
+<h3 id="set">Set</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">const</span> <span class="nx">bucketsCount</span> <span class="p">=</span> <span class="mi">512</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Cache</span><span class="p">)</span> <span class="nf">Set</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">v</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">h</span> <span class="o">:=</span> <span class="nx">xxhash</span><span class="p">.</span><span class="nf">Sum64</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span>
+    <span class="nx">idx</span> <span class="o">:=</span> <span class="nx">h</span> <span class="o">%</span> <span class="nx">bucketsCount</span>
+    <span class="nx">c</span><span class="p">.</span><span class="nx">buckets</span><span class="p">[</span><span class="nx">idx</span><span class="p">].</span><span class="nf">Set</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">v</span><span class="p">,</span> <span class="nx">h</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The Set method will do a hash based on the value of k, and then take the modal map to the buckets bucket, the hash library used here is <code>cespare/xxhash</code>.</p>
+<p>The main thing is the Set method inside the buckets.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">bucket</span><span class="p">)</span> <span class="nf">Set</span><span class="p">(</span><span class="nx">k</span><span class="p">,</span> <span class="nx">v</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">h</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 限定 k v 大小不能超过 2bytes
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">16</span><span class="p">)</span> <span class="o">||</span> <span class="nb">len</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">16</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="c1">// 4个byte 设置每条数据的数据头
+</span><span class="c1"></span>    <span class="kd">var</span> <span class="nx">kvLenBuf</span> <span class="p">[</span><span class="mi">4</span><span class="p">]</span><span class="kt">byte</span>
+    <span class="nx">kvLenBuf</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="p">=</span> <span class="nb">byte</span><span class="p">(</span><span class="nb">uint16</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">k</span><span class="p">))</span> <span class="o">&gt;&gt;</span> <span class="mi">8</span><span class="p">)</span>
+    <span class="nx">kvLenBuf</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="p">=</span> <span class="nb">byte</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">k</span><span class="p">))</span>
+    <span class="nx">kvLenBuf</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span> <span class="p">=</span> <span class="nb">byte</span><span class="p">(</span><span class="nb">uint16</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">v</span><span class="p">))</span> <span class="o">&gt;&gt;</span> <span class="mi">8</span><span class="p">)</span>
+    <span class="nx">kvLenBuf</span><span class="p">[</span><span class="mi">3</span><span class="p">]</span> <span class="p">=</span> <span class="nb">byte</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">v</span><span class="p">))</span>
+    <span class="nx">kvLen</span> <span class="o">:=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">kvLenBuf</span><span class="p">)</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span> <span class="o">+</span> <span class="nb">len</span><span class="p">(</span><span class="nx">v</span><span class="p">))</span>
+    <span class="c1">// 校验一下大小
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">kvLen</span> <span class="o">&gt;=</span> <span class="nx">chunkSize</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+
+    <span class="nx">b</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+    <span class="c1">// 当前索引位置
+</span><span class="c1"></span>    <span class="nx">idx</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">idx</span>
+    <span class="c1">// 存放完数据后索引的位置
+</span><span class="c1"></span>    <span class="nx">idxNew</span> <span class="o">:=</span> <span class="nx">idx</span> <span class="o">+</span> <span class="nx">kvLen</span>
+    <span class="c1">// 根据索引找到在 chunks 的位置
+</span><span class="c1"></span>    <span class="nx">chunkIdx</span> <span class="o">:=</span> <span class="nx">idx</span> <span class="o">/</span> <span class="nx">chunkSize</span>
+    <span class="nx">chunkIdxNew</span> <span class="o">:=</span> <span class="nx">idxNew</span> <span class="o">/</span> <span class="nx">chunkSize</span>
+    <span class="c1">// 新的索引是否超过当前索引
+</span><span class="c1"></span>    <span class="c1">// 因为还有chunkIdx等于chunkIdxNew情况，所以需要先判断一下
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">chunkIdxNew</span> <span class="p">&gt;</span> <span class="nx">chunkIdx</span> <span class="p">{</span>
+        <span class="c1">// 校验是否新索引已到chunks数组的边界
+</span><span class="c1"></span>        <span class="c1">// 已到边界，那么循环链表从头开始
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">chunkIdxNew</span> <span class="o">&gt;=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">chunks</span><span class="p">))</span> <span class="p">{</span>
+            <span class="nx">idx</span> <span class="p">=</span> <span class="mi">0</span>
+            <span class="nx">idxNew</span> <span class="p">=</span> <span class="nx">kvLen</span>
+            <span class="nx">chunkIdx</span> <span class="p">=</span> <span class="mi">0</span>
+            <span class="nx">b</span><span class="p">.</span><span class="nx">gen</span><span class="o">++</span>
+            <span class="c1">// 当 gen 等于 1&lt;&lt;genSizeBits时，才会等于0
+</span><span class="c1"></span>            <span class="c1">// 也就是用来限定 gen 的边界为1&lt;&lt;genSizeBits
+</span><span class="c1"></span>            <span class="k">if</span> <span class="nx">b</span><span class="p">.</span><span class="nx">gen</span><span class="o">&amp;</span><span class="p">((</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="nx">genSizeBits</span><span class="p">)</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="nx">b</span><span class="p">.</span><span class="nx">gen</span><span class="o">++</span>
+            <span class="p">}</span>
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="c1">// 未到 chunks数组的边界,从下一个chunk开始
+</span><span class="c1"></span>            <span class="nx">idx</span> <span class="p">=</span> <span class="nx">chunkIdxNew</span> <span class="o">*</span> <span class="nx">chunkSize</span>
+            <span class="nx">idxNew</span> <span class="p">=</span> <span class="nx">idx</span> <span class="o">+</span> <span class="nx">kvLen</span>
+            <span class="nx">chunkIdx</span> <span class="p">=</span> <span class="nx">chunkIdxNew</span>
+        <span class="p">}</span>
+        <span class="c1">// 重置 chunks[chunkIdx]
+</span><span class="c1"></span>        <span class="nx">b</span><span class="p">.</span><span class="nx">chunks</span><span class="p">[</span><span class="nx">chunkIdx</span><span class="p">]</span> <span class="p">=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">chunks</span><span class="p">[</span><span class="nx">chunkIdx</span><span class="p">][:</span><span class="mi">0</span><span class="p">]</span>
+    <span class="p">}</span>
+    <span class="nx">chunk</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">chunks</span><span class="p">[</span><span class="nx">chunkIdx</span><span class="p">]</span>
+    <span class="k">if</span> <span class="nx">chunk</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">chunk</span> <span class="p">=</span> <span class="nf">getChunk</span><span class="p">()</span>
+        <span class="c1">// 清空切片
+</span><span class="c1"></span>        <span class="nx">chunk</span> <span class="p">=</span> <span class="nx">chunk</span><span class="p">[:</span><span class="mi">0</span><span class="p">]</span>
+    <span class="p">}</span>
+    <span class="c1">// 将数据 append 到 chunk 中
+</span><span class="c1"></span>    <span class="nx">chunk</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">chunk</span><span class="p">,</span> <span class="nx">kvLenBuf</span><span class="p">[:]</span><span class="o">...</span><span class="p">)</span>
+    <span class="nx">chunk</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">chunk</span><span class="p">,</span> <span class="nx">k</span><span class="o">...</span><span class="p">)</span>
+    <span class="nx">chunk</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">chunk</span><span class="p">,</span> <span class="nx">v</span><span class="o">...</span><span class="p">)</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nx">chunks</span><span class="p">[</span><span class="nx">chunkIdx</span><span class="p">]</span> <span class="p">=</span> <span class="nx">chunk</span>
+    <span class="c1">// 因为 idx 不能超过bucketSizeBits，所以用一个 uint64 同时表示gen和idx
+</span><span class="c1"></span>    <span class="c1">// 所以高于bucketSizeBits位置表示gen
+</span><span class="c1"></span>    <span class="c1">// 低于bucketSizeBits位置表示idx
+</span><span class="c1"></span>    <span class="nx">b</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">h</span><span class="p">]</span> <span class="p">=</span> <span class="nx">idx</span> <span class="p">|</span> <span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">gen</span> <span class="o">&lt;&lt;</span> <span class="nx">bucketSizeBits</span><span class="p">)</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nx">idx</span> <span class="p">=</span> <span class="nx">idxNew</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ol>
+<li>at the beginning of this code I will actually limit the size of the key value to no more than 2bytes.</li>
+<li>then encapsulate the 2bytes length of the key value into a 4bytes kvLenBuf as the data header, the total length of the data header and the key value is not to exceed the length of a chunk, that is <code>64 * 1024</code>.</li>
+<li>then calculate the original index chunkIdx and the new index chunkIdxNew, to determine whether the added data plus the original data exceeds a chunk length.</li>
+<li>find the position in the corresponding chunks according to the new index, and then append the key value and kvLenBuf to the back of the chunk.</li>
+<li>set the new idx and the corresponding value in the m dictionary, where the gen and idx are stored by taking and placing.</li>
+</ol>
+<p>In Set a key-value pair will have 4bytes of kvLenBuf as the data header, followed by key and value, in kvLenBuf, the first two bytes represent the low and high bits of the key length respectively; the last two bytes represent the low and high bits of the value length respectively, the data diagram is roughly as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/f2f10282f887408e95afd9747f9de3b6.png" alt="sobyte"></p>
+<p>Here is an example to see how to use chunks as a two-dimensional array to implement a circular linkedlist.</p>
+<p>In the Init method of the bucket, we set the length of the chunks according to the number of bytes passed into the maxBytes bucket, since each chunk size is <code>64 * 1024</code> bytes, then we set the bucket size of <code>3 * 64 * 1024</code> bytes, then the length of the chunks array is 3.</p>
+<p>If the chunkIdx is currently calculated to be at position 1 of the chunks array, and there are 6bytes left unused in position chunks[1], then there are several cases as follows.</p>
+<ol>
+<li>
+<p>now assume that the length of the keys put in is 1byte, then the remaining 6bytes in the chunks[1] position is just enough to put down.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/742cb8df13bb44508414b7c43bc11079.png" alt="sobyte"></p>
+</li>
+<li>
+<p>Now suppose the length of the key value is more than 1byte, then the remaining space in chunks[1] will not fit and will have to be placed in chunks[2].
+<img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/2b60932e92df42ac9a52f64688b0d371.png" alt="sobyte"></p>
+</li>
+</ol>
+<p>If chunkIdx is currently calculated to be at position 2 in the chunks array and now Set a key value, after calculating chunkIdxNew to be 3, which has exceeded the length of the chunks array, then the index will be reset, the data will be repositioned from chunks[0], and gen will be added by one, indicating that a run has been completed.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/37be2ed6e9cd4419a81666919d90234e.png" alt="sobyte"></p>
+<h3 id="get">Get</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">Cache</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">dst</span><span class="p">,</span> <span class="nx">k</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">[]</span><span class="kt">byte</span> <span class="p">{</span>
+   <span class="nx">h</span> <span class="o">:=</span> <span class="nx">xxhash</span><span class="p">.</span><span class="nf">Sum64</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span>
+   <span class="nx">idx</span> <span class="o">:=</span> <span class="nx">h</span> <span class="o">%</span> <span class="nx">bucketsCount</span>
+   <span class="nx">dst</span><span class="p">,</span> <span class="nx">_</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">buckets</span><span class="p">[</span><span class="nx">idx</span><span class="p">].</span><span class="nf">Get</span><span class="p">(</span><span class="nx">dst</span><span class="p">,</span> <span class="nx">k</span><span class="p">,</span> <span class="nx">h</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+   <span class="k">return</span> <span class="nx">dst</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Here it is the same as the Set method, which first finds the location of the corresponding bucket and then goes inside the bucket to get the data. Note that the dst here can be passed in a slice from outside to reduce duplicate allocation of return values.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">bucket</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">dst</span><span class="p">,</span> <span class="nx">k</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">h</span> <span class="kt">uint64</span><span class="p">,</span><span class="nx">returnDst</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">found</span> <span class="o">:=</span> <span class="kc">false</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">RLock</span><span class="p">()</span>
+    <span class="nx">v</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">m</span><span class="p">[</span><span class="nx">h</span><span class="p">]</span>
+    <span class="nx">bGen</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">gen</span> <span class="o">&amp;</span> <span class="p">((</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="nx">genSizeBits</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">v</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="c1">// 高于bucketSizeBits位置表示gen
+</span><span class="c1"></span>        <span class="nx">gen</span> <span class="o">:=</span> <span class="nx">v</span> <span class="o">&gt;&gt;</span> <span class="nx">bucketSizeBits</span>
+        <span class="c1">// 低于bucketSizeBits位置表示idx
+</span><span class="c1"></span>        <span class="nx">idx</span> <span class="o">:=</span> <span class="nx">v</span> <span class="o">&amp;</span> <span class="p">((</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="nx">bucketSizeBits</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+        <span class="c1">// 这里说明chunks还没被写满
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">gen</span> <span class="o">==</span> <span class="nx">bGen</span> <span class="o">&amp;&amp;</span> <span class="nx">idx</span> <span class="p">&lt;</span> <span class="nx">b</span><span class="p">.</span><span class="nx">idx</span> <span class="o">||</span>
+            <span class="c1">// 这里说明chunks已被写满，并且当前数据没有被覆盖
+</span><span class="c1"></span>            <span class="nx">gen</span><span class="o">+</span><span class="mi">1</span> <span class="o">==</span> <span class="nx">bGen</span> <span class="o">&amp;&amp;</span> <span class="nx">idx</span> <span class="o">&gt;=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">idx</span> <span class="o">||</span>
+            <span class="c1">// 这里是边界条件gen已是最大，并且chunks已被写满bGen从1开始，，并且当前数据没有被覆盖
+</span><span class="c1"></span>            <span class="nx">gen</span> <span class="o">==</span> <span class="nx">maxGen</span> <span class="o">&amp;&amp;</span> <span class="nx">bGen</span> <span class="o">==</span> <span class="mi">1</span> <span class="o">&amp;&amp;</span> <span class="nx">idx</span> <span class="o">&gt;=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">idx</span> <span class="p">{</span>
+            <span class="nx">chunkIdx</span> <span class="o">:=</span> <span class="nx">idx</span> <span class="o">/</span> <span class="nx">chunkSize</span>
+            <span class="c1">// chunk 索引位置不能超过 chunks 数组长度
+</span><span class="c1"></span>            <span class="k">if</span> <span class="nx">chunkIdx</span> <span class="o">&gt;=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">chunks</span><span class="p">))</span> <span class="p">{</span>
+                <span class="k">goto</span> <span class="nx">end</span>
+            <span class="p">}</span>
+            <span class="c1">// 找到数据所在的 chunk
+</span><span class="c1"></span>            <span class="nx">chunk</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nx">chunks</span><span class="p">[</span><span class="nx">chunkIdx</span><span class="p">]</span>
+            <span class="c1">// 通过取模找到该key 对应的数据在 chunk 中的位置
+</span><span class="c1"></span>            <span class="nx">idx</span> <span class="o">%=</span> <span class="nx">chunkSize</span>
+            <span class="k">if</span> <span class="nx">idx</span><span class="o">+</span><span class="mi">4</span> <span class="o">&gt;=</span> <span class="nx">chunkSize</span> <span class="p">{</span>
+                <span class="k">goto</span> <span class="nx">end</span>
+            <span class="p">}</span>
+            <span class="c1">// 前 4bytes 是数据头
+</span><span class="c1"></span>            <span class="nx">kvLenBuf</span> <span class="o">:=</span> <span class="nx">chunk</span><span class="p">[</span><span class="nx">idx</span> <span class="p">:</span> <span class="nx">idx</span><span class="o">+</span><span class="mi">4</span><span class="p">]</span>
+            <span class="c1">// 通过数据头算出键值的长度
+</span><span class="c1"></span>            <span class="nx">keyLen</span> <span class="o">:=</span> <span class="p">(</span><span class="nb">uint64</span><span class="p">(</span><span class="nx">kvLenBuf</span><span class="p">[</span><span class="mi">0</span><span class="p">])</span> <span class="o">&lt;&lt;</span> <span class="mi">8</span><span class="p">)</span> <span class="p">|</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">kvLenBuf</span><span class="p">[</span><span class="mi">1</span><span class="p">])</span>
+            <span class="nx">valLen</span> <span class="o">:=</span> <span class="p">(</span><span class="nb">uint64</span><span class="p">(</span><span class="nx">kvLenBuf</span><span class="p">[</span><span class="mi">2</span><span class="p">])</span> <span class="o">&lt;&lt;</span> <span class="mi">8</span><span class="p">)</span> <span class="p">|</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">kvLenBuf</span><span class="p">[</span><span class="mi">3</span><span class="p">])</span>
+            <span class="nx">idx</span> <span class="o">+=</span> <span class="mi">4</span>
+            <span class="k">if</span> <span class="nx">idx</span><span class="o">+</span><span class="nx">keyLen</span><span class="o">+</span><span class="nx">valLen</span> <span class="o">&gt;=</span> <span class="nx">chunkSize</span> <span class="p">{</span>
+                <span class="k">goto</span> <span class="nx">end</span>
+            <span class="p">}</span>
+            <span class="c1">// 如果键值是一致的，表示找到该数据
+</span><span class="c1"></span>            <span class="k">if</span> <span class="nb">string</span><span class="p">(</span><span class="nx">k</span><span class="p">)</span> <span class="o">==</span> <span class="nb">string</span><span class="p">(</span><span class="nx">chunk</span><span class="p">[</span><span class="nx">idx</span><span class="p">:</span><span class="nx">idx</span><span class="o">+</span><span class="nx">keyLen</span><span class="p">])</span> <span class="p">{</span>
+                <span class="nx">idx</span> <span class="o">+=</span> <span class="nx">keyLen</span>
+                <span class="c1">// 返回该键对应的值
+</span><span class="c1"></span>                <span class="k">if</span> <span class="nx">returnDst</span> <span class="p">{</span>
+                    <span class="nx">dst</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">dst</span><span class="p">,</span> <span class="nx">chunk</span><span class="p">[</span><span class="nx">idx</span><span class="p">:</span><span class="nx">idx</span><span class="o">+</span><span class="nx">valLen</span><span class="p">]</span><span class="o">...</span><span class="p">)</span>
+                <span class="p">}</span>
+                <span class="nx">found</span> <span class="p">=</span> <span class="kc">true</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="nx">end</span><span class="p">:</span>
+    <span class="nx">b</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">RUnlock</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nx">dst</span><span class="p">,</span> <span class="nx">found</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The Get method mainly considers the boundary problem of the circular linkedlist. In the Set method, we store the gen and idx indexes of each key in the m dictionary, so we can get the gen and idx indexes by bit operation after getting the value of the m dictionary through hash.</p>
+<p>After finding the gen and idx indexes, it is time to determine the boundary conditions, using an if condition to determine.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">gen</span> <span class="o">==</span> bGen <span class="o">&amp;&amp;</span> idx &lt; b.idx
+</code></pre></td></tr></table>
+</div>
+</div><p>Here it is determined that if it is in the same loop of the circular linkedlist, then the index corresponding to the key should be less than the index of the current bucket.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">gen+1 <span class="o">==</span> bGen <span class="o">&amp;&amp;</span> idx &gt;<span class="o">=</span> b.idx
+</code></pre></td></tr></table>
+</div>
+</div><p>Here it means that the current bucket has entered the next loop, so it is necessary to determine whether the index corresponding to the key is greater than the current index to indicate that the value corresponding to the current key has not been overwritten.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">gen</span> <span class="o">==</span> maxGen <span class="o">&amp;&amp;</span> <span class="nv">bGen</span> <span class="o">==</span> <span class="m">1</span> <span class="o">&amp;&amp;</span> idx &gt;<span class="o">=</span> b.idx
+</code></pre></td></tr></table>
+</div>
+</div><p>Because the gen and idx indexes are stuffed into fields of type uint64, the only maximum value left for gen is <code>maxGen = 1&lt;&lt; 24 -1</code>, and exceeding maxGen will make gen start from 1. So here if key corresponds to gen equal to maxGen, then the current bGen should be equal to 1, and the index corresponding to key should also be greater than the current idx, so that the key-value pair will not be overwritten.</p>
+<p>After judging the boundary conditions, the corresponding chunk will be found, and then the data location will be found after taking the mode, and the value will be found and taken out by the offset.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/bb9e33fa09734948820ae91edb4ce396.png" alt="sobyte"></p>
+<h3 id="benchmark">Benchmark</h3>
+<p>Here&rsquo;s my post-Benchmark.</p>
+<blockquote>
+<p>Code location: <a href="https://github.com/devYun/mycache/blob/main/cache_timing_test.go">https://github.com/devYun/mycache/blob/main/cache_timing_test.go</a></p>
+</blockquote>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">GOMAXPROCS</span><span class="o">=</span><span class="m">4</span> go <span class="nb">test</span> -bench<span class="o">=</span><span class="s1">&#39;Set|Get&#39;</span> -benchtime<span class="o">=</span>10s
+goos: linux
+goarch: amd64
+pkg: gotest
+// GoCache
+BenchmarkGoCacheSet-4                <span class="m">836</span>          <span class="m">14595822</span> ns/op           4.49 MB/s     <span class="m">2167340</span> B/op    <span class="m">65576</span> allocs/op
+BenchmarkGoCacheGet-4               <span class="m">3093</span>           <span class="m">3619730</span> ns/op          18.11 MB/s        <span class="m">5194</span> B/op       <span class="m">23</span> allocs/op
+BenchmarkGoCacheSetGet-4             <span class="m">236</span>          <span class="m">54379268</span> ns/op           2.41 MB/s     <span class="m">2345868</span> B/op    <span class="m">65679</span> allocs/op
+// BigCache
+BenchmarkBigCacheSet-4              <span class="m">1393</span>          <span class="m">12763995</span> ns/op           5.13 MB/s     <span class="m">6691115</span> B/op        <span class="m">8</span> allocs/op
+BenchmarkBigCacheGet-4              <span class="m">2526</span>           <span class="m">4342561</span> ns/op          15.09 MB/s      <span class="m">650870</span> B/op   <span class="m">131074</span> allocs/op
+BenchmarkBigCacheSetGet-4           <span class="m">1063</span>          <span class="m">11180201</span> ns/op          11.72 MB/s     <span class="m">4778699</span> B/op   <span class="m">131081</span> allocs/op 
+// standard map
+BenchmarkStdMapSet-4                <span class="m">1484</span>           <span class="m">7299296</span> ns/op           8.98 MB/s      <span class="m">270603</span> B/op    <span class="m">65537</span> allocs/op
+BenchmarkStdMapGet-4                <span class="m">4278</span>           <span class="m">2480523</span> ns/op          26.42 MB/s        <span class="m">2998</span> B/op       <span class="m">15</span> allocs/op
+BenchmarkStdMapSetGet-4              <span class="m">343</span>          <span class="m">39367319</span> ns/op           3.33 MB/s      <span class="m">298764</span> B/op    <span class="m">65543</span> allocs/op
+// sync.map
+BenchmarkSyncMapSet-4                <span class="m">756</span>          <span class="m">15951363</span> ns/op           4.11 MB/s     <span class="m">3420214</span> B/op   <span class="m">262320</span> allocs/op
+BenchmarkSyncMapGet-4              <span class="m">11826</span>           <span class="m">1010283</span> ns/op          64.87 MB/s        <span class="m">1075</span> B/op       <span class="m">33</span> allocs/op
+BenchmarkSyncMapSetGet-4            <span class="m">1910</span>           <span class="m">5507036</span> ns/op          23.80 MB/s     <span class="m">3412764</span> B/op   <span class="m">262213</span> allocs/op
+PASS
+ok      gotest  215.182s 
+</code></pre></td></tr></table>
+</div>
+</div><p>The above tests are for GoCache, BigCache, Map, and sync.Map. The following tests are for the cache libraries developed in this article.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// myCachce
+</span><span class="c1"></span><span class="nx">BenchmarkCacheSet</span><span class="o">-</span><span class="mi">4</span>                 <span class="mi">4371</span>           <span class="mi">2723208</span> <span class="nx">ns</span><span class="o">/</span><span class="nx">op</span>          <span class="mf">24.07</span> <span class="nx">MB</span><span class="o">/</span><span class="nx">s</span>        <span class="mi">1306</span> <span class="nx">B</span><span class="o">/</span><span class="nx">op</span>        <span class="mi">2</span> <span class="nx">allocs</span><span class="o">/</span><span class="nx">op</span>
+<span class="nx">BenchmarkCacheGet</span><span class="o">-</span><span class="mi">4</span>                 <span class="mi">6003</span>           <span class="mi">1884611</span> <span class="nx">ns</span><span class="o">/</span><span class="nx">op</span>          <span class="mf">34.77</span> <span class="nx">MB</span><span class="o">/</span><span class="nx">s</span>         <span class="mi">951</span> <span class="nx">B</span><span class="o">/</span><span class="nx">op</span>        <span class="mi">1</span> <span class="nx">allocs</span><span class="o">/</span><span class="nx">op</span>
+<span class="nx">BenchmarkCacheSetGet</span><span class="o">-</span><span class="mi">4</span>              <span class="mi">2044</span>           <span class="mi">6611759</span> <span class="nx">ns</span><span class="o">/</span><span class="nx">op</span>          <span class="mf">19.82</span> <span class="nx">MB</span><span class="o">/</span><span class="nx">s</span>        <span class="mi">2797</span> <span class="nx">B</span><span class="o">/</span><span class="nx">op</span>        <span class="mi">5</span> <span class="nx">allocs</span><span class="o">/</span><span class="nx">op</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>You can see that memory allocation is almost non-existent, and the speed of operation is one of the best in the above libraries.</p>
+<h2 id="summary">Summary</h2>
+<p>In this article, we have analyzed the problem of using Map as a cache based on other cache libraries, and then we have given the reasons for this problem and proposed a solution; in our cache library, we first use indexes and memory blocks to store cached data, and then we use OS system calls to allocate memory so that our cached data blocks are out of GC control, thus reducing GC frequency and increasing concurrency.</p>
+<p>In fact, not only the cache library, but also in our project when we need to use a large number of data structures with pointers and need to keep references for a long time, we also need to pay attention to the fact that this may cause GC problems and thus bring potential problems to the system.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/go-snowflakeid/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Go language implementation of Snowflake algorithm</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/go-json/">
+            <span class="next-text nav-default">A deep dive into each of the high-performance JSON parsing libraries in Go</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

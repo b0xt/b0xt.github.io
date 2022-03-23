@@ -1,0 +1,930 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>K8s drain command source code reading - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Background I&amp;rsquo;ve written a previous article [&amp;ldquo;Kubernetes in Action - Smooth Node Removal&amp;rdquo;]) about how to remove nodes from a K8s cluster, and today I&amp;rsquo;ll take a look at what the kubectl drain command does and how it does it. kubectl K8s uses cobra as a command line builder (I don&amp;rsquo;t find cobra very useful and the documentation is unclear.) The actual processing logic is in pkg/kubectl/cmd/cmd.go, with a unified" /><meta name="keywords" content="k8s" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/k8s-drain/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="K8s drain command source code reading" />
+<meta property="og:description" content="Background I&rsquo;ve written a previous article [&ldquo;Kubernetes in Action - Smooth Node Removal&rdquo;]) about how to remove nodes from a K8s cluster, and today I&rsquo;ll take a look at what the kubectl drain command does and how it does it. kubectl K8s uses cobra as a command line builder (I don&rsquo;t find cobra very useful and the documentation is unclear.) The actual processing logic is in pkg/kubectl/cmd/cmd.go, with a unified" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/k8s-drain/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-17T13:24:33+08:00" />
+<meta property="article:modified_time" content="2022-01-17T13:24:33+08:00" />
+
+<meta itemprop="name" content="K8s drain command source code reading">
+<meta itemprop="description" content="Background I&rsquo;ve written a previous article [&ldquo;Kubernetes in Action - Smooth Node Removal&rdquo;]) about how to remove nodes from a K8s cluster, and today I&rsquo;ll take a look at what the kubectl drain command does and how it does it. kubectl K8s uses cobra as a command line builder (I don&rsquo;t find cobra very useful and the documentation is unclear.) The actual processing logic is in pkg/kubectl/cmd/cmd.go, with a unified"><meta itemprop="datePublished" content="2022-01-17T13:24:33+08:00" />
+<meta itemprop="dateModified" content="2022-01-17T13:24:33+08:00" />
+<meta itemprop="wordCount" content="1851">
+<meta itemprop="keywords" content="k8s," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="K8s drain command source code reading"/>
+<meta name="twitter:description" content="Background I&rsquo;ve written a previous article [&ldquo;Kubernetes in Action - Smooth Node Removal&rdquo;]) about how to remove nodes from a K8s cluster, and today I&rsquo;ll take a look at what the kubectl drain command does and how it does it. kubectl K8s uses cobra as a command line builder (I don&rsquo;t find cobra very useful and the documentation is unclear.) The actual processing logic is in pkg/kubectl/cmd/cmd.go, with a unified"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">K8s drain command source code reading</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-17 13:24:33 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1851 words </span>
+          <span class="more-meta"> 4 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#background">Background</a></li>
+        <li><a href="#kubectl">kubectl</a></li>
+        <li><a href="#cordon">cordon</a></li>
+        <li><a href="#drain">Drain</a></li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="background">Background</h2>
+<p>I&rsquo;ve written a previous article [&ldquo;Kubernetes in Action - Smooth Node Removal&rdquo;]) about how to remove nodes from a K8s cluster, and today I&rsquo;ll take a look at what the <code>kubectl drain</code> command does and how it does it.</p>
+<h2 id="kubectl">kubectl</h2>
+<p>K8s uses cobra as a command line builder (I don&rsquo;t find cobra very useful and the documentation is unclear.) The actual processing logic is in <code>pkg/kubectl/cmd/cmd.go</code>, with a unified entry point in <code>cmd/kubectl/kubectl.go</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">   <span class="o">...</span>
+<span class="nx">groups</span> <span class="o">:=</span> <span class="nx">templates</span><span class="p">.</span><span class="nx">CommandGroups</span><span class="p">{</span>
+	<span class="p">{</span>
+		<span class="nx">Message</span><span class="p">:</span> <span class="s">&#34;Basic Commands (Beginner):&#34;</span><span class="p">,</span>
+		<span class="o">...</span>
+	<span class="p">},</span>
+	<span class="p">{</span>
+		<span class="nx">Message</span><span class="p">:</span> <span class="s">&#34;Deploy Commands:&#34;</span><span class="p">,</span>
+		<span class="o">...</span>
+	<span class="p">},</span>
+	<span class="p">{</span>
+		<span class="nx">Message</span><span class="p">:</span> <span class="s">&#34;Cluster Management Commands:&#34;</span><span class="p">,</span>
+		<span class="nx">Commands</span><span class="p">:</span> <span class="p">[]</span><span class="o">*</span><span class="nx">cobra</span><span class="p">.</span><span class="nx">Command</span><span class="p">{</span>
+			<span class="nx">certificates</span><span class="p">.</span><span class="nf">NewCmdCertificate</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">ioStreams</span><span class="p">),</span>
+			<span class="nx">clusterinfo</span><span class="p">.</span><span class="nf">NewCmdClusterInfo</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">ioStreams</span><span class="p">),</span>
+			<span class="nx">top</span><span class="p">.</span><span class="nf">NewCmdTop</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">ioStreams</span><span class="p">),</span>
+			<span class="nx">drain</span><span class="p">.</span><span class="nf">NewCmdCordon</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">ioStreams</span><span class="p">),</span>
+			<span class="nx">drain</span><span class="p">.</span><span class="nf">NewCmdUncordon</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">ioStreams</span><span class="p">),</span>
+			<span class="nx">drain</span><span class="p">.</span><span class="nf">NewCmdDrain</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">ioStreams</span><span class="p">),</span>
+			<span class="nx">taint</span><span class="p">.</span><span class="nf">NewCmdTaint</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">ioStreams</span><span class="p">),</span>
+		<span class="p">},</span>
+	<span class="p">},</span>
+   <span class="o">...</span>
+<span class="p">}</span>
+   <span class="nx">groups</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">cmds</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As you can see in the <code>kubectl</code> entry point for all the subcommands, the <code>drain</code> commands we&rsquo;re looking at today are all cluster management commands and contain.</p>
+<ul>
+<li>cordon</li>
+<li>uncordon</li>
+<li>drain</li>
+</ul>
+<h2 id="cordon">cordon</h2>
+<p>Let&rsquo;s start with the <code>cordon</code> command, the purpose of this command is to mark a node as non-schedulable to prevent K8s from scheduling resources to that node while node maintenance is being performed.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">NewCmdCordon</span><span class="p">(</span><span class="nx">f</span> <span class="nx">cmdutil</span><span class="p">.</span><span class="nx">Factory</span><span class="p">,</span> <span class="nx">ioStreams</span> <span class="nx">genericclioptions</span><span class="p">.</span><span class="nx">IOStreams</span><span class="p">)</span> <span class="o">*</span><span class="nx">cobra</span><span class="p">.</span><span class="nx">Command</span> <span class="p">{</span>
+	<span class="nx">o</span> <span class="o">:=</span> <span class="nf">NewDrainCmdOptions</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">ioStreams</span><span class="p">)</span>
+
+	<span class="nx">cmd</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">cobra</span><span class="p">.</span><span class="nx">Command</span><span class="p">{</span>
+		<span class="nx">Use</span><span class="p">:</span>                   <span class="s">&#34;cordon NODE&#34;</span><span class="p">,</span>
+		<span class="nx">DisableFlagsInUseLine</span><span class="p">:</span> <span class="kc">true</span><span class="p">,</span>
+		<span class="nx">Short</span><span class="p">:</span>                 <span class="nx">i18n</span><span class="p">.</span><span class="nf">T</span><span class="p">(</span><span class="s">&#34;Mark node as unschedulable&#34;</span><span class="p">),</span>
+		<span class="nx">Long</span><span class="p">:</span>                  <span class="nx">cordonLong</span><span class="p">,</span>
+		<span class="nx">Example</span><span class="p">:</span>               <span class="nx">cordonExample</span><span class="p">,</span>
+		<span class="nx">Run</span><span class="p">:</span> <span class="kd">func</span><span class="p">(</span><span class="nx">cmd</span> <span class="o">*</span><span class="nx">cobra</span><span class="p">.</span><span class="nx">Command</span><span class="p">,</span> <span class="nx">args</span> <span class="p">[]</span><span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">cmdutil</span><span class="p">.</span><span class="nf">CheckErr</span><span class="p">(</span><span class="nx">o</span><span class="p">.</span><span class="nf">Complete</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">cmd</span><span class="p">,</span> <span class="nx">args</span><span class="p">))</span>
+			<span class="nx">cmdutil</span><span class="p">.</span><span class="nf">CheckErr</span><span class="p">(</span><span class="nx">o</span><span class="p">.</span><span class="nf">RunCordonOrUncordon</span><span class="p">(</span><span class="kc">true</span><span class="p">))</span>
+		<span class="p">},</span>
+	<span class="p">}</span>
+	<span class="nx">cmd</span><span class="p">.</span><span class="nf">Flags</span><span class="p">().</span><span class="nf">StringVarP</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">o</span><span class="p">.</span><span class="nx">drainer</span><span class="p">.</span><span class="nx">Selector</span><span class="p">,</span> <span class="s">&#34;selector&#34;</span><span class="p">,</span> <span class="s">&#34;l&#34;</span><span class="p">,</span> <span class="nx">o</span><span class="p">.</span><span class="nx">drainer</span><span class="p">.</span><span class="nx">Selector</span><span class="p">,</span> <span class="s">&#34;Selector (label query) to filter on&#34;</span><span class="p">)</span>
+	<span class="nx">cmdutil</span><span class="p">.</span><span class="nf">AddDryRunFlag</span><span class="p">(</span><span class="nx">cmd</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">cmd</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Looking directly at the contents of <code>Run</code>, ignoring <code>cmdutil.CheckErr</code> for the moment, two main methods are executed here: <code>o.Complete</code> and <code>o.RunCordonOrUncordon</code>. The fundamental purpose of <code>kubectl</code> is to send the corresponding HTTP request to the APIServer, and <code>kubectl</code> implements a layer of encapsulation through <code>Builder</code> and <code>Visitor</code>, making the implementation of each subcommand uniform and concise. consistent and concise.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Builder provides convenience functions for taking arguments and parameters
+</span><span class="c1">// from the command line and converting them to a list of resources to iterate
+</span><span class="c1">// over using the Visitor interface.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Builder</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+<span class="c1">// Visitor lets clients walk a list of resources.
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Visitor</span> <span class="kd">interface</span> <span class="p">{</span>
+	<span class="nf">Visit</span><span class="p">(</span><span class="nx">VisitorFunc</span><span class="p">)</span> <span class="kt">error</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The corresponding <code>builder</code> is constructed in <code>o.Complete</code> :</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="o">...</span>
+    <span class="c1">// 根据命令行参数构建 builder 实例
+</span><span class="c1"></span>	<span class="nx">builder</span> <span class="o">:=</span> <span class="nx">f</span><span class="p">.</span><span class="nf">NewBuilder</span><span class="p">().</span>
+		<span class="nf">WithScheme</span><span class="p">(</span><span class="nx">scheme</span><span class="p">.</span><span class="nx">Scheme</span><span class="p">,</span> <span class="nx">scheme</span><span class="p">.</span><span class="nx">Scheme</span><span class="p">.</span><span class="nf">PrioritizedVersionsAllGroups</span><span class="p">()</span><span class="o">...</span><span class="p">).</span>
+		<span class="nf">NamespaceParam</span><span class="p">(</span><span class="nx">o</span><span class="p">.</span><span class="nx">Namespace</span><span class="p">).</span><span class="nf">DefaultNamespace</span><span class="p">().</span>
+		<span class="nf">ResourceNames</span><span class="p">(</span><span class="s">&#34;nodes&#34;</span><span class="p">,</span> <span class="nx">args</span><span class="o">...</span><span class="p">).</span>
+		<span class="nf">SingleResourceType</span><span class="p">().</span>
+		<span class="nf">Flatten</span><span class="p">()</span>
+
+	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">o</span><span class="p">.</span><span class="nx">drainer</span><span class="p">.</span><span class="nx">Selector</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">builder</span> <span class="p">=</span> <span class="nx">builder</span><span class="p">.</span><span class="nf">LabelSelectorParam</span><span class="p">(</span><span class="nx">o</span><span class="p">.</span><span class="nx">drainer</span><span class="p">.</span><span class="nx">Selector</span><span class="p">).</span>
+			<span class="nf">ResourceTypes</span><span class="p">(</span><span class="s">&#34;nodes&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+    <span class="c1">// builder.Do 返回带有 Visitor 的 Result 对象
+</span><span class="c1"></span>    <span class="nx">r</span> <span class="o">:=</span> <span class="nx">builder</span><span class="p">.</span><span class="nf">Do</span><span class="p">()</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>See what <code>builder.Do()</code> does next to return the Result type resource.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">Builder</span><span class="p">)</span> <span class="nf">Do</span><span class="p">()</span> <span class="o">*</span><span class="nx">Result</span> <span class="p">{</span>
+    <span class="c1">// 调用 visitorResult 返回 Result 类型
+</span><span class="c1"></span>	<span class="nx">r</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nf">visitorResult</span><span class="p">()</span>
+    <span class="o">...</span>
+	<span class="k">return</span> <span class="nx">r</span>
+<span class="p">}</span>
+<span class="o">...</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">Builder</span><span class="p">)</span> <span class="nf">visitorResult</span><span class="p">()</span> <span class="o">*</span><span class="nx">Result</span> <span class="p">{</span>
+    <span class="o">...</span>
+	<span class="c1">// 跳过其他步骤，直接看最简单的通过 Name 来获取 Result
+</span><span class="c1"></span>	<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">names</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">b</span><span class="p">.</span><span class="nf">visitByName</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+<span class="o">...</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">b</span> <span class="o">*</span><span class="nx">Builder</span><span class="p">)</span> <span class="nf">visitByName</span><span class="p">()</span> <span class="o">*</span><span class="nx">Result</span> <span class="p">{</span>
+    <span class="c1">// 声明 Result 对象
+</span><span class="c1"></span>	<span class="nx">result</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Result</span><span class="p">{</span>
+		<span class="nx">singleItemImplied</span><span class="p">:</span>  <span class="nb">len</span><span class="p">(</span><span class="nx">b</span><span class="p">.</span><span class="nx">names</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span><span class="p">,</span>
+		<span class="nx">targetsSingleItems</span><span class="p">:</span> <span class="kc">true</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+    <span class="c1">// 获取 K8s client
+</span><span class="c1"></span>	<span class="nx">client</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">b</span><span class="p">.</span><span class="nf">getClient</span><span class="p">(</span><span class="nx">mapping</span><span class="p">.</span><span class="nx">GroupVersionKind</span><span class="p">.</span><span class="nf">GroupVersion</span><span class="p">())</span>
+	<span class="o">...</span>
+	<span class="nx">visitors</span> <span class="o">:=</span> <span class="p">[]</span><span class="nx">Visitor</span><span class="p">{}</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">name</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">b</span><span class="p">.</span><span class="nx">names</span> <span class="p">{</span>
+		<span class="nx">info</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Info</span><span class="p">{</span>
+			<span class="nx">Client</span><span class="p">:</span>    <span class="nx">client</span><span class="p">,</span>
+			<span class="nx">Mapping</span><span class="p">:</span>   <span class="nx">mapping</span><span class="p">,</span>
+			<span class="nx">Namespace</span><span class="p">:</span> <span class="nx">selectorNamespace</span><span class="p">,</span>
+			<span class="nx">Name</span><span class="p">:</span>      <span class="nx">name</span><span class="p">,</span>
+			<span class="nx">Export</span><span class="p">:</span>    <span class="nx">b</span><span class="p">.</span><span class="nx">export</span><span class="p">,</span>
+		<span class="p">}</span>
+		<span class="nx">visitors</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">visitors</span><span class="p">,</span> <span class="nx">info</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// VisitorList 也实现了 Visit 接口，遍历执行 Visitor 的 Visit 方法
+</span><span class="c1"></span>	<span class="nx">result</span><span class="p">.</span><span class="nx">visitor</span> <span class="p">=</span> <span class="nf">VisitorList</span><span class="p">(</span><span class="nx">visitors</span><span class="p">)</span>
+	<span class="nx">result</span><span class="p">.</span><span class="nx">sources</span> <span class="p">=</span> <span class="nx">visitors</span>
+	<span class="k">return</span> <span class="nx">result</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Having seen how to get an object of type Result, let&rsquo;s look at how <code>o.Complete</code> handles it, passing in a VisitorFunc, the visitors of Result all implement the <code>Visit</code> interface, the role of the <code>Visit</code> interface is to receive the <code>VisitorFunc</code> and execute it. The role of the <code>Visit</code> interface is to receive the <code>VisitorFunc</code> and execute it.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="k">return</span> <span class="nx">r</span><span class="p">.</span><span class="nf">Visit</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">info</span> <span class="o">*</span><span class="nx">resource</span><span class="p">.</span><span class="nx">Info</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+		<span class="o">...</span>
+    <span class="p">})</span>
+<span class="o">...</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">v</span> <span class="nx">DecoratedVisitor</span><span class="p">)</span> <span class="nf">Visit</span><span class="p">(</span><span class="nx">fn</span> <span class="nx">VisitorFunc</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="nx">v</span><span class="p">.</span><span class="nx">visitor</span><span class="p">.</span><span class="nf">Visit</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">info</span> <span class="o">*</span><span class="nx">Info</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+        <span class="o">...</span>
+		<span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">v</span><span class="p">.</span><span class="nx">decorators</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">v</span><span class="p">.</span><span class="nx">decorators</span><span class="p">[</span><span class="nx">i</span><span class="p">](</span><span class="nx">info</span><span class="p">,</span> <span class="kc">nil</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="k">return</span> <span class="nx">err</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="k">return</span> <span class="nf">fn</span><span class="p">(</span><span class="nx">info</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+	<span class="p">})</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Next, see what <code>o.RunCordonOrUncordon</code> does.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">o</span> <span class="o">*</span><span class="nx">DrainCmdOptions</span><span class="p">)</span> <span class="nf">RunCordonOrUncordon</span><span class="p">(</span><span class="nx">desired</span> <span class="kt">bool</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">cordonOrUncordon</span> <span class="o">:=</span> <span class="s">&#34;cordon&#34;</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">desired</span> <span class="p">{</span>
+		<span class="nx">cordonOrUncordon</span> <span class="p">=</span> <span class="s">&#34;un&#34;</span> <span class="o">+</span> <span class="nx">cordonOrUncordon</span>
+	<span class="p">}</span>
+    <span class="c1">// 通过 Visit 获取到的 nodeInfos 列表
+</span><span class="c1"></span>	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">nodeInfo</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">o</span><span class="p">.</span><span class="nx">nodeInfos</span> <span class="p">{</span>
+        <span class="o">...</span>
+		<span class="nx">gvk</span> <span class="o">:=</span> <span class="nx">nodeInfo</span><span class="p">.</span><span class="nf">ResourceMapping</span><span class="p">().</span><span class="nx">GroupVersionKind</span>
+		<span class="k">if</span> <span class="nx">gvk</span><span class="p">.</span><span class="nx">Kind</span> <span class="o">==</span> <span class="s">&#34;Node&#34;</span> <span class="p">{</span>
+			<span class="nx">c</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">drain</span><span class="p">.</span><span class="nf">NewCordonHelperFromRuntimeObject</span><span class="p">(</span><span class="nx">nodeInfo</span><span class="p">.</span><span class="nx">Object</span><span class="p">,</span> <span class="nx">scheme</span><span class="p">.</span><span class="nx">Scheme</span><span class="p">,</span> <span class="nx">gvk</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">updateRequired</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">UpdateIfRequired</span><span class="p">(</span><span class="nx">desired</span><span class="p">);</span> <span class="p">!</span><span class="nx">updateRequired</span> <span class="p">{</span>
+				<span class="o">...</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="k">if</span> <span class="nx">o</span><span class="p">.</span><span class="nx">drainer</span><span class="p">.</span><span class="nx">DryRunStrategy</span> <span class="o">!=</span> <span class="nx">cmdutil</span><span class="p">.</span><span class="nx">DryRunClient</span> <span class="p">{</span>
+                    <span class="o">...</span>
+                    <span class="c1">// 修改对应节点的配置
+</span><span class="c1"></span>					<span class="nx">err</span><span class="p">,</span> <span class="nx">patchErr</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">PatchOrReplace</span><span class="p">(</span><span class="nx">o</span><span class="p">.</span><span class="nx">drainer</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">o</span><span class="p">.</span><span class="nx">drainer</span><span class="p">.</span><span class="nx">DryRunStrategy</span> <span class="o">==</span> <span class="nx">cmdutil</span><span class="p">.</span><span class="nx">DryRunServer</span><span class="p">)</span>
+					<span class="o">...</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+        <span class="p">}</span>
+        <span class="o">...</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+<span class="o">...</span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">CordonHelper</span><span class="p">)</span> <span class="nf">PatchOrReplace</span><span class="p">(</span><span class="nx">clientset</span> <span class="nx">kubernetes</span><span class="p">.</span><span class="nx">Interface</span><span class="p">,</span> <span class="nx">serverDryRun</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">(</span><span class="kt">error</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">client</span> <span class="o">:=</span> <span class="nx">clientset</span><span class="p">.</span><span class="nf">CoreV1</span><span class="p">().</span><span class="nf">Nodes</span><span class="p">()</span>
+    <span class="nx">oldData</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nf">Marshal</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">node</span><span class="p">)</span>
+    <span class="c1">// 更新 node Spec 的 Unschedulable 字段
+</span><span class="c1"></span>	<span class="nx">c</span><span class="p">.</span><span class="nx">node</span><span class="p">.</span><span class="nx">Spec</span><span class="p">.</span><span class="nx">Unschedulable</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">desired</span>
+	<span class="nx">newData</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">json</span><span class="p">.</span><span class="nf">Marshal</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">node</span><span class="p">)</span>
+    <span class="c1">// merge 数据，通过 diff 然后获取
+</span><span class="c1"></span>	<span class="nx">patchBytes</span><span class="p">,</span> <span class="nx">patchErr</span> <span class="o">:=</span> <span class="nx">strategicpatch</span><span class="p">.</span><span class="nf">CreateTwoWayMergePatch</span><span class="p">(</span><span class="nx">oldData</span><span class="p">,</span> <span class="nx">newData</span><span class="p">,</span> <span class="nx">c</span><span class="p">.</span><span class="nx">node</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">patchErr</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="o">...</span>
+		<span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Patch</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">(),</span> <span class="nx">c</span><span class="p">.</span><span class="nx">node</span><span class="p">.</span><span class="nx">Name</span><span class="p">,</span> <span class="nx">types</span><span class="p">.</span><span class="nx">StrategicMergePatchType</span><span class="p">,</span> <span class="nx">patchBytes</span><span class="p">,</span> <span class="nx">patchOptions</span><span class="p">)</span>
+	<span class="p">}</span> 
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="drain">Drain</h2>
+<p>After Cordon, on to Drain.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">NewCmdDrain</span><span class="p">(</span><span class="nx">f</span> <span class="nx">cmdutil</span><span class="p">.</span><span class="nx">Factory</span><span class="p">,</span> <span class="nx">ioStreams</span> <span class="nx">genericclioptions</span><span class="p">.</span><span class="nx">IOStreams</span><span class="p">)</span> <span class="o">*</span><span class="nx">cobra</span><span class="p">.</span><span class="nx">Command</span> <span class="p">{</span>
+    <span class="o">...</span>
+	<span class="nx">cmd</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">cobra</span><span class="p">.</span><span class="nx">Command</span><span class="p">{</span>
+		<span class="o">...</span>
+		<span class="nx">Run</span><span class="p">:</span> <span class="kd">func</span><span class="p">(</span><span class="nx">cmd</span> <span class="o">*</span><span class="nx">cobra</span><span class="p">.</span><span class="nx">Command</span><span class="p">,</span> <span class="nx">args</span> <span class="p">[]</span><span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">cmdutil</span><span class="p">.</span><span class="nf">CheckErr</span><span class="p">(</span><span class="nx">o</span><span class="p">.</span><span class="nf">Complete</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">cmd</span><span class="p">,</span> <span class="nx">args</span><span class="p">))</span>
+			<span class="nx">cmdutil</span><span class="p">.</span><span class="nf">CheckErr</span><span class="p">(</span><span class="nx">o</span><span class="p">.</span><span class="nf">RunDrain</span><span class="p">())</span>
+		<span class="p">},</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Looking directly at <code>o.RunDrain</code>, the first thing we see is the execution of <code>o.RunCordonOrUncordon</code>, which marks the node as undispatchable, so the blog I wrote earlier is actually incorrect, if you want to take the node offline, then just execute <code>kubectl drain</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">o</span> <span class="o">*</span><span class="nx">DrainCmdOptions</span><span class="p">)</span> <span class="nf">RunDrain</span><span class="p">()</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">o</span><span class="p">.</span><span class="nf">RunCordonOrUncordon</span><span class="p">(</span><span class="kc">true</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="nx">err</span>
+	<span class="p">}</span>
+    <span class="o">...</span>
+	<span class="nx">drainedNodes</span> <span class="o">:=</span> <span class="nx">sets</span><span class="p">.</span><span class="nf">NewString</span><span class="p">()</span>
+	<span class="kd">var</span> <span class="nx">fatal</span> <span class="kt">error</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">info</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">o</span><span class="p">.</span><span class="nx">nodeInfos</span> <span class="p">{</span>
+        <span class="c1">// 驱逐 Pod
+</span><span class="c1"></span>		<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">o</span><span class="p">.</span><span class="nf">deleteOrEvictPodsSimple</span><span class="p">(</span><span class="nx">info</span><span class="p">);</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">drainedNodes</span><span class="p">.</span><span class="nf">Insert</span><span class="p">(</span><span class="nx">info</span><span class="p">.</span><span class="nx">Name</span><span class="p">)</span>
+			<span class="nf">printObj</span><span class="p">(</span><span class="nx">info</span><span class="p">.</span><span class="nx">Object</span><span class="p">,</span> <span class="nx">o</span><span class="p">.</span><span class="nx">Out</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="c1">// 如果驱逐 Pod 失败，则显示对应的 Node 信息
+</span><span class="c1"></span>			<span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">remainingNodes</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nx">fmt</span><span class="p">.</span><span class="nf">Fprintf</span><span class="p">(</span><span class="nx">o</span><span class="p">.</span><span class="nx">ErrOut</span><span class="p">,</span> <span class="s">&#34;There are pending nodes to be drained:\n&#34;</span><span class="p">)</span>
+				<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">nodeName</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">remainingNodes</span> <span class="p">{</span>
+					<span class="nx">fmt</span><span class="p">.</span><span class="nf">Fprintf</span><span class="p">(</span><span class="nx">o</span><span class="p">.</span><span class="nx">ErrOut</span><span class="p">,</span> <span class="s">&#34; %s\n&#34;</span><span class="p">,</span> <span class="nx">nodeName</span><span class="p">)</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In <code>deleteOrEvictPodsSimple</code>, the corresponding Pod information is first obtained by Node name, and then the eviction action is performed.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">o</span> <span class="o">*</span><span class="nx">DrainCmdOptions</span><span class="p">)</span> <span class="nf">deleteOrEvictPodsSimple</span><span class="p">(</span><span class="nx">nodeInfo</span> <span class="o">*</span><span class="nx">resource</span><span class="p">.</span><span class="nx">Info</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">list</span><span class="p">,</span> <span class="nx">errs</span> <span class="o">:=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">drainer</span><span class="p">.</span><span class="nf">GetPodsForDeletion</span><span class="p">(</span><span class="nx">nodeInfo</span><span class="p">.</span><span class="nx">Name</span><span class="p">)</span>
+    <span class="o">...</span>
+	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">o</span><span class="p">.</span><span class="nx">drainer</span><span class="p">.</span><span class="nf">DeleteOrEvictPods</span><span class="p">(</span><span class="nx">list</span><span class="p">.</span><span class="nf">Pods</span><span class="p">());</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="o">...</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Here <code>GetPodsForDeletion</code> performs a filter that contains filters for the following scenarios, it should be noted that the filtering scenarios here are in a strict order.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">Helper</span><span class="p">)</span> <span class="nf">makeFilters</span><span class="p">()</span> <span class="p">[]</span><span class="nx">podFilter</span> <span class="p">{</span>
+	<span class="k">return</span> <span class="p">[]</span><span class="nx">podFilter</span><span class="p">{</span>
+        <span class="c1">// 被标记删除的 Pod(DeletionTimestamp 不为0)
+</span><span class="c1"></span>        <span class="nx">d</span><span class="p">.</span><span class="nx">skipDeletedFilter</span><span class="p">,</span>
+        <span class="c1">// 属于 DaemonSet 的 Pod
+</span><span class="c1"></span>        <span class="nx">d</span><span class="p">.</span><span class="nx">daemonSetFilter</span><span class="p">,</span>
+        <span class="c1">// mirror pod 其实就是 static pod，
+</span><span class="c1"></span>        <span class="c1">// 是我们在 /etc/kubernetes/manifests/ 中定义的由 kubelet 负责生命周期管理的 Pod
+</span><span class="c1"></span>        <span class="c1">// 在 `Annotations` 中会包含 `kubernetes.io/config.mirror` 
+</span><span class="c1"></span>        <span class="nx">d</span><span class="p">.</span><span class="nx">mirrorPodFilter</span><span class="p">,</span>
+        <span class="c1">// 包含本地存储的 Pod，Pod 中的 Volume 字段不为空
+</span><span class="c1"></span>        <span class="nx">d</span><span class="p">.</span><span class="nx">localStorageFilter</span><span class="p">,</span>
+        <span class="c1">// 不属于 replicate 的 pod，`Controlled By` 不为空的 pod
+</span><span class="c1"></span>		<span class="nx">d</span><span class="p">.</span><span class="nx">unreplicatedFilter</span><span class="p">,</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Once the filtered list of Pods is obtained, the eviction action is performed, starting with a goroutine for each Pod, and waiting until the Pod eviction is complete.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">Helper</span><span class="p">)</span> <span class="nf">evictPods</span><span class="p">(</span><span class="nx">pods</span> <span class="p">[]</span><span class="nx">corev1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">,</span> <span class="nx">policyGroupVersion</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">getPodFn</span> <span class="kd">func</span><span class="p">(</span><span class="nx">namespace</span><span class="p">,</span> <span class="nx">name</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">corev1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">,</span> <span class="kt">error</span><span class="p">))</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">returnCh</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">error</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="o">...</span>
+	<span class="nx">ctx</span><span class="p">,</span> <span class="nx">cancel</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithTimeout</span><span class="p">(</span><span class="nx">d</span><span class="p">.</span><span class="nf">getContext</span><span class="p">(),</span> <span class="nx">globalTimeout</span><span class="p">)</span>
+	<span class="k">defer</span> <span class="nf">cancel</span><span class="p">()</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">pod</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">pods</span> <span class="p">{</span>
+		<span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">pod</span> <span class="nx">corev1</span><span class="p">.</span><span class="nx">Pod</span><span class="p">,</span> <span class="nx">returnCh</span> <span class="kd">chan</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">for</span> <span class="p">{</span>
+				<span class="o">...</span>
+				<span class="k">select</span> <span class="p">{</span>
+				<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">ctx</span><span class="p">.</span><span class="nf">Done</span><span class="p">():</span>
+					<span class="c1">// 驱逐超时
+</span><span class="c1"></span>					<span class="nx">returnCh</span> <span class="o">&lt;-</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;error when evicting pod %q: global timeout reached: %v&#34;</span><span class="p">,</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Name</span><span class="p">,</span> <span class="nx">globalTimeout</span><span class="p">)</span>
+					<span class="k">return</span>
+				<span class="k">default</span><span class="p">:</span>
+                <span class="p">}</span>
+                <span class="c1">// 驱逐 Pod 动作，最终执行 d.Client.PolicyV1beta1().Evictions(eviction.Namespace).Evict(eviction)
+</span><span class="c1"></span>				<span class="nx">err</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">EvictPod</span><span class="p">(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">policyGroupVersion</span><span class="p">)</span>
+				<span class="o">...</span>
+			<span class="p">}</span>
+			<span class="o">...</span>
+			<span class="nx">params</span> <span class="o">:=</span> <span class="nx">waitForDeleteParams</span><span class="p">{</span>
+				<span class="o">...</span>
+            <span class="p">}</span>
+            <span class="c1">// 等待驱逐动作完成
+</span><span class="c1"></span>			<span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">waitForDelete</span><span class="p">(</span><span class="nx">params</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nx">returnCh</span> <span class="o">&lt;-</span> <span class="kc">nil</span>
+			<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+				<span class="nx">returnCh</span> <span class="o">&lt;-</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Errorf</span><span class="p">(</span><span class="s">&#34;error when waiting for pod %q terminating: %v&#34;</span><span class="p">,</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Name</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+			<span class="p">}</span>
+		<span class="p">}(</span><span class="nx">pod</span><span class="p">,</span> <span class="nx">returnCh</span><span class="p">)</span>
+    <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>waitForDelete</code> will pass <code>ConditionFunc</code> into the <code>WaitFor</code> loop if it does not complete immediately, where <code>ConditionFunc</code> detects that a Pod exists and the ObjectMeta UID has changed.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">WaitFor</span><span class="p">(</span><span class="nx">wait</span> <span class="nx">WaitFunc</span><span class="p">,</span> <span class="nx">fn</span> <span class="nx">ConditionFunc</span><span class="p">,</span> <span class="nx">done</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span> <span class="kt">error</span> <span class="p">{</span>
+	<span class="nx">stopCh</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+	<span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">stopCh</span><span class="p">)</span>
+	<span class="nx">c</span> <span class="o">:=</span> <span class="nf">wait</span><span class="p">(</span><span class="nx">stopCh</span><span class="p">)</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">select</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">open</span> <span class="o">:=</span> <span class="o">&lt;-</span><span class="nx">c</span><span class="p">:</span>
+			<span class="nx">ok</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">runConditionWithCrashProtection</span><span class="p">(</span><span class="nx">fn</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="k">return</span> <span class="nx">err</span>
+			<span class="p">}</span>
+			<span class="k">if</span> <span class="nx">ok</span> <span class="p">{</span>
+				<span class="k">return</span> <span class="kc">nil</span>
+			<span class="p">}</span>
+			<span class="k">if</span> <span class="p">!</span><span class="nx">open</span> <span class="p">{</span>
+				<span class="k">return</span> <span class="nx">ErrWaitTimeout</span>
+			<span class="p">}</span>
+		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">done</span><span class="p">:</span>
+			<span class="k">return</span> <span class="nx">ErrWaitTimeout</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="summary">Summary</h2>
+<p>The implementation of the <code>kubectl drain</code> command is very simple, with no particularly complex logic. An important reason why K8s is able to do this is that all actions are declarative, and there is no need to actively do something dirty after declaring and waiting for execution to complete. In the case of Pod eviction, not all Pods will be evicted to other nodes, so extra care needs to be taken to check if there are simply Pod resources still running on the node before it goes offline, or if there are any Pods using local storage, or similar.</p>
+<p>I&rsquo;ve seen this combination of design patterns for a while now, and I&rsquo;m looking for a chance to re-learn them.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/k8s/">k8s</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/raft-vip/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Implementing VIP functionality with Raft</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/how-fsck-works/">
+            <span class="next-text nav-default">How fsck works</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

@@ -1,0 +1,779 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Shopee ClickHouse Cold and hot data separation storage architecture and practice - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Shopee ClickHouse is a highly available distributed analytical database based on the open source database ClickHouse for secondary development and architectural evolution. This article will focus on Shopee ClickHouse&amp;rsquo;s hot and cold storage architecture and the practices that support the company&amp;rsquo;s business.
+Shopee ClickHouse&amp;rsquo;s hot and cold storage architecture uses JuiceFS clients to mount remote object storage to the local machine path, and uses remote object storage as if it were multi-volume storage by writing ClickHouse storage policies." /><meta name="keywords" content="Shopee ClickHous, Hot and Cold Data" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2021-10/shopee-clickhouse-hot-and-cold-data/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Shopee ClickHouse Cold and hot data separation storage architecture and practice" />
+<meta property="og:description" content="Shopee ClickHouse is a highly available distributed analytical database based on the open source database ClickHouse for secondary development and architectural evolution. This article will focus on Shopee ClickHouse&rsquo;s hot and cold storage architecture and the practices that support the company&rsquo;s business.
+Shopee ClickHouse&rsquo;s hot and cold storage architecture uses JuiceFS clients to mount remote object storage to the local machine path, and uses remote object storage as if it were multi-volume storage by writing ClickHouse storage policies." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2021-10/shopee-clickhouse-hot-and-cold-data/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-10-17T10:31:52+08:00" />
+<meta property="article:modified_time" content="2021-10-17T10:31:52+08:00" />
+
+<meta itemprop="name" content="Shopee ClickHouse Cold and hot data separation storage architecture and practice">
+<meta itemprop="description" content="Shopee ClickHouse is a highly available distributed analytical database based on the open source database ClickHouse for secondary development and architectural evolution. This article will focus on Shopee ClickHouse&rsquo;s hot and cold storage architecture and the practices that support the company&rsquo;s business.
+Shopee ClickHouse&rsquo;s hot and cold storage architecture uses JuiceFS clients to mount remote object storage to the local machine path, and uses remote object storage as if it were multi-volume storage by writing ClickHouse storage policies."><meta itemprop="datePublished" content="2021-10-17T10:31:52+08:00" />
+<meta itemprop="dateModified" content="2021-10-17T10:31:52+08:00" />
+<meta itemprop="wordCount" content="3678">
+<meta itemprop="keywords" content="shopee clickhous," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Shopee ClickHouse Cold and hot data separation storage architecture and practice"/>
+<meta name="twitter:description" content="Shopee ClickHouse is a highly available distributed analytical database based on the open source database ClickHouse for secondary development and architectural evolution. This article will focus on Shopee ClickHouse&rsquo;s hot and cold storage architecture and the practices that support the company&rsquo;s business.
+Shopee ClickHouse&rsquo;s hot and cold storage architecture uses JuiceFS clients to mount remote object storage to the local machine path, and uses remote object storage as if it were multi-volume storage by writing ClickHouse storage policies."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Shopee ClickHouse Cold and hot data separation storage architecture and practice</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-10-17 10:31:52 </span>
+        <div class="post-category">
+            <a href="/categories/skills/"> skills </a>
+            </div>
+          <span class="more-meta"> 3678 words </span>
+          <span class="more-meta"> 18 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#shopee-clickhouse-cluster-general-architecture">Shopee ClickHouse Cluster General Architecture</a></li>
+        <li><a href="#hot-and-cold-storage-architecture-solutions">Hot and cold storage architecture solutions</a>
+          <ul>
+            <li><a href="#cold-storage-media-selection-and-juicefs">Cold storage media selection and JuiceFS</a></li>
+            <li><a href="#implementation-of-hot-and-cold-data-storage-separation">Implementation of hot and cold data storage separation</a></li>
+          </ul>
+        </li>
+        <li><a href="#practice-sharing">Practice Sharing</a>
+          <ul>
+            <li><a href="#redis-memory-growth-exception">Redis Memory Growth Exception</a></li>
+            <li><a href="#juicefs-readwrite-s3-failure">JuiceFS Read/Write S3 Failure</a></li>
+            <li><a href="#clickhouse-server-failed-to-start">clickhouse-server failed to start</a></li>
+            <li><a href="#suspicious_broken_parts">suspicious_broken_parts</a></li>
+          </ul>
+        </li>
+        <li><a href="#hot-and-cold-storage-architecture-benefits-in-a-nutshell">Hot and Cold Storage Architecture Benefits in a Nutshell</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Shopee ClickHouse is a highly available distributed analytical database based on the open source database ClickHouse for secondary development and architectural evolution. This article will focus on Shopee ClickHouse&rsquo;s hot and cold storage architecture and the practices that support the company&rsquo;s business.</p>
+<p>Shopee ClickHouse&rsquo;s hot and cold storage architecture uses JuiceFS clients to mount remote object storage to the local machine path, and uses remote object storage as if it were multi-volume storage by writing ClickHouse storage policies. Because we use the same ClickHouse DB cluster to support the business of multiple teams, the hot and cold division of data between different teams and even different businesses of the same team may have different benchmarks, so when doing hot and cold separation policy needs to be done at the table level of ClickHouse.</p>
+<p>In order to achieve hot and cold separation at the table level, we modify the storage policy of tables according to the storage policy edited in advance for the stock of business tables that need to do hot and cold separation. For new business tables that require hot/cold separation, we specify a storage policy that supports data on remote storage when building the tables, and then determine whether the data should be on the local or remote side by refining the TTL expressions.</p>
+<p>After the hot and cold storage architecture went live, we encountered some problems and challenges, such as juicefs object request error, Redis memory growth exceptions, suspicious broken parts, and so on. This article will address some of these issues, contextualize the scenarios, and provide solutions through source code analysis.</p>
+<p>In general, the overall design idea of Shopee ClickHouse hot and cold storage architecture is: local SSD storage for hot data queries and remote storage for less frequently queried data, thus saving storage costs and supporting more data storage needs.</p>
+<h2 id="shopee-clickhouse-cluster-general-architecture">Shopee ClickHouse Cluster General Architecture</h2>
+<p>ClickHouse is an open source OLAP (On-Line Analytic Query) type database that implements a vectorized execution engine with excellent AP query performance. shopee ClickHouse is an analytic database that continues to do second iteration development and product architecture evolution based on ClickHouse.</p>
+<p>The following diagram shows the architecture of the Shopee ClickHouse DB cluster.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/10/17/00bc381811be4a3d819b37876158a2ed.png" alt=""></p>
+<p>From top to bottom is the user request intervention SLB, Proxy layer, ClickHouse DB cluster layer, and at the bottom is the remote object storage, here we use S3 provided by the Shopee STO team.</p>
+<p>Among them, <strong>SLB provides user request routing</strong>; <strong>Proxy layer provides query routing</strong>, requests will be routed to the corresponding cluster based on the cluster name in the user connection string, also provides the ability to partially write balance and query routing; <strong>ClickHouse DB cluster layer is composed of Shopee ClickHouse database distributed clusters</strong> , currently there are compute distributed clusters with SSD disks as the hot data storage medium, and compute single node clusters, and storage distributed clusters with SATA Disk as the storage medium; <strong>the bottom remote storage is used as the cold data storage medium</strong> .</p>
+<h2 id="hot-and-cold-storage-architecture-solutions">Hot and cold storage architecture solutions</h2>
+<p>Users want to store more and longer data and query faster. But usually the more data is stored, the higher the return latency for the same query conditions.</p>
+<p>In terms of resource utilization, we wanted the data stored on Shopee ClickHouse to be more accessible and available to provide broader support to the business. So, initially we required that the data stored in the Shopee ClickHouse database by the business side be the user&rsquo;s business hot data.</p>
+<p>But this also brought some problems, for example: users sometimes need to query a relatively long time data for analysis, so you have to import that part of the data that is not in ClickHouse and then do the analysis, and then delete this part of the data after the analysis. Another example: some of the business through the log service to do aggregate analysis and retrieval analysis, but also need a relatively long time log service data to help supervise and analyze the daily business.</p>
+<p>Based on such requirements, we want to maximize the utilization of resources on the one hand, and support more data storage volume on the other hand, without affecting the query speed of users' hot data, so using <strong>hot and cold data separation storage architecture</strong> is a good choice.</p>
+<p>Typically, the design of a hot and cold separation scheme requires consideration of the following issues.</p>
+<ul>
+<li>How to store cold data?</li>
+<li>How to use cold storage media in an efficient, stable and simple way?</li>
+<li>How can hot data be sunk to cold storage media?</li>
+<li>How to evolve the architecture without affecting the existing user business?</li>
+</ul>
+<p>The choice of cold data storage media is generally analyzed by comparing the following points.</p>
+<ul>
+<li>Cost</li>
+<li>Stability</li>
+<li>Full functionality (data can still be correctly queried during the sinking process and data in the database can be correctly written)</li>
+<li>Performance</li>
+<li>Scalability</li>
+</ul>
+<h3 id="cold-storage-media-selection-and-juicefs">Cold storage media selection and JuiceFS</h3>
+<p>The media that can be used for cold storage are S3, Ozone, HDFS, SATA Disk, where SATA Disk is limited by the machine hardware and not easily scalable, so it can be eliminated first. HDFS, Ozone and S3 are all better cold storage media.</p>
+<p>Meanwhile, to use cold storage media efficiently and simply, we focus on JuiceFS, an open source POSIX file system built on Redis and cloud object storage, which allows us to access remote object storage more easily and efficiently.</p>
+<p>JuiceFS uses existing object stores in the public cloud, such as S3, GCS, OSS, and so on. JuiceFS chooses Redis as the metadata storage engine because Redis storage is in memory, which can meet the low latency and high IOPS of metadata reading and writing, support optimistic transactions, and meet the file system atomicity for metadata operations.</p>
+<p>JuiceFS provides an efficient and convenient way to access remote storage by simply using the <code>format</code> and <code>mount</code> commands to mount the remote storage to the local path through the JuiceFS client. Our ClickHouse database can then be accessed from the remote storage as if it were a local path.</p>
+<p>After choosing JuiceFS, we turn our attention back to the selection of cold data storage media. We designed a benchmark as follows, using ClickHouse TPCH Star Schema Benchmark 1000s (benchmark details can be found in the We designed a benchmark that uses ClickHouse TPCH Star Schema Benchmark 1000s (see the ClickHouse community documentation for details) as test data to test the Insert performance of S3 and Ozone respectively, and the select statement of Star Schema Benchmark to compare the query performance.</p>
+<p>The queried data is in the following three storage states.</p>
+<ul>
+<li>Partly in Ozone/S3 and partly on the local SSD disk.</li>
+<li>All on Ozone/S3.</li>
+<li>All on SSD.</li>
+</ul>
+<p>The following are the results of our test sampling.</p>
+<h4 id="1insert-performance-sampling-results">(1)Insert performance sampling results</h4>
+<p>Insert <strong>Lineorder</strong> table data to Ozone:</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/10/17/11e7dcb13af34146b2ecf426499ac809.png" alt=""></p>
+<p>Insert <strong>Lineorder</strong> table data to S3:</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/10/17/26964aa84c614a0da7492e4252873f25.png" alt=""></p>
+<p>As you can see, <strong>S3&rsquo;s Insert performance is a little stronger</strong>.</p>
+<h4 id="2query-performance-sampling-results">(2)Query performance sampling results</h4>
+<p>According to ClickHouse Star Schema Benchmark, after importing the <strong>Customer, Lineorder, Part, Supplier</strong> tables, you need to create a flattened wide table based on the data from the four tables.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">lineorder_flat</span><span class="w">  
+</span><span class="w"></span><span class="n">ENGINE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">MergeTree</span><span class="w">  
+</span><span class="w"></span><span class="n">PARTITION</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">toYear</span><span class="p">(</span><span class="n">LO_ORDERDATE</span><span class="p">)</span><span class="w">  
+</span><span class="w"></span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="p">(</span><span class="n">LO_ORDERDATE</span><span class="p">,</span><span class="w"> </span><span class="n">LO_ORDERKEY</span><span class="p">)</span><span class="w">  
+</span><span class="w"></span><span class="k">AS</span><span class="w">  
+</span><span class="w"></span><span class="k">SELECT</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_ORDERKEY</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_ORDERKEY</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_LINENUMBER</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_LINENUMBER</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_CUSTKEY</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_CUSTKEY</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_PARTKEY</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_PARTKEY</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_SUPPKEY</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_SUPPKEY</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_ORDERDATE</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_ORDERDATE</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_ORDERPRIORITY</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_ORDERPRIORITY</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_SHIPPRIORITY</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_SHIPPRIORITY</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_QUANTITY</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_QUANTITY</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_EXTENDEDPRICE</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_EXTENDEDPRICE</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_ORDTOTALPRICE</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_ORDTOTALPRICE</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_DISCOUNT</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_DISCOUNT</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_REVENUE</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_REVENUE</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_SUPPLYCOST</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_SUPPLYCOST</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_TAX</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_TAX</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_COMMITDATE</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_COMMITDATE</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">l</span><span class="p">.</span><span class="n">LO_SHIPMODE</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">LO_SHIPMODE</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="k">c</span><span class="p">.</span><span class="n">C_NAME</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">C_NAME</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="k">c</span><span class="p">.</span><span class="n">C_ADDRESS</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">C_ADDRESS</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="k">c</span><span class="p">.</span><span class="n">C_CITY</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">C_CITY</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="k">c</span><span class="p">.</span><span class="n">C_NATION</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">C_NATION</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="k">c</span><span class="p">.</span><span class="n">C_REGION</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">C_REGION</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="k">c</span><span class="p">.</span><span class="n">C_PHONE</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">C_PHONE</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="k">c</span><span class="p">.</span><span class="n">C_MKTSEGMENT</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">C_MKTSEGMENT</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">s</span><span class="p">.</span><span class="n">S_NAME</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">S_NAME</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">s</span><span class="p">.</span><span class="n">S_ADDRESS</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">S_ADDRESS</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">s</span><span class="p">.</span><span class="n">S_CITY</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">S_CITY</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">s</span><span class="p">.</span><span class="n">S_NATION</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">S_NATION</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">s</span><span class="p">.</span><span class="n">S_REGION</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">S_REGION</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">s</span><span class="p">.</span><span class="n">S_PHONE</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">S_PHONE</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">p</span><span class="p">.</span><span class="n">P_NAME</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">P_NAME</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">p</span><span class="p">.</span><span class="n">P_MFGR</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">P_MFGR</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">p</span><span class="p">.</span><span class="n">P_CATEGORY</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">P_CATEGORY</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">p</span><span class="p">.</span><span class="n">P_BRAND</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">P_BRAND</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">p</span><span class="p">.</span><span class="n">P_COLOR</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">P_COLOR</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">p</span><span class="p">.</span><span class="n">P_TYPE</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">P_TYPE</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">p</span><span class="p">.</span><span class="n">P_SIZE</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">P_SIZE</span><span class="p">,</span><span class="w">  
+</span><span class="w"></span><span class="n">p</span><span class="p">.</span><span class="n">P_CONTAINER</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">P_CONTAINER</span><span class="w">  
+</span><span class="w"></span><span class="k">FROM</span><span class="w"> </span><span class="n">lineorder</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">l</span><span class="w">  
+</span><span class="w"></span><span class="k">INNER</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="n">customer</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="k">c</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="k">c</span><span class="p">.</span><span class="n">C_CUSTKEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l</span><span class="p">.</span><span class="n">LO_CUSTKEY</span><span class="w">  
+</span><span class="w"></span><span class="k">INNER</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="n">supplier</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">s</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">s</span><span class="p">.</span><span class="n">S_SUPPKEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l</span><span class="p">.</span><span class="n">LO_SUPPKEY</span><span class="w">  
+</span><span class="w"></span><span class="k">INNER</span><span class="w"> </span><span class="k">JOIN</span><span class="w"> </span><span class="n">part</span><span class="w"> </span><span class="k">AS</span><span class="w"> </span><span class="n">p</span><span class="w"> </span><span class="k">ON</span><span class="w"> </span><span class="n">p</span><span class="p">.</span><span class="n">P_PARTKEY</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">l</span><span class="p">.</span><span class="n">LO_PARTKEY</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>When this SQL statement is executed again, the following Error occurs when the data is all on the Ozone.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">Code: 246. DB::Exception: Received from localhost:9000. DB::Exception: Bad size of marks file &#39;/mnt/jfs/data/tpch1000s_juice/customer/all_19_24_1/C_CUSTKEY.mrk2&#39;: 0, must be: 18480
+</code></pre></td></tr></table>
+</div>
+</div><p>A portion of the Select data is in the Ozone, and a data sink from the SSD disk to the Ozone occurs during this process.</p>
+<p>Result: Hang is stuck and cannot be queried.</p>
+<blockquote>
+<p>When we did this test, we used the community version of Ozone 1.1.0-SNAPSHOT, and the results of this test only show that Ozone 1.1.0-SNAPSHOT is not very suitable for our usage scenario.</p>
+</blockquote>
+<p>Since Ozone 1.1.0-SNAPSHOT has functional shortcomings in our usage scenario, the subsequent Star Schema Benchmark performance test report focuses on SSD and S3 performance comparisons (detailed Query SQL statements are available from the ClickHouse community documentation).</p>
+<table>
+<thead>
+<tr>
+<th>Query No.</th>
+<th>Query Latency Data on JuiceFS</th>
+<th>Query Latency Data on ⅓ JuiceFs + ⅔ SSD</th>
+<th>Query Latency Data on SSD</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Q1.1</td>
+<td>8.884 s</td>
+<td>8.966 s</td>
+<td>1.417 s</td>
+</tr>
+<tr>
+<td>Q1.2</td>
+<td>0.921 s</td>
+<td>0.998 s</td>
+<td>0.313 s</td>
+</tr>
+<tr>
+<td>Q1.3</td>
+<td>0.551 s</td>
+<td>0.611 s</td>
+<td>0.125 s</td>
+</tr>
+<tr>
+<td>Q2.1</td>
+<td>68.148 s</td>
+<td>36.273 s</td>
+<td>5.450 s</td>
+</tr>
+<tr>
+<td>Q2.2</td>
+<td>54.360 s</td>
+<td>20.846 s</td>
+<td>4.557 s</td>
+</tr>
+<tr>
+<td>Q2.3</td>
+<td>55.329 s</td>
+<td>22.152 s</td>
+<td>4.297 s</td>
+</tr>
+<tr>
+<td>Q3.1</td>
+<td>60.796 s</td>
+<td>27.585 s</td>
+<td>7.999 s</td>
+</tr>
+<tr>
+<td>Q3.2</td>
+<td>67.559 s</td>
+<td>29.123 s</td>
+<td>5.928 s</td>
+</tr>
+<tr>
+<td>Q3.3</td>
+<td>45.917 s</td>
+<td>20.682 s</td>
+<td>5.606 s</td>
+</tr>
+<tr>
+<td>Q3.4</td>
+<td>0.675 s</td>
+<td>0.202 s</td>
+<td>0.188 s</td>
+</tr>
+<tr>
+<td>Q4.1</td>
+<td>100.644 s</td>
+<td>41.498 s</td>
+<td>7.019 s</td>
+</tr>
+<tr>
+<td>Q4.2</td>
+<td>32.294 s</td>
+<td>2.952 s</td>
+<td>2.464 s</td>
+</tr>
+<tr>
+<td>Q4.3</td>
+<td>33.667 s</td>
+<td>2.813 s</td>
+<td>2.357 s</td>
+</tr>
+</tbody>
+</table>
+<p>In the end, we chose <strong>S3 as the cold storage medium</strong> after comparing all aspects.</p>
+<p>Therefore, <strong>Cold and hot storage separation solution is implemented by JuiceFS+S3</strong>, and the process is briefly described below.</p>
+<h3 id="implementation-of-hot-and-cold-data-storage-separation">Implementation of hot and cold data storage separation</h3>
+<p>First, we mount the S3 bucket to the local storage path <code>/mnt/jfs</code> by using the JuiceFS client and then edit the ClickHouse storage policy configuration <code>. /config.d/storage.xml</code> file. Be careful when writing the storage policy configuration file not to affect historical user storage (i.e. keep the previous storage policy). Here, <code>default</code> is our historical storage policy and <code>hcs_ck</code> is the hot/cold storage policy.</p>
+<p>For details, you can refer to the following figure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/10/17/0e177d5fb6524c30bb2b4763951320cc.png" alt=""></p>
+<p>For businesses that need to separate hot and cold storage, you just need to write the storage policy as <code>hcs_ck</code> in the table Statement and then control the cold data sink policy through the expression of TTL.</p>
+<p>The following is an example to illustrate the usage and data separation process. Table <strong>hcs_table_name</strong> is a business log data table that needs to separate hot and cold storage, and the following is the table build statement.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="k">CREATE</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">db_name</span><span class="p">.</span><span class="n">hcs_table_name</span><span class="w">  
+</span><span class="w"></span><span class="p">(</span><span class="w">  
+</span><span class="w">    </span><span class="p">.....</span><span class="w">  
+</span><span class="w">    </span><span class="o">`</span><span class="n">log_time</span><span class="o">`</span><span class="w"> </span><span class="n">DateTime64</span><span class="p">(</span><span class="mi">3</span><span class="p">),</span><span class="w">  
+</span><span class="w">    </span><span class="o">`</span><span class="n">log_level</span><span class="o">`</span><span class="w"> </span><span class="n">String</span><span class="p">,</span><span class="w">  
+</span><span class="w">    </span><span class="p">.....</span><span class="w">  
+</span><span class="w">    </span><span class="o">`</span><span class="n">create_time</span><span class="o">`</span><span class="w"> </span><span class="n">DateTime</span><span class="w"> </span><span class="k">DEFAULT</span><span class="w"> </span><span class="n">now</span><span class="p">()</span><span class="w">  
+</span><span class="w"></span><span class="p">)</span><span class="w">  
+</span><span class="w"></span><span class="n">ENGINE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ReplicatedMergeTree</span><span class="p">(</span><span class="s1">&#39;/clickhouse/tables/{layer}-{shard}/db_name.hcs_table_name  
+</span><span class="s1">&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;{replica}&#39;</span><span class="p">)</span><span class="w">  
+</span><span class="w"></span><span class="n">PARTITION</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="n">toYYYYMMDD</span><span class="p">(</span><span class="n">log_time</span><span class="p">)</span><span class="w">  
+</span><span class="w"></span><span class="k">ORDER</span><span class="w"> </span><span class="k">BY</span><span class="w"> </span><span class="p">(</span><span class="n">ugi</span><span class="p">,</span><span class="w"> </span><span class="n">ip</span><span class="p">)</span><span class="w">  
+</span><span class="w"></span><span class="n">TTL</span><span class="w"> </span><span class="n">toDateTime</span><span class="p">(</span><span class="n">log_time</span><span class="p">)</span><span class="w"> </span><span class="k">TO</span><span class="w"> </span><span class="n">VOLUME</span><span class="w"> </span><span class="s1">&#39;v_ssd&#39;</span><span class="p">,</span><span class="w">  
+</span><span class="w">        </span><span class="n">toDateTime</span><span class="p">(</span><span class="n">log_time</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">toIntervalDay</span><span class="p">(</span><span class="mi">7</span><span class="p">)</span><span class="w"> </span><span class="k">TO</span><span class="w"> </span><span class="n">VOLUME</span><span class="w"> </span><span class="s1">&#39;v_cold&#39;</span><span class="p">,</span><span class="w">  
+</span><span class="w">        </span><span class="n">toDateTime</span><span class="p">(</span><span class="n">log_time</span><span class="p">)</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">toIntervalDay</span><span class="p">(</span><span class="mi">14</span><span class="p">)</span><span class="w">  
+</span><span class="w"></span><span class="n">SETTINGS</span><span class="w"> </span><span class="n">index_granularity</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">16384</span><span class="p">,</span><span class="w">  
+</span><span class="w">                   </span><span class="n">storage_policy</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s1">&#39;hcs_ck&#39;</span><span class="p">,</span><span class="w">   
+</span><span class="w">                    </span><span class="n">parts_to_throw_insert</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="mi">1600</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>The TTL expression shows that the table <strong>hcs_table_name</strong> indicates that the last 7 days of data are stored on the local SSD disk, the 8th to 14th days of data are stored on the remote S3, and data older than 14 days are deleted.</p>
+<p>The general flow is shown in the following diagram.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/10/17/119af834384b4c41b284a15b4b74e8fb.png" alt=""></p>
+<p>The data parts of the table <strong>hcs_table_name</strong> (ClickHouse&rsquo;s data storage uses the data part as the basic processing unit) are scheduled by a background task, which is executed by the thread BgMoveProcPool from the <code>back_ground_move_pool</code> (note that it is not the same as <code>back_ground_pool</code>).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c++" data-lang="c++"><span class="n">std</span><span class="o">::</span><span class="n">optional</span><span class="o">&lt;</span><span class="n">BackgroundProcessingPool</span><span class="o">&gt;</span> <span class="n">background_move_pool</span><span class="p">;</span> <span class="c1">/// The thread pool for the background moves performed by the tables.
+</span></code></pre></td></tr></table>
+</div>
+</div><p>The background task scheduler determines whether the data parts need to be moved (<strong>whether the data needs to be moved down to the remote storage</strong>) and whether it is possible to move.</p>
+<p>The core logic of this task is to first select the data parts that need to be moved, and then move those data parts to the destination store.</p>
+<p>In the interface: <code>MergeTreePartsMover::selectPartsForMove</code> and then select the data parts that need to be moved based on the <code>ttl_move</code> information in the data parts and store the <code>move_entry</code> of the data parts (with the IMergeTreeDataPart pointer and the required (including the IMergeTreeDataPart pointer and the size of the storage space to be reserved) into the vector. Afterwards, the interface is called.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c++" data-lang="c++"><span class="n">MergeTreeData</span><span class="o">::</span><span class="n">moveParts</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The move process is simply <strong>clone</strong> the data parts on the SSD disk to the detach directory of the <strong>hcs_table_name</strong> table on the remote storage S3, and then move the data parts out of the detach directory, and finally the data parts on the SSD disk are cleared in the IMergeTreeDataPart destructor.</p>
+<p>So the table is always available during the whole move process, because it is a clone operation, and the data parts moved at the same time are either active on the SSD disk or active on the remote storage.</p>
+<p>For the move information of the table data parts, you can also query the following three fields of the system table system.parts.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">move_ttl_info.expression；
+move_ttl_info.min; 
+move_ttl_info.max; 
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="practice-sharing">Practice Sharing</h2>
+<p>After the Shopee ClickHouse cold and hot data separation storage architecture went live, we summarized some of the issues we encountered in practice.</p>
+<h3 id="redis-memory-growth-exception">Redis Memory Growth Exception</h3>
+<p>While the amount of data storage on S3 has not increased much, Redis memory continues to grow at a high rate.</p>
+<p>JuiceFS uses Redis to store the metadata of the data files on S3, so normally, the more data files on S3, the more Redis storage is used. Usually this anomaly is due to the fact that the target table has many small files that do not merge and sink directly, which can easily fill up Redis.</p>
+<p>This also introduces another problem: once Redis memory is full, JuiceFS can no longer successfully write data to S3, and if the JuiceFS client is unmounted, it will not be able to mount it again, and when it is mounted again, it will throw Error.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c++" data-lang="c++"><span class="nl">Meta</span><span class="p">:</span> <span class="n">create</span> <span class="nl">session</span><span class="p">:</span> <span class="n">OOM</span> <span class="n">command</span> <span class="n">not</span> <span class="n">allowed</span> <span class="n">when</span> <span class="n">used</span> <span class="n">memory</span> <span class="o">&gt;</span> <span class="err">&#39;</span><span class="n">maxmemory</span><span class="err">&#39;</span><span class="p">.</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>To avoid this problem, you should first monitor the ClickHouse merge status. <code>clickhouse-exporter</code> collects a merge metric <code>clickhouse_merge</code> that captures the number of merges that are currently being triggered (by querying the system.metrics table metric=&lsquo;merge &lsquo;), and for each merge trigger, multiple data parts of a table will be merged. In our experience, if the average number of merges every three hours is less than 0.5, then it is likely that there is a merge problem on this machine.</p>
+<p>There are many possible reasons for merge exceptions (e.g. HTTPHandler thread, ZooKeeperRecv thread continuously occupying a lot of CPU resources, etc.), which is not the focus of this article and will not be expanded here. So you can set an alert rule, if the number of merge is less than 0.5 times in three hours, alert the ClickHouse development and operation team to avoid the generation of a large number of small files.</p>
+<p><strong>What should I do if there are already a lot of small files sinking into S3</strong>?</p>
+<p>The first way to stop the data from sinking is to find the user&rsquo;s business table that is sinking a lot of small files in two ways.</p>
+<p>The first way: check ClickHouse Error Log, find the table that throws too many parts, and then further determine if the table that throws the error has hot and cold storage.</p>
+<p>The second way: by querying the system.parts table, find the ones with obviously too many active parts and disk_name equal to the alias of the cold storage. After locating the table that generates a lot of small files, use the ClickHouse system command SQL.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">SYSTEM STOP MOVES [[db.]merge_tree_family_table_name] 
+</code></pre></td></tr></table>
+</div>
+</div><p>Stops the data from continuing to sink and prevents Redis memory from filling up.</p>
+<p>If the table is small, say less than 1TB after compression (the 1TB here is an empirical value, we have used <code>insert into ... select * from ...</code>, if it is larger than 1TB, the import time will be very long and there is a certain possibility that it will fail in the middle of the import), you can choose to create temp table &gt; insert into this temp table &gt; select * from org table after confirming that the merge function is back to normal. from org table, then drop org table &gt; rename temp table to org table.</p>
+<p>If the table is relatively large, after confirming that the merge function is back to normal, try to use the system command SQL.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="k">SYSTEM</span><span class="w"> </span><span class="k">START</span><span class="w"> </span><span class="n">MERGES</span><span class="w"> </span><span class="p">[[</span><span class="n">db</span><span class="p">.]</span><span class="n">merge_tree_family_table_name</span><span class="p">]</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>to wake up the merge thread. If merge is slow, you can query the system.parts table to find the data parts already on S3, and then manually execute the Query:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">table_source</span><span class="w"> </span><span class="k">MOVE</span><span class="w"> </span><span class="n">PART</span><span class="o">/</span><span class="n">PARTITION</span><span class="w"> </span><span class="n">partition_expr</span><span class="w"> </span><span class="k">TO</span><span class="w"> </span><span class="n">volume</span><span class="w"> </span><span class="s1">&#39;ssd_volume&#39;</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>Move the small files that fall on S3 back to the SSD. Since SSDs have much higher IOPS than S3 (even with JuiceFS access acceleration), this speeds up the merge process on the one hand, and frees up Redis memory as files are moved out of S3 on the other.</p>
+<h3 id="juicefs-readwrite-s3-failure">JuiceFS Read/Write S3 Failure</h3>
+<p>Data sink failure, access to S3 through JuiceFS, can not read and write operations to S3, this time the user query if overwritten to the data on S3, then the query will throw the S3 mount on the local path of the data file can not be accessed error. If you encounter this problem, you can check the JuiceFS logs.</p>
+<blockquote>
+<p>The JuiceFS logs are stored on syslog in Linux CentOS, so you can use the method <code>cat/var/log/messages|grep 'juicefs'</code> to query the logs, and refer to the JuiceFS community documentation for the log directories for different operating systems.</p>
+</blockquote>
+<p>The problem we encountered was <code>send request to S3 host name certificate expired</code>. The access problem was solved by contacting the S3 development and maintenance team.</p>
+<p>So how to monitor this kind of JuiceFS read/write S3 failure? You can monitor it with the metrics <code>juicefs_object_request_errors</code> provided by JuiceFS, and alert the team members if there is an error, and check the logs to locate the problem in time.</p>
+<h3 id="clickhouse-server-failed-to-start">clickhouse-server failed to start</h3>
+<p>When modifying the TTL of a replicated table (table engine with Replicated prefix) that requires hot and cold data storage separation for historical tables, the TTL expressions in the local metadata of the <code>.sql</code> file on clickhouse-server do not match the TTL expressions stored on ZooKeeper. This is an issue we encountered during testing, and if we restart clickhouse-server without fixing this issue, clickhouse-server will fail to start because the table structures are not aligned.</p>
+<p>This is because the TTL of replicated tables is modified first in ZooKeeper, and then the TTL of tables on machines under the same node is modified, so if the TTL of the local machine is not modified successfully after the TTL is modified, and clickhouse-server is restarted, the above problem will occur.</p>
+<h3 id="suspicious_broken_parts">suspicious_broken_parts</h3>
+<p>Restarting clickhouse-server failed, throwing Error.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c++" data-lang="c++"><span class="n">DB</span><span class="o">::</span><span class="nl">Exception</span><span class="p">:</span> <span class="n">Suspiciously</span> <span class="n">many</span> <span class="n">broken</span> <span class="n">parts</span> <span class="n">to</span> <span class="n">remove</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This is because ClickHouse reloads the MergeTree table engine data when restarting the service, the main code interface is</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c++" data-lang="c++"><span class="n">MergeTreeData</span><span class="o">::</span><span class="n">loadDataParts</span><span class="p">(</span><span class="kt">bool</span> <span class="n">skip_sanity_checks</span><span class="p">)</span> 
+</code></pre></td></tr></table>
+</div>
+</div><p>In this interface, it will get the data parts of each table and determine if there is a <code>#DELETE_ON_DESTROY_MARKER_PATH</code> file under the data part folder, which is <code>delete-on-destroy.txt</code>. If it does, add the part to <code>broken_parts_to_detach</code> and add 1 to the <code>suspicious_broken_parts</code> count.</p>
+<p>Then, in the scenario of hot and cold data storage separation, when data parts are sunk by TTL, the following code calls are made in the core interface move operation function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c++" data-lang="c++"><span class="n">MergeTreeData</span><span class="o">::</span><span class="n">moveParts</span><span class="o">-&gt;</span><span class="n">MergeTreePartsMover</span><span class="o">::</span><span class="n">swapClonedPart</span><span class="o">-&gt;</span><span class="n">MergeTreeData</span><span class="o">::</span><span class="n">swapActivePart</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the last function swap the path pointing to active parts, that is, as said above, data parts are available during the move process, either in SSD as active or in S3 as active.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c++" data-lang="c++"><span class="kt">void</span> <span class="n">MergeTreeData</span><span class="o">::</span><span class="n">swapActivePart</span><span class="p">(</span><span class="n">MergeTreeData</span><span class="o">::</span><span class="n">DataPartPtr</span> <span class="n">part_copy</span><span class="p">)</span>  
+<span class="p">{</span>  
+    <span class="k">auto</span> <span class="n">lock</span> <span class="o">=</span> <span class="n">lockParts</span><span class="p">();</span>  
+    <span class="k">for</span> <span class="p">(</span><span class="k">auto</span> <span class="nl">original_active_part</span> <span class="p">:</span> <span class="n">getDataPartsStateRange</span><span class="p">(</span><span class="n">DataPartState</span><span class="o">::</span><span class="n">Committed</span><span class="p">))</span> <span class="c1">// NOLINT (copy is intended)  
+</span><span class="c1"></span>    <span class="p">{</span>  
+        <span class="k">if</span> <span class="p">(</span><span class="n">part_copy</span><span class="o">-&gt;</span><span class="n">name</span> <span class="o">==</span> <span class="n">original_active_part</span><span class="o">-&gt;</span><span class="n">name</span><span class="p">)</span>  
+        <span class="p">{</span>  
+            <span class="p">.....</span>  
+            <span class="n">String</span> <span class="n">marker_path</span> <span class="o">=</span> <span class="n">original_active_part</span><span class="o">-&gt;</span><span class="n">getFullRelativePath</span><span class="p">()</span> <span class="o">+</span> <span class="n">DELETE_ON_DESTROY_MARKER_PATH</span><span class="p">;</span>  
+            <span class="k">try</span>  
+            <span class="p">{</span>  
+                <span class="n">disk</span><span class="o">-&gt;</span><span class="n">createFile</span><span class="p">(</span><span class="n">marker_path</span><span class="p">);</span>  
+            <span class="p">}</span>  
+            <span class="k">catch</span> <span class="p">(</span><span class="n">Poco</span><span class="o">::</span><span class="n">Exception</span> <span class="o">&amp;</span> <span class="n">e</span><span class="p">)</span>  
+            <span class="p">...</span>  
+<span class="p">}</span>  
+</code></pre></td></tr></table>
+</div>
+</div><p>In this interface, <code>#DELETE_ON_DESTROY_MARKER_PATH</code> files are created inside the old active parts (i.e. replacing parts) to modify the state to DeleteOnDestory, which is used to delete the data parts of the state later on when IMergeTreeDataPart is parsed.</p>
+<p>This is the reason why <code>suspicious_broken_parts</code> appears in our usage scenario, which affects ClickHouse service startup when this value exceeds the default threshold of 10.</p>
+<p>There are two solutions: The first is to delete the metadata <code>.sql</code> file, stored data, metadata on ZooKeeper for the table that threw the error on this machine, restart the machine and rebuild the table, the data will be synchronized from the backup machine. The second one is to create <code>force_restore_data</code> flag under ClickHouse <code>/flags</code> path with the running user of clickhouse-server process and then just reboot.</p>
+<p>As you can see from the above question, after using JuiceFS+S3 to implement a separate storage architecture for hot and cold data, new components (JuiceFS+Redis+S3) were introduced, and the database usage scenarios became more flexible, and accordingly, all aspects of monitoring information should be done. A few of the more important monitoring indicators are shared here.</p>
+<ul>
+<li>JuiceFS: <code>juicefs_object_request_errors</code> : JuiceFS health status monitoring of S3 reads and writes.</li>
+<li>Redis: <code>Memory Usage</code> : Monitoring the memory usage of Redis.</li>
+<li>ClickHouse: <code>clickhouse_merge</code> : Monitor the merge status of machines in the cluster to see if it is working properly.</li>
+</ul>
+<h2 id="hot-and-cold-storage-architecture-benefits-in-a-nutshell">Hot and Cold Storage Architecture Benefits in a Nutshell</h2>
+<p>With the separation of hot and cold data storage, we have better supported our users&rsquo; data business, improved the overall cluster data storage capacity, relieved the local storage pressure on individual machines, and provided more flexible management of business data.</p>
+<p>Before the hot and cold data separation architecture went online, the average disk utilization rate of our cluster machines was close to 85%. After going online, this figure dropped to 75% by modifying the business user table TTL. And the overall cluster supported two new data services on top of the original business volume. If we had not gone live with hot and cold isolation, our cluster would have been unable to take on new projects due to insufficient disk usage before the expansion. Currently we are sinking more than 90TB of data (after compression) to the remote S3.</p>
+<p>In the future Shopee ClickHouse will continue to develop more useful features and evolve the product architecture. Currently JuiceFS is very stable in our production environment and we will further use JuiceFS to access HDFS and thus realize the Shopee ClickHouse storage compute separation architecture.</p>
+<p><strong>The version information for each product component mentioned in this article is as follows:</strong></p>
+<ul>
+<li>Shopee ClickHouse: currently based on the community version ClickHouse 20.8.12.2-LTS version</li>
+<li>JuiceFS: v0.14.2</li>
+<li>Redis: v6.2.2, sentinel model, AOF on (policy is Every Secs), RDB on (policy is One Backup a Day)</li>
+<li>S3: provided by Shopee STO team</li>
+<li>Ozone: 1.1.0-SNAPSHOT</li>
+</ul>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/shopee-clickhous/">shopee clickhous</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2021-10/golang-from-kernel-to-epoll/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">golang from kernel to epoll</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2021-10/css-content-url/">
+            <span class="next-text nav-default">CSS content&#39;s new replacement element specification behavior explained</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How fsck works - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Background We usually encounter a lot of file system anomalies after a system crash. We usually fix them with the fsck tool, today we will learn what fsck does and how it does it.
+Workload example Suppose there is a workload that appends a single block of data to an existing file. The append is done by opening the file, calling lseek() to move the file offset to the end of the file, and then issuing a single 4KB write to the file before closing it." /><meta name="keywords" content="fsck" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/how-fsck-works/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="How fsck works" />
+<meta property="og:description" content="Background We usually encounter a lot of file system anomalies after a system crash. We usually fix them with the fsck tool, today we will learn what fsck does and how it does it.
+Workload example Suppose there is a workload that appends a single block of data to an existing file. The append is done by opening the file, calling lseek() to move the file offset to the end of the file, and then issuing a single 4KB write to the file before closing it." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/how-fsck-works/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-17T13:14:13+08:00" />
+<meta property="article:modified_time" content="2022-01-17T13:14:13+08:00" />
+
+<meta itemprop="name" content="How fsck works">
+<meta itemprop="description" content="Background We usually encounter a lot of file system anomalies after a system crash. We usually fix them with the fsck tool, today we will learn what fsck does and how it does it.
+Workload example Suppose there is a workload that appends a single block of data to an existing file. The append is done by opening the file, calling lseek() to move the file offset to the end of the file, and then issuing a single 4KB write to the file before closing it."><meta itemprop="datePublished" content="2022-01-17T13:14:13+08:00" />
+<meta itemprop="dateModified" content="2022-01-17T13:14:13+08:00" />
+<meta itemprop="wordCount" content="2050">
+<meta itemprop="keywords" content="fsck," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How fsck works"/>
+<meta name="twitter:description" content="Background We usually encounter a lot of file system anomalies after a system crash. We usually fix them with the fsck tool, today we will learn what fsck does and how it does it.
+Workload example Suppose there is a workload that appends a single block of data to an existing file. The append is done by opening the file, calling lseek() to move the file offset to the end of the file, and then issuing a single 4KB write to the file before closing it."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How fsck works</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-17 13:14:13 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2050 words </span>
+          <span class="more-meta"> 10 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#background">Background</a></li>
+        <li><a href="#workload-example">Workload example</a></li>
+        <li><a href="#crash-scenario">Crash scenario</a></li>
+        <li><a href="#fsck">fsck</a></li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="background">Background</h2>
+<p>We usually encounter a lot of file system anomalies after a system crash. We usually fix them with the fsck tool, today we will learn what fsck does and how it does it.</p>
+<h2 id="workload-example">Workload example</h2>
+<p>Suppose there is a workload that appends a single block of data to an existing file. The append is done by opening the file, calling <code>lseek()</code> to move the file offset to the end of the file, and then issuing a single 4KB write to the file before closing it.</p>
+<p>It is assumed that a standard simple file system structure is used on the disk, consisting of an inode bitmap (only 8 bits, one per inode), a databitmap (also 8 bits, one per data block), inodes (8 in total, numbered 0 to 7, spread over 4 blocks), and data blocks (8 in total, numbered 0 to 7). numbered 0 to 7). The following is a diagram of the file system.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/17/1918d7e25e614d129352370e70cf51b8.png" alt="image"></p>
+<p>Looking at the structure in the diagram, you can see that an inode is allocated (inode number 2), which is marked in the inode bitmap, and a single allocated data block (data block 4) is also marked in the data bitmap. inode is denoted as I [v1], as it is the first version of this inode. It will be updated soon (due to the above workload). Take a look at this simplified inode again. in I[v1], you can see</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">owner : remzi
+permissions : read-write
+size : 1
+pointer : 4
+pointer : null
+pointer : null
+pointer : null
+</code></pre></td></tr></table>
+</div>
+</div><p>In this simplified inode, the file has a size of 1 (it has one block located in it), the first direct pointer points to block 4 (the first data block of the file, Da), and all the other 3 direct pointers are set to null (indicating that they are not used). Of course, the real inode has more fields.</p>
+<p>When appending to a file, a new data block is added to it, so 3 structures on disk must be updated: the inode (which must point to the new block and has a larger size due to the append), the new data block Db and a new version of the data bitmap (called B[v2]) indicating that the new data block has been allocated.
+As a result, there are 3 blocks in the system&rsquo;s memory that must be written to disk. The updated inode (inode version 2, or simply I [v2]) now looks like this</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">owner : remzi
+permissions : read-write
+size : 2
+pointer : 4
+pointer : 5
+pointer : null
+pointer : null
+</code></pre></td></tr></table>
+</div>
+</div><p>The updated data bitmap (B[v2]) now looks like this: 00001100. Finally, there is the data block (Db), which is just the content that the user puts into the file. Hopefully the final disk image of the file system will look like this</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/17/daa44ae915fd4804af304fa33be18d13.png" alt="image"></p>
+<p>To achieve this transformation, the file system must perform 3 separate writes to the disk, for the inode (I[v2]), the bitmap (B[v2]) and the data block (Db). Note that these writes do not usually occur immediately when the user issues the write() system call. The dirty inode, bitmap and new data first exist in memory (page cache, page cache, or buffer cache, buffer cache) for a while.</p>
+<p>Then, when the file system finally decides to write them to disk (say 5s or 30s), the file system issues the necessary write requests to disk. Unfortunately, crashes can occur which interfere with these updates to the disk. In particular, if a crash occurs after one or two of these writes have completed, rather than all 3, the file system may be in an abnormal state.</p>
+<h2 id="crash-scenario">Crash scenario</h2>
+<p>Imagine that only one write succeeds. There are therefore 3 possible outcomes.</p>
+<ul>
+<li>Only the data block (Db) is written to disk. In this case, the data is on the disk, but there is no inode pointing to it and no bitmap indicating that the block has been allocated. Therefore, it is as if the write never happened. From the point of view of file system crash consistency, this situation is not a problem at all.</li>
+<li>Only the updated inode (I[v2]) is written to disk. In this case, the inode points to the disk address (5), where Db is about to be written, but Db has not yet been written. Therefore, if the pointer is trusted, then rubbish data (the old contents of disk address 5) will be read from the disk.</li>
+</ul>
+<p>In addition, a new problem was encountered, which is called file-system inconsistency. The bitmap on the disk shows that block 5 has not been allocated yet, but the inode says it has. This disagreement in the file-system data structure is a file-system data structure inconsistency. To use the file system, this problem must be resolved in some way.</p>
+<ul>
+<li>Only the updated bitmap (B [v2]) is written to disk. In this case, the bitmap indicates that block 5 has been allocated, but there is no inode pointing to it. thus the file system is once again inconsistent. If not fixed, this write will lead to a space leak, as the file system will never use block 5.</li>
+</ul>
+<p>There are 3 other crash scenarios in this 3 write attempts to disk. In these scenarios, two writes succeed and the last one fails.</p>
+<ul>
+<li>inode (I[v2]) and bitmap (B[v2]) were written to disk, but no data (Db) was written. In this case, the file system metadata is perfectly consistent: inode has a pointer to block 5, and the bitmap indicates that 5 is in use, so from the point of view of the file system metadata, everything looks fine. But there&rsquo;s a problem: 5 is rubbish in 5 again.</li>
+<li>The inode (I[v2]) and the data block (Db) are written, but not the bitmap (B[v2]). In this case the inode points to the correct data on the disk, but again there is an inconsistency between the inode and the older version of the bitmap (B1). Therefore, the problem needs to be solved again before the file system can be used.</li>
+<li>The bitmap (B[v2]) and the data block (Db) were written, but not the inode (I[v2]). In this case, there is again an inconsistency between the inode and the data bitmap. However, even if the block is written and the bitmap indicates its use, it is not known which file it belongs to, as there is no inode pointing to the block.</li>
+</ul>
+<p>From these crash scenarios, you can see the many problems that can occur with a disk filesystem image as a result of a crash.
+There are many problems: there may be inconsistencies in the file system data structure. There may be space leaks, rubbish data may be returned to the user, and so on.</p>
+<p>The ideal approach is to move the file system from a consistent state (before the file is appended), atomically, to another state.
+(atomically) to another state (after inodes, bitmaps and new data blocks have been written to disk). Unfortunately, this is not easy to do, as the disk is only committed to one write at a time, and crashes or power failures can occur between these updates. Refer to this general problem as the crash-consistency problem, which can also be referred to as the consistent-update problem.</p>
+<h2 id="fsck">fsck</h2>
+<p>Early file systems took a simple approach to handling crash consistency. Basically, they decided to let inconsistencies happen and then fix them (on reboot). A typical example of this lazy approach can be found in one tool: fsck. fsck is a UNIX tool for finding these inconsistencies and fixing them. Similar tools for checking and repairing disk partitions exist on different systems. Please note that this approach will not solve all problems. For example, consider the case above, where the file system appears to be consistent, but the inode points to rubbish data. The only real goal is to ensure that the filesystem metadata is internally consistent.</p>
+<p>The tool fsck runs in a number of stages, it runs before the filesystem is mounted and available (fsck assumes that no other filesystem activity is going on at the time of running). Once completed, the filesystem on disk should be consistent and therefore accessible to the user. The following is a basic summary of fsck.</p>
+<ul>
+<li>Superblocks: fsck first checks that the superblocks make sense, mainly by performing soundness checks, e.g. to ensure that the file system size is larger than the number of blocks allocated. Usually, the aim of these soundness checks is to find a suspicious (conflicting) superblock. In this case, the system (or administrator) can decide to use an alternate copy of the superblock.</li>
+<li>Free blocks: Next, fsck scans the inode, indirect blocks, double indirect blocks, etc. for blocks currently allocated in the file system. It uses this knowledge to generate the correct version of the allocation bitmap. Thus, if there is any inconsistency between the bitmap and the inode, it is resolved by trusting the information within the inode. The same type of check is performed on all inodes to ensure that all inodes that look like they are in use, are marked in the inode bitmap.</li>
+<li>inode status: Check each inode for corruption or other problems. For example, fsck ensures that each allocated inode has a valid type field (i.e. regular file, directory, symbolic link, etc.). If an inode field is faulty and not easily repairable, the inode is considered suspect and is cleared by fsck, and the inode bitmap is updated accordingly.</li>
+<li>inode links: fsck also verifies the link count for each allocated inode. As you may recall, the link count indicates the number of different directories that contain references (i.e. links) to this particular file. To verify the link count, fsck scans the entire directory tree, starting with the root directory, and constructs its own link count for each file and directory in the filesystem. If the newly calculated count does not match the count found in the inode, corrective action must be taken, usually by repairing the count in the inode. If an allocated inode is found but no directory refers to it, it is moved to the lost + found directory.</li>
+<li>Duplicates: fsck also checks for duplicate pointers, i.e. cases where two different inodes refer to the same block. If an inode is clearly bad, it may be cleared. Alternatively, the block pointed to can be copied, thus providing each inode with its own copy as required.</li>
+<li>Bad blocks: When scanning the list of all pointers, bad block pointers are also checked. A pointer is considered &ldquo;bad&rdquo; if it apparently points to a pointer that is outside its valid range, for example, if its address points to a block larger than the partition size. In this case, fsck cannot do anything too intelligent. It just removes (clears) the pointer from the inode or indirect block.</li>
+<li>Directory checking: fsck does not know the contents of user files. However, directories contain information in a specific format created by the file system itself. Therefore, fsck performs an additional integrity check on the contents of each directory, making sure that &ldquo;.&rdquo; and &ldquo;&hellip;&rdquo; are preceding entries, that each inode referenced in the directory entry is assigned, and that no directory is referenced more than once in the entire hierarchy.</li>
+</ul>
+<h2 id="summary">Summary</h2>
+<p>As mentioned above, building fsck that works effectively requires complex knowledge of the filesystem. Ensuring that such code works properly in all cases can be challenging. However, fsck (and similar methods) have a larger and perhaps more fundamental problem: they are too slow.</p>
+<p>For very large volumes, scanning the entire disk to find all allocated blocks and read the entire directory tree can take minutes or hours. As disk capacity grows and RAID becomes more popular, the performance of fsck becomes prohibitive. At a higher level, the basic premise of fsck seems a little unreasonable. Consider the example above, where only 3 blocks are written to the disk. It is very expensive to scan the entire disk and only fix the problems that occur during the update of 3 blocks.</p>
+<p>This situation is similar to putting your keys on the floor of your bedroom and then searching every room, starting from the basement, to perform a &ldquo;search the whole house for keys&rdquo; recovery algorithm. It works, but it&rsquo;s wasteful.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/fsck/">fsck</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/k8s-drain/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">K8s drain command source code reading</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/file-system/">
+            <span class="next-text nav-default">Explanation of basic file system concepts and common operations</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

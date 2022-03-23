@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Passing file descriptors between processes via UNIX domain sockets  - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Linux provides a series of system calls that allow us to pass file descriptors between processes. Instead of simply passing the file descriptor, which is a 32-bit integer, we actually pass the file handle to the target process so that it can read and write to the file. Now suppose process B wants to send a file descriptor to process A. Let&amp;rsquo;s see how to do that.
+1. UNIX domain socket To pass file descriptors, you need to establish inter-process communication." /><meta name="keywords" content="unix, socket" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/pass-fd-over-domain-socket/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Passing file descriptors between processes via UNIX domain sockets " />
+<meta property="og:description" content="Linux provides a series of system calls that allow us to pass file descriptors between processes. Instead of simply passing the file descriptor, which is a 32-bit integer, we actually pass the file handle to the target process so that it can read and write to the file. Now suppose process B wants to send a file descriptor to process A. Let&rsquo;s see how to do that.
+1. UNIX domain socket To pass file descriptors, you need to establish inter-process communication." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/pass-fd-over-domain-socket/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-04T13:11:27+08:00" />
+<meta property="article:modified_time" content="2022-01-04T13:11:27+08:00" />
+
+<meta itemprop="name" content="Passing file descriptors between processes via UNIX domain sockets ">
+<meta itemprop="description" content="Linux provides a series of system calls that allow us to pass file descriptors between processes. Instead of simply passing the file descriptor, which is a 32-bit integer, we actually pass the file handle to the target process so that it can read and write to the file. Now suppose process B wants to send a file descriptor to process A. Let&rsquo;s see how to do that.
+1. UNIX domain socket To pass file descriptors, you need to establish inter-process communication."><meta itemprop="datePublished" content="2022-01-04T13:11:27+08:00" />
+<meta itemprop="dateModified" content="2022-01-04T13:11:27+08:00" />
+<meta itemprop="wordCount" content="1208">
+<meta itemprop="keywords" content="unix,socket," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Passing file descriptors between processes via UNIX domain sockets "/>
+<meta name="twitter:description" content="Linux provides a series of system calls that allow us to pass file descriptors between processes. Instead of simply passing the file descriptor, which is a 32-bit integer, we actually pass the file handle to the target process so that it can read and write to the file. Now suppose process B wants to send a file descriptor to process A. Let&rsquo;s see how to do that.
+1. UNIX domain socket To pass file descriptors, you need to establish inter-process communication."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Passing file descriptors between processes via UNIX domain sockets </h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-04 13:11:27 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1208 words </span>
+          <span class="more-meta"> 6 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li>
+          <ul>
+            <li><a href="#1-unix-domain-socket">1. UNIX domain socket</a></li>
+            <li><a href="#2-sendmsg">2. sendmsg</a></li>
+            <li><a href="#3-recvmsg">3. recvmsg</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Linux provides a series of system calls that allow us to pass file descriptors between processes. Instead of simply passing the file descriptor, which is a 32-bit integer, we actually pass the file handle to the target process so that it can read and write to the file. Now suppose process B wants to send a file descriptor to process A. Let&rsquo;s see how to do that.</p>
+<h3 id="1-unix-domain-socket">1. UNIX domain socket</h3>
+<p>To pass file descriptors, you need to establish inter-process communication. UNIX domain socket is a way to communicate between processes, it is similar to a normal socket, except that it does not use an ip address, but a socket file. We want to use it to send control messages and thus pass file descriptors. First we will have process A create a socket:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="cm">/*code of process A*/</span>
+<span class="kt">int</span> <span class="n">socket_fd</span> <span class="o">=</span> <span class="n">socket</span><span class="p">(</span><span class="n">AF_UNIX</span><span class="p">,</span> <span class="n">SOCK_DGRAM</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Note the arguments to the <code>socket</code> function. <code>AF_UNIX</code> specifies the protocol family as a UNIX domain socket. Here we use the datagram socket <code>SOCK_DGRAM</code> , which is similar to UDP and does not require a link to be established, but is sent directly through the address. Of course, you can also use <code>SOCK_STREAM</code>, which is similar to TCP. We won&rsquo;t list them here.</p>
+<p>Next we bind the address:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-cc" data-lang="cc"><span class="cm">/*code of process A*/</span>
+<span class="k">struct</span> <span class="nc">sockaddr_un</span> <span class="n">un</span><span class="p">;</span>
+<span class="n">un</span><span class="p">.</span><span class="n">sun_family</span> <span class="o">=</span> <span class="n">AF_UNIX</span><span class="p">;</span>
+<span class="n">unlink</span><span class="p">(</span><span class="s">&#34;process_a&#34;</span><span class="p">);</span>
+<span class="n">strcpy</span><span class="p">(</span><span class="n">un</span><span class="p">.</span><span class="n">sun_path</span><span class="p">,</span> <span class="s">&#34;process_a&#34;</span><span class="p">);</span>
+
+<span class="k">if</span> <span class="p">(</span><span class="n">bind</span><span class="p">(</span><span class="n">socket_fd</span><span class="p">,</span> <span class="p">(</span><span class="k">struct</span> <span class="nc">sockaddr</span><span class="o">*</span><span class="p">)</span><span class="o">&amp;</span><span class="n">un</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">un</span><span class="p">))</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;bind failed</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+    <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Note that the address here is no longer an ip address, but a file path. Here we specify the address as <code>process_a</code>, and call <code>bind</code> to bind the address, which creates a socket file called <code>process_a</code>.</p>
+<p>This way, other processes can send messages to this process through a special address like <code>process_a</code>. It is the same as sending UDP messages, except that <code>struct sockaddr_un</code> is used to define the address instead of <code>struct sockaddr_in</code> or <code>struct sockaddr_in6</code>. In addition, it is important to note that other processes can pass file descriptors to this process by sending control messages.</p>
+<h3 id="2-sendmsg">2. sendmsg</h3>
+<p>Linux provides a pair of system calls: <code>sendmsg</code> and <code>recvmsg</code> . Unlike our usual <code>send</code> and <code>recv</code>, they can be used to send or receive control messages in addition to regular data, which is the key to passing file descriptors; they can also be used to send or receive a discrete piece of data.</p>
+<p>Let&rsquo;s look at the declarations of these two system calls</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="cp">#include</span> <span class="cpf">&lt;sys/types.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;sys/socket.h&gt;</span><span class="cp">
+</span><span class="cp"></span>
+<span class="n">ssize_t</span> <span class="nf">sendmsg</span><span class="p">(</span><span class="kt">int</span> <span class="n">sockfd</span><span class="p">,</span> <span class="k">const</span> <span class="k">struct</span> <span class="n">msghdr</span> <span class="o">*</span><span class="n">msg</span><span class="p">,</span> <span class="kt">int</span> <span class="n">flags</span><span class="p">);</span>
+<span class="n">ssize_t</span> <span class="nf">recvmsg</span><span class="p">(</span><span class="kt">int</span> <span class="n">sockfd</span><span class="p">,</span> <span class="k">struct</span> <span class="n">msghdr</span> <span class="o">*</span><span class="n">msg</span><span class="p">,</span> <span class="kt">int</span> <span class="n">flags</span><span class="p">);</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>sendmsg</code> and <code>recvmsg</code> use a structure <code>struct msghdr</code> to describe the data sent. The structure is defined as follows:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="k">struct</span> <span class="n">iovec</span> <span class="p">{</span>                    <span class="cm">/* Scatter/gather array items */</span>
+    <span class="kt">void</span>  <span class="o">*</span><span class="n">iov_base</span><span class="p">;</span>              <span class="cm">/* Starting address */</span>
+    <span class="n">size_t</span> <span class="n">iov_len</span><span class="p">;</span>               <span class="cm">/* Number of bytes to transfer */</span>
+<span class="p">};</span>
+
+<span class="k">struct</span> <span class="n">msghdr</span> <span class="p">{</span>
+    <span class="kt">void</span>         <span class="o">*</span><span class="n">msg_name</span><span class="p">;</span>       <span class="cm">/* optional address */</span>
+    <span class="n">socklen_t</span>     <span class="n">msg_namelen</span><span class="p">;</span>    <span class="cm">/* size of address */</span>
+    <span class="k">struct</span> <span class="n">iovec</span> <span class="o">*</span><span class="n">msg_iov</span><span class="p">;</span>        <span class="cm">/* scatter/gather array */</span>
+    <span class="n">size_t</span>        <span class="n">msg_iovlen</span><span class="p">;</span>     <span class="cm">/* # elements in msg_iov */</span>
+    <span class="kt">void</span>         <span class="o">*</span><span class="n">msg_control</span><span class="p">;</span>    <span class="cm">/* ancillary data, see below */</span>
+    <span class="n">size_t</span>        <span class="n">msg_controllen</span><span class="p">;</span> <span class="cm">/* ancillary data buffer len */</span>
+    <span class="kt">int</span>           <span class="n">msg_flags</span><span class="p">;</span>      <span class="cm">/* flags on received message */</span>
+<span class="p">};</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li><code>msg_name</code> Destination address. This is optional, if the protocol is connection-oriented, you don&rsquo;t need to specify an address; otherwise, you need to specify an address. This is similar to <code>send()</code> and <code>sendto()</code> .</li>
+<li><code>msg_iov</code> the data to be sent. This is an array, the length of which is specified by <code>msg_iovlen</code>, and the elements of the array are a <code>struct iovec</code> structure that specifies the starting address (<code>iov_base</code>) and length (<code>iov_len</code>) of a contiguous piece of data. In other words, it can send more than one continuous piece of data; or, it can send a discontinuous piece of data.</li>
+<li><code>msg_control</code> controls the message. This is what we are talking about today. We can&rsquo;t set it directly, we have to use a series of macros to set it.</li>
+</ul>
+<p><code>msg_control</code> points to a sequence consisting of a <code>struct cmsghdr</code> structure and its additional data. The definition of <code>struct cmsghdr</code> is as follows:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="k">struct</span> <span class="n">cmsghdr</span> <span class="p">{</span>
+    <span class="n">socklen_t</span> <span class="n">cmsg_len</span><span class="p">;</span>    <span class="cm">/* data byte count, including header */</span>
+    <span class="kt">int</span>       <span class="n">cmsg_level</span><span class="p">;</span>  <span class="cm">/* originating protocol */</span>
+    <span class="kt">int</span>       <span class="n">cmsg_type</span><span class="p">;</span>   <span class="cm">/* protocol-specific type */</span>
+<span class="cm">/* followed by
+</span><span class="cm">    unsigned char cmsg_data[]; */</span>
+<span class="p">};</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>struct cmsghdr</code> actually defines the header of the data, which should be followed by an <code>unsigned char</code> array that holds the actual data of the control information. This is often referred to as a <code>variable-length structure</code>. <code>msg_control</code> points to a sequence of such variable-length structures. The memory structure is shown in the figure below:</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/04/0a0b1cb311444821a0967d0dc767beed.png" alt="image"></p>
+<p>We need to use the following macros:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="cp">#include</span> <span class="cpf">&lt;sys/socket.h&gt;</span><span class="cp">
+</span><span class="cp"></span>
+<span class="k">struct</span> <span class="n">cmsghdr</span> <span class="o">*</span><span class="nf">CMSG_FIRSTHDR</span><span class="p">(</span><span class="k">struct</span> <span class="n">msghdr</span> <span class="o">*</span><span class="n">msgh</span><span class="p">);</span>
+<span class="n">size_t</span> <span class="nf">CMSG_SPACE</span><span class="p">(</span><span class="n">size_t</span> <span class="n">length</span><span class="p">);</span>
+<span class="n">size_t</span> <span class="nf">CMSG_LEN</span><span class="p">(</span><span class="n">size_t</span> <span class="n">length</span><span class="p">);</span>
+<span class="kt">unsigned</span> <span class="kt">char</span> <span class="o">*</span><span class="nf">CMSG_DATA</span><span class="p">(</span><span class="k">struct</span> <span class="n">cmsghdr</span> <span class="o">*</span><span class="n">cmsg</span><span class="p">);</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li><code>CMSG_FIRSTHDR()</code> returns the first element of the sequence pointed to by <code>msg_control</code></li>
+<li><code>CMSG_SPACE()</code> The length of the actual data of the incoming control message, returning the space required for the variable-length structure</li>
+<li><code>CMSG_LEN()</code> The length of the actual data of the control message, and the length of the variable-length structure.</li>
+<li><code>CMSG_DATA()</code> Returns the first address of the actual data that holds the control information.</li>
+</ul>
+<blockquote>
+<p>Note the difference between <code>CMSG_SPACE()</code> and <code>CMSG_LEN()</code>: the former contains the length of the padding, which is the actual space occupied; the latter does not contain the length of the padding, and is used to assign the value to <code>cmsg_len</code> .</p>
+</blockquote>
+<p>Next, let&rsquo;s have process B pass a file descriptor to process A. First set the address of process A, which is &ldquo;process_a&rdquo;:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="cm">/*code of process B*/</span>
+<span class="k">struct</span> <span class="n">sockaddr_un</span> <span class="n">ad</span><span class="p">;</span>
+<span class="n">ad</span><span class="p">.</span><span class="n">sun_family</span> <span class="o">=</span> <span class="n">AF_UNIX</span><span class="p">;</span>
+<span class="n">strcpy</span><span class="p">(</span><span class="n">ad</span><span class="p">.</span><span class="n">sun_path</span><span class="p">,</span> <span class="s">&#34;process_a&#34;</span><span class="p">);</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We only need to send control messages, not regular data, so we leave the regular data empty:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="cm">/*code of process B*/</span>
+<span class="k">struct</span> <span class="n">iovec</span> <span class="n">e</span> <span class="o">=</span> <span class="p">{</span><span class="nb">NULL</span><span class="p">,</span> <span class="mi">0</span><span class="p">};</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Next, we allocate space for the control data, since we only pass one file descriptor, so the length is <code>sizeof(int)</code> :</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="cm">/*code of process B*/</span>
+<span class="kt">char</span> <span class="n">cmsg</span><span class="p">[</span><span class="n">CMSG_SPACE</span><span class="p">(</span><span class="k">sizeof</span><span class="p">(</span><span class="kt">int</span><span class="p">))];</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Then you can set the <code>struct msghdr</code> structure:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="cm">/*code of process B*/</span>
+<span class="k">struct</span> <span class="n">msghdr</span> <span class="n">m</span> <span class="o">=</span> <span class="p">{(</span><span class="kt">void</span><span class="o">*</span><span class="p">)</span><span class="o">&amp;</span><span class="n">ad</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">ad</span><span class="p">),</span> <span class="o">&amp;</span><span class="n">e</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">cmsg</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">cmsg</span><span class="p">),</span> <span class="mi">0</span><span class="p">};</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Next we get <code>struct cmsghdr</code> and set it:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="cm">/*code of process B*/</span>
+<span class="k">struct</span> <span class="n">cmsghdr</span> <span class="o">*</span><span class="n">c</span> <span class="o">=</span> <span class="n">CMSG_FIRSTHDR</span><span class="p">(</span><span class="o">&amp;</span><span class="n">m</span><span class="p">);</span>
+<span class="n">c</span><span class="o">-&gt;</span><span class="n">cmsg_level</span> <span class="o">=</span> <span class="n">SOL_SOCKET</span><span class="p">;</span>
+<span class="n">c</span><span class="o">-&gt;</span><span class="n">cmsg_type</span> <span class="o">=</span> <span class="n">SCM_RIGHTS</span><span class="p">;</span>
+<span class="n">c</span><span class="o">-&gt;</span><span class="n">cmsg_len</span> <span class="o">=</span> <span class="n">CMSG_LEN</span><span class="p">(</span><span class="k">sizeof</span><span class="p">(</span><span class="kt">int</span><span class="p">));</span>
+<span class="o">*</span><span class="p">(</span><span class="kt">int</span><span class="o">*</span><span class="p">)</span><span class="n">CMSG_DATA</span><span class="p">(</span><span class="n">c</span><span class="p">)</span> <span class="o">=</span> <span class="n">cfd</span><span class="p">;</span> <span class="c1">// set file descriptor
+</span></code></pre></td></tr></table>
+</div>
+</div><p>Finally, just send it out:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="cm">/*code of process B*/</span>
+<span class="n">sendmsg</span><span class="p">(</span><span class="n">mfd</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">m</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="3-recvmsg">3. recvmsg</h3>
+<p>Now we ask process A to receive the file descriptor passed to it. Here we call <code>recvmsg</code> .</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="cm">/*code of process A*/</span>
+<span class="kt">char</span> <span class="n">buf</span><span class="p">[</span><span class="mi">512</span><span class="p">];</span>
+<span class="k">struct</span> <span class="n">iovec</span> <span class="n">e</span> <span class="o">=</span> <span class="p">{</span><span class="n">buf</span><span class="p">,</span> <span class="mi">512</span><span class="p">};</span>
+<span class="kt">char</span> <span class="n">cmsg</span><span class="p">[</span><span class="n">CMSG_SPACE</span><span class="p">(</span><span class="k">sizeof</span><span class="p">(</span><span class="kt">int</span><span class="p">))];</span>
+<span class="k">struct</span> <span class="n">msghdr</span> <span class="n">m</span> <span class="o">=</span> <span class="p">{</span><span class="nb">NULL</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">e</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">cmsg</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">cmsg</span><span class="p">),</span> <span class="mi">0</span><span class="p">};</span>
+
+<span class="kt">int</span> <span class="n">n</span> <span class="o">=</span> <span class="n">recvmsg</span><span class="p">(</span><span class="n">socket_fd</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">m</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+<span class="n">printf</span><span class="p">(</span><span class="s">&#34;Receive: %d</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">n</span><span class="p">);</span>
+
+<span class="k">struct</span> <span class="n">cmsghdr</span> <span class="o">*</span><span class="n">c</span> <span class="o">=</span> <span class="n">CMSG_FIRSTHDR</span><span class="p">(</span><span class="o">&amp;</span><span class="n">m</span><span class="p">);</span>
+<span class="kt">int</span> <span class="n">cfd</span> <span class="o">=</span> <span class="o">*</span><span class="p">(</span><span class="kt">int</span><span class="o">*</span><span class="p">)</span><span class="n">CMSG_DATA</span><span class="p">(</span><span class="n">c</span><span class="p">);</span> <span class="c1">// receive file descriptor
+</span></code></pre></td></tr></table>
+</div>
+</div><p>Thus, process A receives the file descriptor from process B, and process B opens the file and can perform read and write operations on it.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/unix/">unix</a>
+          <a href="/tags/socket/">socket</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/tab-to-search/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Enable Tab Search on your own blog</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/promise-and-deferred/">
+            <span class="next-text nav-default">Promise and Deferred</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

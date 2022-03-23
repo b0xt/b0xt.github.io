@@ -1,0 +1,669 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How Kubernetes implements timed tasks - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Each component of Kubernetes has certain timed tasks, such as log processing, querying of tasks, cache usage, etc. Timed tasks in Kubernetes are implemented through wait packages, such as starting a probe check in a Kubelet.
+1 2 3 4 5 6 7  // Start syncing probe status. This should only be called once. func (m *manager) Start() { // Start syncing readiness. 	go wait.Forever(m.updateReadiness, 0) // Start syncing startup." /><meta name="keywords" content="kubernetes, Task" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/kubernetes-task/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="How Kubernetes implements timed tasks" />
+<meta property="og:description" content="Each component of Kubernetes has certain timed tasks, such as log processing, querying of tasks, cache usage, etc. Timed tasks in Kubernetes are implemented through wait packages, such as starting a probe check in a Kubelet.
+1 2 3 4 5 6 7  // Start syncing probe status. This should only be called once. func (m *manager) Start() { // Start syncing readiness. 	go wait.Forever(m.updateReadiness, 0) // Start syncing startup." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/kubernetes-task/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-14T09:30:49+08:00" />
+<meta property="article:modified_time" content="2022-03-14T09:30:49+08:00" />
+
+<meta itemprop="name" content="How Kubernetes implements timed tasks">
+<meta itemprop="description" content="Each component of Kubernetes has certain timed tasks, such as log processing, querying of tasks, cache usage, etc. Timed tasks in Kubernetes are implemented through wait packages, such as starting a probe check in a Kubelet.
+1 2 3 4 5 6 7  // Start syncing probe status. This should only be called once. func (m *manager) Start() { // Start syncing readiness. 	go wait.Forever(m.updateReadiness, 0) // Start syncing startup."><meta itemprop="datePublished" content="2022-03-14T09:30:49+08:00" />
+<meta itemprop="dateModified" content="2022-03-14T09:30:49+08:00" />
+<meta itemprop="wordCount" content="1037">
+<meta itemprop="keywords" content="kubernetes," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How Kubernetes implements timed tasks"/>
+<meta name="twitter:description" content="Each component of Kubernetes has certain timed tasks, such as log processing, querying of tasks, cache usage, etc. Timed tasks in Kubernetes are implemented through wait packages, such as starting a probe check in a Kubelet.
+1 2 3 4 5 6 7  // Start syncing probe status. This should only be called once. func (m *manager) Start() { // Start syncing readiness. 	go wait.Forever(m.updateReadiness, 0) // Start syncing startup."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How Kubernetes implements timed tasks</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-14 09:30:49 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1037 words </span>
+          <span class="more-meta"> 5 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#golangs-timed-tasks">Golang&rsquo;s Timed Tasks</a></li>
+        <li><a href="#kubernetes-wait-library">Kubernetes' wait library</a>
+          <ul>
+            <li><a href="#common-apis">Common APIs</a></li>
+            <li><a href="#core-code">Core code</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Each component of Kubernetes has certain timed tasks, such as log processing, querying of tasks, cache usage, etc. Timed tasks in Kubernetes are implemented through wait packages, such as starting a probe check in a Kubelet.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Start syncing probe status. This should only be called once.
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">manager</span><span class="p">)</span> <span class="nf">Start</span><span class="p">()</span> <span class="p">{</span>
+	<span class="c1">// Start syncing readiness.
+</span><span class="c1"></span>	<span class="k">go</span> <span class="nx">wait</span><span class="p">.</span><span class="nf">Forever</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">updateReadiness</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+	<span class="c1">// Start syncing startup.
+</span><span class="c1"></span>	<span class="k">go</span> <span class="nx">wait</span><span class="p">.</span><span class="nf">Forever</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">updateStartup</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="golangs-timed-tasks">Golang&rsquo;s Timed Tasks</h2>
+<p>Before we talk about the Kubernetes wait library, let&rsquo;s take a look at how Golang should implement a timed task.</p>
+<p>The time library in Golang contains a lot of time-related tools, including the Ticker and Timer timers.</p>
+<p>The Ticker will trigger at a fixed interval as soon as it is defined, starting with a timer and requiring no other action.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+
+	<span class="nx">d</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span> <span class="o">*</span> <span class="mi">5</span><span class="p">)</span>
+	<span class="nx">ticker</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTicker</span><span class="p">(</span><span class="nx">d</span><span class="p">)</span>
+
+	<span class="k">defer</span> <span class="nx">ticker</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="o">&lt;-</span><span class="nx">ticker</span><span class="p">.</span><span class="nx">C</span>
+
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;Hello World&#34;</span><span class="p">)</span>
+	<span class="p">}</span>
+
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>And for Timer, it needs to be reset after the timeout to continue triggering.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+	<span class="s">&#34;fmt&#34;</span>
+	<span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+
+	<span class="nx">d</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span> <span class="o">*</span> <span class="mi">5</span><span class="p">)</span>
+	<span class="nx">timer</span> <span class="o">:=</span> <span class="nx">time</span><span class="p">.</span><span class="nf">NewTimer</span><span class="p">(</span><span class="nx">d</span><span class="p">)</span>
+
+	<span class="k">defer</span> <span class="nx">timer</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="o">&lt;-</span><span class="nx">timer</span><span class="p">.</span><span class="nx">C</span>
+
+		<span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;Hello World&#34;</span><span class="p">)</span>
+		<span class="nx">timer</span><span class="p">.</span><span class="nf">Reset</span><span class="p">(</span><span class="nx">d</span><span class="p">)</span>
+	<span class="p">}</span>
+
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Note. Regardless of the timer, <code>.C</code> is a unidirectional channel of type <code>chan Time</code> with a capacity of 1. It will be blocked when there is more than 1 data, so that it will not be triggered more than once.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">NewTimer</span><span class="p">(</span><span class="nx">d</span> <span class="nx">Duration</span><span class="p">)</span> <span class="o">*</span><span class="nx">Timer</span> <span class="p">{</span>
+	<span class="nx">c</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">Time</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="nx">t</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Timer</span><span class="p">{</span>
+		<span class="nx">C</span><span class="p">:</span> <span class="nx">c</span><span class="p">,</span>
+		<span class="nx">r</span><span class="p">:</span> <span class="nx">runtimeTimer</span><span class="p">{</span>
+			<span class="nx">when</span><span class="p">:</span> <span class="nf">when</span><span class="p">(</span><span class="nx">d</span><span class="p">),</span>
+			<span class="nx">f</span><span class="p">:</span>    <span class="nx">sendTime</span><span class="p">,</span>
+			<span class="nx">arg</span><span class="p">:</span>  <span class="nx">c</span><span class="p">,</span>
+		<span class="p">},</span>
+	<span class="p">}</span>
+	<span class="nf">startTimer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">t</span><span class="p">.</span><span class="nx">r</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">t</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="kubernetes-wait-library">Kubernetes' wait library</h2>
+<h3 id="common-apis">Common APIs</h3>
+<p>The wait library implements a variety of common APIs to provide the ability to execute functions at regular intervals.</p>
+<h4 id="executes-a-function-periodically-and-never-stops">executes a function periodically and never stops</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Forever calls f every period for ever.
+</span><span class="c1">//
+</span><span class="c1">// Forever is syntactic sugar on top of Until.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">Forever</span><span class="p">(</span><span class="nx">f</span> <span class="kd">func</span><span class="p">(),</span> <span class="nx">period</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This function supports one function argument and one interval, and the function will be executed periodically without stopping.</p>
+<h4 id="executes-a-function-periodically-and-can-accept-a-stop-signal">executes a function periodically and can accept a stop signal</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Until loops until stop channel is closed, running f every period.
+</span><span class="c1">//
+</span><span class="c1">// Until is syntactic sugar on top of JitterUntil with zero jitter factor and
+</span><span class="c1">// with sliding = true (which means the timer for period starts after the f
+</span><span class="c1">// completes).
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">Until</span><span class="p">(</span><span class="nx">f</span> <span class="kd">func</span><span class="p">(),</span> <span class="nx">period</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">,</span> <span class="nx">stopCh</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span> 
+</code></pre></td></tr></table>
+</div>
+</div><p>This function supports providing a function, an interval, and a channel where the stop signal occurs, similar to Forever, but can be stopped by posting a message to stopCh.</p>
+<h4 id="periodically-checks-for-prerequisites">periodically checks for prerequisites</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// Poll tries a condition func until it returns true, an error, or the timeout
+</span><span class="c1">// is reached.
+</span><span class="c1">//
+</span><span class="c1">// Poll always waits the interval before the run of &#39;condition&#39;.
+</span><span class="c1">// &#39;condition&#39; will always be invoked at least once.
+</span><span class="c1">//
+</span><span class="c1">// Some intervals may be missed if the condition takes too long or the time
+</span><span class="c1">// window is too short.
+</span><span class="c1">//
+</span><span class="c1">// If you want to Poll something forever, see PollInfinite.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">Poll</span><span class="p">(</span><span class="nx">interval</span><span class="p">,</span> <span class="nx">timeout</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">,</span> <span class="nx">condition</span> <span class="nx">ConditionFunc</span><span class="p">)</span> <span class="kt">error</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This function will periodically check if the condition is checked successfully at interval intervals.</p>
+<h4 id="periodically-checks-for-preconditions-until-the-check-is-successful-or-stops">periodically checks for preconditions until the check is successful or stops</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// PollUntil tries a condition func until it returns true, an error or stopCh is
+</span><span class="c1">// closed.
+</span><span class="c1">//
+</span><span class="c1">// PollUntil always waits interval before the first run of &#39;condition&#39;.
+</span><span class="c1">// &#39;condition&#39; will always be invoked at least once.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">PollUntil</span><span class="p">(</span><span class="nx">interval</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">,</span> <span class="nx">condition</span> <span class="nx">ConditionFunc</span><span class="p">,</span> <span class="nx">stopCh</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span> <span class="kt">error</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="core-code">Core code</h3>
+<p>The wait library&rsquo;s timed task API is based on the <code>JitterUntil</code> implementation.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// JitterUntil loops until stop channel is closed, running f every period.
+</span><span class="c1">//
+</span><span class="c1">// If jitterFactor is positive, the period is jittered before every run of f.
+</span><span class="c1">// If jitterFactor is not positive, the period is unchanged and not jittered.
+</span><span class="c1">//
+</span><span class="c1">// If sliding is true, the period is computed after f runs. If it is false then
+</span><span class="c1">// period includes the runtime for f.
+</span><span class="c1">//
+</span><span class="c1">// Close stopCh to stop. f may not be invoked if stop channel is already
+</span><span class="c1">// closed. Pass NeverStop to if you don&#39;t want it stop.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">JitterUntil</span><span class="p">(</span><span class="nx">f</span> <span class="kd">func</span><span class="p">(),</span> <span class="nx">period</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span><span class="p">,</span> <span class="nx">jitterFactor</span> <span class="kt">float64</span><span class="p">,</span> <span class="nx">sliding</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">stopCh</span> <span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span> <span class="p">{</span>
+	<span class="kd">var</span> <span class="nx">t</span> <span class="o">*</span><span class="nx">time</span><span class="p">.</span><span class="nx">Timer</span>
+	<span class="kd">var</span> <span class="nx">sawTimeout</span> <span class="kt">bool</span>
+
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="k">select</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">stopCh</span><span class="p">:</span>
+			<span class="k">return</span>
+		<span class="k">default</span><span class="p">:</span>
+		<span class="p">}</span>
+
+		<span class="nx">jitteredPeriod</span> <span class="o">:=</span> <span class="nx">period</span>
+		<span class="k">if</span> <span class="nx">jitterFactor</span> <span class="p">&gt;</span> <span class="mf">0.0</span> <span class="p">{</span>
+			<span class="nx">jitteredPeriod</span> <span class="p">=</span> <span class="nf">Jitter</span><span class="p">(</span><span class="nx">period</span><span class="p">,</span> <span class="nx">jitterFactor</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="k">if</span> <span class="p">!</span><span class="nx">sliding</span> <span class="p">{</span>
+			<span class="nx">t</span> <span class="p">=</span> <span class="nf">resetOrReuseTimer</span><span class="p">(</span><span class="nx">t</span><span class="p">,</span> <span class="nx">jitteredPeriod</span><span class="p">,</span> <span class="nx">sawTimeout</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+			<span class="k">defer</span> <span class="nx">runtime</span><span class="p">.</span><span class="nf">HandleCrash</span><span class="p">()</span>
+			<span class="nf">f</span><span class="p">()</span>
+		<span class="p">}()</span>
+
+		<span class="k">if</span> <span class="nx">sliding</span> <span class="p">{</span>
+			<span class="nx">t</span> <span class="p">=</span> <span class="nf">resetOrReuseTimer</span><span class="p">(</span><span class="nx">t</span><span class="p">,</span> <span class="nx">jitteredPeriod</span><span class="p">,</span> <span class="nx">sawTimeout</span><span class="p">)</span>
+		<span class="p">}</span>
+
+		<span class="c1">// NOTE: b/c there is no priority selection in golang
+</span><span class="c1"></span>		<span class="c1">// it is possible for this to race, meaning we could
+</span><span class="c1"></span>		<span class="c1">// trigger t.C and stopCh, and t.C select falls through.
+</span><span class="c1"></span>		<span class="c1">// In order to mitigate we re-check stopCh at the beginning
+</span><span class="c1"></span>		<span class="c1">// of every loop to prevent extra executions of f().
+</span><span class="c1"></span>		<span class="k">select</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">stopCh</span><span class="p">:</span>
+			<span class="k">return</span>
+		<span class="k">case</span> <span class="o">&lt;-</span><span class="nx">t</span><span class="p">.</span><span class="nx">C</span><span class="p">:</span>
+			<span class="nx">sawTimeout</span> <span class="p">=</span> <span class="kc">true</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The 5 parameters of <code>JitterUntil</code>.</p>
+<table>
+<thead>
+<tr>
+<th>parameter name</th>
+<th>type</th>
+<th>role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>f</td>
+<td><code>func()</code></td>
+<td>a logical function to be executed at regular intervals</td>
+</tr>
+<tr>
+<td>period</td>
+<td><code>time.Duration</code></td>
+<td>the time interval of the timed task</td>
+</tr>
+<tr>
+<td>jitterFactor</td>
+<td><code>float64</code></td>
+<td>if greater than 0.0 the interval becomes a random value from duration to duration + maxFactor * duration</td>
+</tr>
+<tr>
+<td>sliding</td>
+<td><code>bool</code></td>
+<td>whether the execution time of the logic is not counted in the interval</td>
+</tr>
+<tr>
+<td>stopCh</td>
+<td><code>&lt;-chan struct{}</code></td>
+<td>the channel that receives the stop signal</td>
+</tr>
+</tbody>
+</table>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/kubernetes/">kubernetes</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/kubefed/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Kubernetes Multi-Cluster Management: Kubefed (Federation v2)</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/podman/">
+            <span class="next-text nav-default">Container tool without Daemon process: Podman</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

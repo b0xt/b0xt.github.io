@@ -1,0 +1,2215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>The principle of Go language garbage collector implementation - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="In almost all modern programming languages, the garbage collector is a complex system that requires a lot of effort in order to reclaim the deprecated memory without affecting the user program. Java&amp;rsquo;s garbage collection mechanism is a good example. Java 8 contains four garbage collectors, linear, concurrent, parallel marker removal, and G1. It takes a lot of effort to understand how they work and the details of their implementation. In" /><meta name="keywords" content="golang, Garbage Collector" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2021-12/golang-garbage-collector/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="The principle of Go language garbage collector implementation" />
+<meta property="og:description" content="In almost all modern programming languages, the garbage collector is a complex system that requires a lot of effort in order to reclaim the deprecated memory without affecting the user program. Java&rsquo;s garbage collection mechanism is a good example. Java 8 contains four garbage collectors, linear, concurrent, parallel marker removal, and G1. It takes a lot of effort to understand how they work and the details of their implementation. In" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2021-12/golang-garbage-collector/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-12-05T11:38:38+08:00" />
+<meta property="article:modified_time" content="2021-12-05T11:38:38+08:00" />
+
+<meta itemprop="name" content="The principle of Go language garbage collector implementation">
+<meta itemprop="description" content="In almost all modern programming languages, the garbage collector is a complex system that requires a lot of effort in order to reclaim the deprecated memory without affecting the user program. Java&rsquo;s garbage collection mechanism is a good example. Java 8 contains four garbage collectors, linear, concurrent, parallel marker removal, and G1. It takes a lot of effort to understand how they work and the details of their implementation. In"><meta itemprop="datePublished" content="2021-12-05T11:38:38+08:00" />
+<meta itemprop="dateModified" content="2021-12-05T11:38:38+08:00" />
+<meta itemprop="wordCount" content="11589">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="The principle of Go language garbage collector implementation"/>
+<meta name="twitter:description" content="In almost all modern programming languages, the garbage collector is a complex system that requires a lot of effort in order to reclaim the deprecated memory without affecting the user program. Java&rsquo;s garbage collection mechanism is a good example. Java 8 contains four garbage collectors, linear, concurrent, parallel marker removal, and G1. It takes a lot of effort to understand how they work and the details of their implementation. In"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">The principle of Go language garbage collector implementation</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-12-05 11:38:38 </span>
+        <div class="post-category">
+            <a href="/categories/skills/"> skills </a>
+            </div>
+          <span class="more-meta"> 11589 words </span>
+          <span class="more-meta"> 24 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#design-principles">Design Principles</a>
+          <ul>
+            <li><a href="#mark-sweep">Mark-Sweep</a></li>
+            <li><a href="#three-color-abstraction">Three-color abstraction</a></li>
+            <li><a href="#barrier-techniques">Barrier techniques</a></li>
+            <li><a href="#incremental-and-concurrent">Incremental and concurrent</a></li>
+          </ul>
+        </li>
+        <li><a href="#evolutionary-process">Evolutionary Process</a>
+          <ul>
+            <li><a href="#concurrent-garbage-collection">Concurrent Garbage Collection</a></li>
+            <li><a href="#recycle-heap-target">Recycle heap target</a></li>
+            <li><a href="#mixed-write-barriers">Mixed write barriers</a></li>
+          </ul>
+        </li>
+        <li><a href="#implementation-principles">Implementation Principles</a>
+          <ul>
+            <li><a href="#global-variables">Global variables</a></li>
+            <li><a href="#trigger-timing">Trigger timing</a></li>
+            <li><a href="#garbage-collection-start">Garbage collection start</a></li>
+            <li><a href="#concurrent-scanning-with-tagging-assistance">Concurrent scanning with tagging assistance</a></li>
+            <li><a href="#marker-termination">Marker termination</a></li>
+            <li><a href="#memory-cleanup">Memory cleanup</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>In almost all modern programming languages, the garbage collector is a complex system that requires a lot of effort in order to reclaim the deprecated memory without affecting the user program.</p>
+<p>Java&rsquo;s garbage collection mechanism is a good example. Java 8 contains four garbage collectors, linear, concurrent, parallel marker removal, and G1. It takes a lot of effort to understand how they work and the details of their implementation.</p>
+<p>In this section, we will not only discuss the common garbage collection mechanisms and analyze their evolution from the v1.0 version of the Go language, but also dive into the source code to analyze how the garbage collectors work.</p>
+<h2 id="design-principles">Design Principles</h2>
+<p>Today&rsquo;s programming languages typically use both manual and automatic memory management. Programming languages such as C, C++, and Rust use manual memory management where engineers need to actively request or release memory, while languages such as Python, Ruby, Java, and Go use automatic memory management systems, generally garbage collection mechanisms, although Objective-C chooses automatic reference counting. Although reference counting is also an automatic memory management mechanism, we will not go into detail about it here; the focus of this section is still on garbage collection.</p>
+<p>I believe that many people have the impression that the garbage collector is a suspended program (Stop the world, STW). As the user program requests more and more memory, the garbage in the system gradually increases; when the memory occupation of the program reaches a certain threshold, the entire application will be suspended and the garbage collector will scan all the objects that have been allocated and reclaim the memory space that is no longer in use.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/cb15afcee17b414db3d27561a2733cd4.png" alt=""></p>
+<p>In the above diagram, the user program (Mutator) requests memory on the heap through the memory allocator (Allocator) and the garbage collector (Collector) reclaims the memory space on the heap. The memory allocator and the garbage collector together manage the heap memory space in the program. In this section, we will go over the key theories involved in Go language garbage collection to help us better understand the rest of this section.</p>
+<h3 id="mark-sweep">Mark-Sweep</h3>
+<p>The Mark-Sweep algorithm is the most common garbage collection algorithm. The Mark-Sweep collector is a trace-based garbage collector whose execution can be divided into two phases: Mark and Sweep.</p>
+<ol>
+<li>marking phase - finding and marking all surviving objects in the heap from the root object.</li>
+<li>the cleanup phase - iterates through all objects in the heap, reclaiming unmarked garbage objects and adding the reclaimed memory to the free chain.</li>
+</ol>
+<p>As shown in the figure below, the memory space contains multiple objects, we start from the root object and iterate through the object&rsquo;s children and mark the objects reachable from the root node as alive, i.e., A, C and D. The remaining three objects, B, E and F, are treated as garbage because they are not reachable from the root node.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/85df732106db468bbf8d9eb7f8e611b1.png" alt=""></p>
+<p>After the tagging phase, it enters the cleanup phase, in which the collector traverses all objects in the heap in turn, releasing the untagged B, E, and F objects and chaining the new free memory space in a chain structure for the memory allocator to use.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/a83b7999d7514623802cf91827df1b4f.png" alt=""></p>
+<p>Here is the most traditional marker removal algorithm, the garbage collector starts from the root object of garbage collection, recursively iterates through the sub-objects pointed to by these objects and marks all the reachable objects as alive; after the marking phase, the garbage collector will sequentially iterate through the objects in the heap and remove the garbage from them, the whole process needs to mark the alive status of the objects, and the user program cannot be executed during the garbage collection process, we need to use a more complex mechanism to solve the problem of STW.</p>
+<h3 id="three-color-abstraction">Three-color abstraction</h3>
+<p>To address the long STW caused by the original marker removal algorithm, most modern trace garbage collectors implement a variant of the three-color marker algorithm to reduce the STW time. The three-color tagging algorithm classifies objects in the program into three categories: white, black, and gray.</p>
+<p>1 white objects - potentially garbage whose memory may be reclaimed by the garbage collector.
+2. black objects - active objects, including objects without any reference to external pointers and objects reachable from the root object.
+3. gray objects - active objects, because of the presence of external pointers to white objects, whose children are scanned by the garbage collector.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/515e8e66203842d78daa1595d2d5ea47.png" alt=""></p>
+<p>When the garbage collector starts working, there are no black objects in the program, the root object of garbage collection will be marked as gray, the garbage collector will only take objects from the gray object collection and start scanning, the marking phase will end when there are no objects in the gray collection.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/1939c921d2fe43a8beeaa8df331214e2.png" alt=""></p>
+<p>The working principle of the three-colored marker garbage collector is simple and we can summarize it in the following steps.</p>
+<ol>
+<li>select a gray object from the set of gray objects and mark it as black.</li>
+<li>mark all objects pointed to by the black object as gray, ensuring that neither the object nor the objects referenced by it will be reclaimed.</li>
+<li>repeat the above two steps until there are no gray objects in the object graph.</li>
+</ol>
+<p>When the marking phase of the three-color marker cleanup is over, there are no gray objects in the heap of the application, we can only see black surviving objects and white garbage objects, which can be recycled by the garbage collector.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/7854ffb112a540a2bc69219bf4d93716.png" alt=""></p>
+<p>Because the user program may modify the object&rsquo;s pointer during the marker execution, the three-color marker removal algorithm itself cannot be executed concurrently or incrementally; it still requires STW. In the three-color marker process shown below, the user program creates a reference from object A to object D, but since there is no longer a gray object in the program, object D is incorrectly reclaimed by the garbage collector.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/70f7cd533a64459091fdb2e1da22680f.png" alt=""></p>
+<p>Objects that should not be reclaimed but are reclaimed are very serious errors in memory management. We call such errors hanging pointers, i.e., pointers that do not point to a legal object of a specific type, affecting memory security. To mark objects concurrently or incrementally still requires the use of barrier techniques.</p>
+<h3 id="barrier-techniques">Barrier techniques</h3>
+<p>The memory barrier technique is a barrier instruction that allows the CPU or compiler to follow specific constraints when executing memory-related operations. Most modern processors today execute instructions out of order to maximize performance, but the technique ensures that memory operations are sequential, and that operations executed before the memory barrier must precede those executed after the memory barrier.</p>
+<p>To guarantee correctness in concurrent or incremental marking algorithms, we need to reach one of the following two types of Tri-color invariant (TCI).</p>
+<ol>
+<li>strong tricolor invariance - black objects do not point to white objects, only to gray objects or black objects.</li>
+<li>weak tricolor invariant - the white object pointed to by the black object must contain a reachable path from the gray object through multiple white objects</li>
+</ol>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/7c1cbb80d47f437ba16834d3d7fefed8.png" alt=""></p>
+<p>The above diagram shows the heap memory with strong and weak tricolor invariance. By following either of the two invariants, we can guarantee the correctness of the garbage collection algorithm, and the barrier technique is an important technique to guarantee tricolor invariance during concurrent or incremental marking.</p>
+<p>The barrier technique in garbage collection is more like a hook method, which is a piece of code that is executed when the user program reads an object, creates a new object, and updates the object pointer.</p>
+<p>Depending on the type of operation, we can divide them into Read barriers and Write barriers. Since Read barriers require code fragments to be added to the read operation, which has a significant impact on the performance of the user program, programming languages tend to use Write barriers to ensure tri-color invariance.</p>
+<p>Here we would like to introduce two write barrier techniques used in Go, namely, the insertion write barrier proposed by Dijkstra and the deletion write barrier proposed by Yuasa, and analyze how they guarantee tri-color invariance and correctness of the garbage collector.</p>
+<h4 id="inserting-write-barriers">Inserting Write Barriers</h4>
+<p>Dijkstra proposed in 1978 the insertion of a write barrier, by which the user program and the garbage collector can guarantee correct program execution while working alternately as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nf">writePointer</span><span class="p">(</span><span class="nx">slot</span><span class="p">,</span> <span class="nx">ptr</span><span class="p">):</span>
+    <span class="nf">shade</span><span class="p">(</span><span class="nx">ptr</span><span class="p">)</span>
+    <span class="o">*</span><span class="nx">slot</span> <span class="p">=</span> <span class="nx">ptr</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The above pseudo-code for inserting the write barrier is pretty self-explanatory. Whenever we execute an expression like *slot = ptr, we execute the above write barrier to try to change the color of the pointer via the shade function. If the ptr pointer is white, then this function will set the object to gray, otherwise it will stay the same.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/bb28ce877f8d466d8468253ab42cfe14.png" alt=""></p>
+<p>Assuming that we use Dijkstra&rsquo;s proposed insertion-write barrier in our application, a scenario in which the garbage collector and the user program run alternately would result in a marking process as shown above.</p>
+<ol>
+<li>the garbage collector marks the root object pointing to object A as black and marks object B pointed to by object A as gray.</li>
+<li>the user program modifies the pointer to object A and points the pointer to object B to object C, which triggers the write barrier to mark object C as gray.</li>
+<li>the garbage collector iterates through the other gray objects in the program and marks each of them as black.</li>
+</ol>
+<p>Dijkstra&rsquo;s insertion-write barrier is a relatively conservative barrier technique that marks all potentially viable objects as gray to satisfy strong tricolor invariance. In the garbage collection process shown above, object B, which is no longer alive, is not recovered; if we change the pointer to object C back to B between the second and third steps, the garbage collector still considers object C alive, and these incorrectly marked garbage objects are recovered only in the next loop.</p>
+<p>Although the plug-in Dijkstra write barrier is very simple to implement and guarantees strong tricolor invariance, it also has significant drawbacks. Because objects on the stack are also considered root objects in garbage collection, Dijkstra must either add a write barrier to objects on the stack or rescan the stack at the end of the marking phase in order to ensure memory safety, each of which has its own disadvantages. The designer of the algorithm needs to make a trade-off between the two.</p>
+<h4 id="removing-the-write-barrier">Removing the write barrier</h4>
+<p>In his 1990 paper Real-time garbage collection on general-purpose machines, Yuasa proposed removing the write barrier because once it starts working, it guarantees the reachability of all objects on the heap when the write barrier is turned on. This is why it is also called Snapshot GC.</p>
+<blockquote>
+<p>This guarantees that no objects will become unreachable to the garbage collector traversal all objects which are live at the beginning of garbage collection will be reached even if the pointers to them are overwritten.</p>
+</blockquote>
+<p>The algorithm will guarantee the correctness of the program when garbage collection is performed incrementally or concurrently using a write barrier as shown below.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nf">writePointer</span><span class="p">(</span><span class="nx">slot</span><span class="p">,</span> <span class="nx">ptr</span><span class="p">)</span>
+    <span class="nf">shade</span><span class="p">(</span><span class="o">*</span><span class="nx">slot</span><span class="p">)</span>
+    <span class="o">*</span><span class="nx">slot</span> <span class="p">=</span> <span class="nx">ptr</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The above code will paint the old object in white gray when the reference to the old object is removed, so that removing the write barrier will ensure weak tricolor invariance and the downstream object referenced by the old object can definitely be referenced by the gray object.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/6358bdb416e0440c9fd317567ceb8a11.png" alt=""></p>
+<p>Assuming that we use Yuasa&rsquo;s proposed removal of the write barrier in our application, a scenario in which the garbage collector and the user program run alternately would result in a marking process as shown above.</p>
+<ol>
+<li>the garbage collector marks the root object pointing to object A as black and marks object B pointed to by object A as gray.</li>
+<li>the user program points the pointer of object A originally pointing to B to C, triggering the removal of the write barrier, but leaves the object B unchanged because it is already gray.</li>
+<li>the user program removes the pointer to object B originally pointing to C, triggering the removal of the write barrier, and the white C object is grayed out.
+the garbage collector iterates through the other gray objects in the program in turn, marking them each as black.</li>
+</ol>
+<p>The third step in the above procedure triggers Yuasa to remove the coloring of the write barrier because the user program removes the pointer of B to the C object, so the two objects C and D will violate strong and weak trichromatic invariance, respectively.</p>
+<ol>
+<li>strong tricolor invariant - the black A object points directly to the white C object.</li>
+<li>weak tricolor invariance - the garbage collector cannot access both white C and D objects from some gray object through several consecutive white objects.</li>
+</ol>
+<p>Yuasa removes the write barrier by coloring the C object to ensure that the C object and the downstream D object survive this garbage collection loop and avoid hanging pointers to ensure the correctness of the user program.</p>
+<h3 id="incremental-and-concurrent">Incremental and concurrent</h3>
+<p>Traditional garbage collection algorithms suspend the application during the execution of garbage collection. Once garbage collection is triggered, the garbage collector will seize CPU usage to occupy a large amount of computational resources to complete the marking and purging work, however, many applications pursuing real-time cannot accept a long STW.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/e8fcc11a741f4c14a6fea1d7c340e15f.png" alt=""></p>
+<p>Computational resources were not as abundant in ancient times as they are today, and today&rsquo;s computers tend to have multi-core processors, and the garbage collector wastes a large amount of computational resources once it starts executing. In order to reduce the maximum time that an application can pause and the total pause time for garbage collection, we would optimize the modern garbage collector using the following strategy.</p>
+<ul>
+<li>Incremental garbage collection - incrementally marking and removing garbage, reducing the maximum amount of time an application can be suspended.</li>
+<li>Concurrent garbage collection - using the computing resources of multiple cores to mark and remove garbage concurrently while the user program is executing.</li>
+</ul>
+<p>Because both incremental and concurrent can run alternately with the user program, we need to use barrier techniques to ensure correct garbage collection; at the same time, the application cannot wait until memory overflows to trigger garbage collection, because when memory is low, the application can no longer allocate memory, which is no different from directly suspending the program. Incremental and concurrent garbage collection needs to be triggered in advance and complete the whole loop before memory runs out, avoiding a long suspension of the program.</p>
+<h4 id="incremental-collector">Incremental Collector</h4>
+<p>Incremental garbage collection is a solution to reduce the maximum amount of time a program can be paused by slicing an otherwise long pause into multiple smaller GC time slices, which reduces the maximum amount of time an application can be paused, even though it takes longer from the start of garbage collection to the end.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/4667435c5b1e4efbb776ff3091b9ae16.png" alt=""></p>
+<p>It should be noted that incremental garbage collection needs to be used with the tri-color marking method. To ensure correct garbage collection, we need to turn on the write barrier before garbage collection starts, so that user programs modifying memory will go through the write barrier first, ensuring strong tri-color invariance or weak tri-color invariance of object relationships in heap memory. Although incremental garbage collection can reduce the maximum program pause time, incremental collection also increases the total time of a GC loop, and during garbage collection, the user program also needs to bear additional computational overhead because of the write barrier, so incremental garbage collection does not bring only benefits, but the overall benefits still outweigh the disadvantages.</p>
+<h4 id="concurrent-collector">Concurrent Collector</h4>
+<p>Concurrent garbage collection reduces not only the maximum suspension time of the program, but also the entire garbage collection phase. By turning on the read/write barrier, <strong>taking advantage of multi-core parallel execution with the user program</strong> , concurrent garbage collectors can indeed reduce the impact of garbage collection on the application by.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/0f363017327b41179a56b06123448d0c.png" alt=""></p>
+<p>Although the concurrent collector can run with the user program, not all phases can run with the user program, and some phases still need to suspend the user program, but compared with the traditional algorithm, concurrent garbage collection can execute the work that can be executed concurrently as much as possible; of course, because of the introduction of the read-write barrier, concurrent garbage collector must also bring extra overhead, which will not only increase the total time of garbage collection, but also affect the user program, which is something we must pay attention to when designing the garbage collection strategy.</p>
+<h2 id="evolutionary-process">Evolutionary Process</h2>
+<p>The Go language garbage collector has been evolving since day one, except for a few versions without major updates, almost every minor release will improve the performance of garbage collection, and along with the performance improvement is the complexity of the garbage collector code, this section will analyze the evolution of the garbage collector from the Go language v1.0.</p>
+<ol>
+<li>v1.0 - a fully serialized tagging and purging process, requiring a pause of the entire process.</li>
+<li>v1.1 - parallel execution of the mark and purge phases of garbage collection on multicore hosts.</li>
+<li>v1.3 - runtime added support for accurate scanning of stack memory based on the assumption that only values of pointer types contain pointers, enabling truly accurate garbage collection.
+<ul>
+<li>the conversion of unsafe.Pointer types to values of integer types identified as illegitimate, which could cause serious problems such as hanging pointers.</li>
+</ul>
+</li>
+<li>v1.5 - Implemented a concurrent garbage collector based on a three-color marker sweep.
+<ul>
+<li>a significant reduction in garbage collection latency from several hundred ms to less than 10ms.</li>
+<li>calculating the appropriate time for garbage collection to start and accelerating the process by concurrency.</li>
+</ul>
+</li>
+<li>v1.6 - implementation of a decentralized garbage collection coordinator.
+<ul>
+<li>explicitly based state machine enabling any Goroutine to trigger state migration for garbage collection.</li>
+<li>using dense bitmaps instead of heap memory represented by idle chains to reduce CPU usage during the purge phase.</li>
+</ul>
+</li>
+<li>v1.7 - reducing garbage collection time to less than 2ms by parallel stack shrinkage.</li>
+<li>v1.8 - reducing garbage collection time to within 0.5ms using a hybrid write barrier.</li>
+<li>v1.9 - completely removed the process of rescanning the stack for suspended procedures.</li>
+<li>v1.10 - updated the implementation of the garbage collection modulator (Pacer) to separate soft and hard heap size targets.</li>
+<li>v1.12 - simplifying several phases of the garbage collector with a new marked termination algorithm.</li>
+<li>v1.13 - solving the problem of returning memory to the operating system for applications with excessive transient memory usage with a new Scavenger.</li>
+<li>v1.14 - optimizing the speed of memory allocation with a new page allocator.</li>
+</ol>
+<p>We can see from the evolution of the Go language garbage collector that the implementation and algorithms of the component have become more and more complex. The initial garbage collector was an imprecise single-threaded STW collector, but the latest version of the garbage collector supports concurrent garbage collection, decentralized coordination, and other features, and we will introduce the components and features associated with the latest version of the garbage collector here.</p>
+<h3 id="concurrent-garbage-collection">Concurrent Garbage Collection</h3>
+<p>The Go language introduced concurrent garbage collector in v1.5. The garbage collector uses the three-color abstraction and write barrier techniques we mentioned above to ensure the correctness of the garbage collector execution.</p>
+<p>First, the concurrent garbage collector must trigger the garbage collection loop at the right point in time. Assuming our Go language program is running on a 4-core physical machine, then after garbage collection starts, the collector takes 25% of the computational resources in the background to scan and mark objects in memory.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/fe81e049dd4045b8a5b6ac16bec4dec0.png" alt=""></p>
+<p>The Go language&rsquo;s concurrent garbage collector pauses the program to do some preparatory work for marking objects before scanning them, including starting the background marked garbage collector and turning on the write barrier. If the garbage collector executing in the background is not fast enough and the application requests memory faster than expected, the runtime will let the application requesting memory assist in completing the scanning phase of garbage collection, and after the marking and marking termination phases are over it will enter an asynchronous cleanup phase to reclaim the unused memory increments.</p>
+<p>The v1.5 implementation of the concurrent garbage collection strategy has a dedicated Goroutine responsible for synchronizing and coordinating the state of garbage collection among processors. When other Goroutines discover that garbage collection needs to be triggered, they need to notify the main Goroutine responsible for modifying the state, however this notification process introduces a certain delay, the time window of this delay is likely to be uncontrollable, and the user program will continue to allocate memory during this time.</p>
+<p>v1.6 introduces a decentralized garbage collection coordination mechanism that turns the garbage collector into an explicit state machine, and any Goroutine can call methods to trigger the migration of state.</p>
+<ul>
+<li>runtime.gcStart - switches from _GCoff to _GCmark phase, enters the concurrent mark phase and opens the write barrier.</li>
+<li>runtime.gcMarkDone - call * runtime.gcMarkTermination if all reachable objects have finished scanning.</li>
+<li>runtime.gcMarkTermination - converts from _GCmark to _GCmarktermination phase, enters mark termination phase and enters _GCoff upon completion.</li>
+</ul>
+<p>The above three methods were introduced in a commit related to the <a href="https://github.com/golang/go/issues/11970">runtime: replace GC coordinator with state machine</a> issue, and they remove what used to be a centralized state migration process.</p>
+<h3 id="recycle-heap-target">Recycle heap target</h3>
+<p>STW&rsquo;s garbage collector, although it needs to pause the program, can effectively control the size of the heap memory. The default configuration of the Go language runtime triggers a new round of garbage collection when the heap memory reaches twice the size of the previous one, a behavior that can be adjusted by the environment variable GOGC, which by default has a value of 100, i.e. it takes a 100% growth of the heap memory to trigger a GC.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/a66070eb671b487990e239ceef288e70.png" alt=""></p>
+<p>Because the concurrent garbage collector will run with the program, it cannot accurately control the size of the heap memory. The concurrent collector needs to trigger garbage collection before reaching the target so that the memory size can be controlled, and the concurrent collector needs to ensure that the heap memory at the end of garbage collection is as consistent as possible with the user-configured GOGC.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/0c2435ff1fc7464e8484d6b8f9dfdae1.png" alt=""></p>
+<p>The Go language v1.5 introduces concurrent garbage collector while using the garbage collection pacing algorithm to calculate the optimal time to trigger garbage collection, ensuring that the trigger time neither wastes computational resources nor exceeds the expected heap size. As shown above, the black part is the heap size marked after the last garbage collection, the green part is the newly allocated memory since the last garbage collection ended, and since we use concurrent garbage collection, the yellow part is the memory allocated during the garbage collection, and the last red part is the difference between the end of garbage collection and the target, we want to reduce the red part of memory as much as possible to reduce the We want to reduce as much as possible the red part of the memory to reduce the extra overhead and the suspension time of the program.</p>
+<p>The garbage collection pacing algorithm was introduced along with v1.5, and the goal of the algorithm is to optimize the heap growth rate and the CPU utilization of the garbage collector.23 In v1.10, the algorithm was optimized, and the original destination heap size was split into two goals: hard and soft.24 Because adjusting the execution frequency of garbage collection involves more complex formulas, which are of limited help in understanding the principle of garbage collection, this section does not include the following more limited, this section will not be introduced, interested readers can read for themselves.</p>
+<h3 id="mixed-write-barriers">Mixed write barriers</h3>
+<p>Prior to Go v1.7, the runtime used Dijkstra to insert write barriers to ensure strong tricolor invariance, but the runtime did not turn on inserting write barriers on all garbage collection root objects. Because applications can contain hundreds or thousands of Goroutines, and the root object of garbage collection generally includes global variables and stack objects, it would be a huge additional overhead to turn on write barriers on the stacks of hundreds of Goroutines at runtime, so the Go team chose to pause the program at the end of the marking phase, mark all stack objects as gray, and rescan In a program with a lot of active Goroutines, the rescan process takes 10-100ms.</p>
+<p>The Go language in v1.8 combines the Dijkstra insertion write barrier and the Yuasa deletion write barrier to form a hybrid write barrier that marks overwritten objects as gray and marks new objects as gray when the current stack is not scanned as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nf">writePointer</span><span class="p">(</span><span class="nx">slot</span><span class="p">,</span> <span class="nx">ptr</span><span class="p">):</span>
+    <span class="nf">shade</span><span class="p">(</span><span class="o">*</span><span class="nx">slot</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">current</span> <span class="nx">stack</span> <span class="nx">is</span> <span class="nx">grey</span><span class="p">:</span>
+        <span class="nf">shade</span><span class="p">(</span><span class="nx">ptr</span><span class="p">)</span>
+    <span class="o">*</span><span class="nx">slot</span> <span class="p">=</span> <span class="nx">ptr</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>To remove the stack rescanning process, in addition to introducing a mixed write barrier, we need to mark all new objects created as black during the mark phase of garbage collection to prevent objects in newly allocated stack memory and heap memory from being reclaimed incorrectly, since the stack memory exists mark phase will eventually turn black, so there is no longer any need to rescan the stack space.</p>
+<h2 id="implementation-principles">Implementation Principles</h2>
+<p>Before describing the evolution of the garbage collector, we need a preliminary understanding of the execution cycle of the latest garbage collector, which will be more helpful in understanding its global design. garbage collection in Go language can be divided into four different phases of purge termination, mark, mark termination and purge, which accomplish different jobs.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/8ef2126502374f8886c9892549efee33.png" alt=""></p>
+<ol>
+<li>the cleanup termination phase.
+<ol>
+<li><strong>pause the program</strong> , at which point all processors go to the Safe point (Safe point).</li>
+<li>if the current garbage collection loop is forcibly triggered, we also need to deal with the memory management units that have not yet been cleaned up.</li>
+</ol>
+</li>
+<li>the marking phase.
+<ol>
+<li>switch the state to <code>_GCmark</code>, turn on the write barrier, user program assists (Mutator Assists) and queue the root object.</li>
+<li>resuming execution of the program, the marker process and the user program used to assist will start concurrently marking objects in memory, the write barrier will mark both the overwritten pointer and the new pointer in gray, and all newly created objects will be marked directly in black.</li>
+<li>starts scanning the root object, including the stack of all Goroutines, global objects, and runtime data structures not in the heap, suspending the current processor during the scan of the Goroutine stack.</li>
+<li>processes the objects in the gray queue in turn, marking the objects black and marking the objects they point to gray.</li>
+<li>checking the remaining work using a distributed termination algorithm and entering the mark termination phase when the mark phase is found to be complete.</li>
+</ol>
+</li>
+<li>marking the termination phase.
+<ol>
+<li><strong>pause the program</strong>, switch the state to <code>_GCmarktermination</code> and close the auxiliary marker user program.</li>
+<li>clearing the thread cache on the processor.</li>
+</ol>
+</li>
+<li>the cleanup phase.
+<ol>
+<li>switch state to <code>_GCoff</code> to start the cleanup phase, initialize the cleanup state and turn off the write barrier.</li>
+<li>resuming the user program, with all newly created objects marked white.</li>
+<li>clean up all memory management units concurrently in the background, triggered when a Goroutine requests a new memory management unit.</li>
+</ol>
+</li>
+</ol>
+<p>Although the runtime will only use <code>_GCoff</code>, <code>_GCmark</code> and <code>_GCmarktermination</code> states to represent all phases of garbage collection, the implementation is much more complicated, and this section will analyze the implementation principles in detail according to the different phases of garbage collection.</p>
+<h3 id="global-variables">Global variables</h3>
+<p>There are some relatively important global variables in garbage collection. Before analyzing their process, we will introduce each of these important variables, which recur in the various phases of garbage collection, so it is very important to understand their functions, and we will start with some of the simpler ones.</p>
+<ul>
+<li>runtime.gcphase is the current phase of the garbage collector, which may be in _GCoff, _GCmark and _GCmarktermination, and Goroutine needs to ensure atomicity when reading or modifying this phase.</li>
+<li>runtime.gcBlackenEnabled is a boolean variable that is set to 1 when garbage collection is in the marking phase, where user programs that assist in garbage collection and background marking tasks can black out objects.</li>
+<li>runtime.gcController implements the pacing algorithm for garbage collection, which can determine when parallel garbage collection is triggered and the jobs to be processed.</li>
+<li>runtime.gcpercent is the memory growth percentage to trigger garbage collection, by default 100, i.e. the GC should be triggered when the heap memory grows by 100% compared to the last garbage collection, and the parallel garbage collector will finish garbage collection before reaching that target; * runtime.writeBarrier is the memory growth percentage to trigger garbage collection.</li>
+<li>runtime.writeBarrier is a structure containing the status of the write barrier, where the enabled field indicates whether the write barrier is on or off.</li>
+<li>runtime.worldsema is a global semaphore, and the thread that gets it has the right to suspend the current application.</li>
+</ul>
+<p>In addition to the global variables mentioned above, we need to take a brief look at the runtime.work variable here.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="nx">work</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">full</span>  <span class="nx">lfstack</span>
+	<span class="nx">empty</span> <span class="nx">lfstack</span>
+	<span class="nx">pad0</span>  <span class="nx">cpu</span><span class="p">.</span><span class="nx">CacheLinePad</span>
+
+	<span class="nx">wbufSpans</span> <span class="kd">struct</span> <span class="p">{</span>
+		<span class="nx">lock</span> <span class="nx">mutex</span>
+		<span class="nx">free</span> <span class="nx">mSpanList</span>
+		<span class="nx">busy</span> <span class="nx">mSpanList</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+	<span class="nx">nproc</span>  <span class="kt">uint32</span>
+	<span class="nx">tstart</span> <span class="kt">int64</span>
+	<span class="nx">nwait</span>  <span class="kt">uint32</span>
+	<span class="nx">ndone</span>  <span class="kt">uint32</span>
+	<span class="o">...</span>
+	<span class="nx">mode</span> <span class="nx">gcMode</span>
+	<span class="nx">cycles</span> <span class="kt">uint32</span>
+	<span class="o">...</span>
+	<span class="nx">stwprocs</span><span class="p">,</span> <span class="nx">maxprocs</span> <span class="kt">int32</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This structure contains a number of fields related to garbage collection, such as the number of garbage collection cycles completed, the current cycle time and CPU utilization, the mode of garbage collection, etc. We will see more fields in this structure in later subsections.</p>
+<h3 id="trigger-timing">Trigger timing</h3>
+<p>The runtime determines whether garbage collection should be triggered by the runtime.gcTrigger.test method as follows. When the basic conditions for triggering garbage collection are met - garbage collection is allowed, the program does not crash, and it is not in a garbage collection loop - the method is triggered in three different ways with different checks.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">t</span> <span class="nx">gcTrigger</span><span class="p">)</span> <span class="nf">test</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">enablegc</span> <span class="o">||</span> <span class="nx">panicking</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">gcphase</span> <span class="o">!=</span> <span class="nx">_GCoff</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">false</span>
+	<span class="p">}</span>
+	<span class="k">switch</span> <span class="nx">t</span><span class="p">.</span><span class="nx">kind</span> <span class="p">{</span>
+	<span class="k">case</span> <span class="nx">gcTriggerHeap</span><span class="p">:</span>
+		<span class="k">return</span> <span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_live</span> <span class="o">&gt;=</span> <span class="nx">memstats</span><span class="p">.</span><span class="nx">gc_trigger</span>
+	<span class="k">case</span> <span class="nx">gcTriggerTime</span><span class="p">:</span>
+		<span class="k">if</span> <span class="nx">gcpercent</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">false</span>
+		<span class="p">}</span>
+		<span class="nx">lastgc</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">atomic</span><span class="p">.</span><span class="nf">Load64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">last_gc_nanotime</span><span class="p">))</span>
+		<span class="k">return</span> <span class="nx">lastgc</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">t</span><span class="p">.</span><span class="nx">now</span><span class="o">-</span><span class="nx">lastgc</span> <span class="p">&gt;</span> <span class="nx">forcegcperiod</span>
+	<span class="k">case</span> <span class="nx">gcTriggerCycle</span><span class="p">:</span>
+		<span class="k">return</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">t</span><span class="p">.</span><span class="nx">n</span><span class="o">-</span><span class="nx">work</span><span class="p">.</span><span class="nx">cycles</span><span class="p">)</span> <span class="p">&gt;</span> <span class="mi">0</span>
+	<span class="p">}</span>
+	<span class="k">return</span> <span class="kc">true</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ol>
+<li>gcTriggerHeap - the allocation of heap memory up to the trigger heap size calculated by the controller.</li>
+<li>gcTriggerTime - a new cycle is triggered if it is not triggered within a certain time, the trigger condition is controlled by the runtime.forcegcperiod variable and defaults to 2 minutes.</li>
+<li>gcTriggerCycle - Triggers a new cycle if garbage collection is not currently enabled</li>
+</ol>
+<p>The method runtime.gcStart used to start garbage collection receives a predicate of type runtime.gcTrigger, and all occurrences of the runtime.gcTrigger structure are code that triggers garbage collection.</p>
+<ol>
+<li>runtime.sysmon and runtime.forcegchelper - background running of timing checks and garbage collection.</li>
+<li>runtime.gc - garbage collection triggered manually by the user program.</li>
+<li>runtime.mallocgc - triggers garbage collection based on heap size when requesting memory.</li>
+</ol>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/5ccd784deb554d77a0af27a108a631da.png" alt=""></p>
+<p>In addition to using the system monitor running in the background and the forced garbage collection helper to trigger garbage collection, the other two methods will trigger garbage collection from any processor, this does not require the central component coordination is introduced in the v1.6 version, we will then expand on the three different trigger timing.</p>
+<h4 id="background-trigger">background trigger</h4>
+<p>The runtime opens a Goroutine in the background at application startup to force garbage collection. The duty of the Goroutine is very simple - it calls runtime.gcStart to try to start a new round of garbage collection.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">init</span><span class="p">()</span> <span class="p">{</span>
+	<span class="k">go</span> <span class="nf">forcegchelper</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">forcegchelper</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">forcegc</span><span class="p">.</span><span class="nx">g</span> <span class="p">=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">idle</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+		<span class="nf">goparkunlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">waitReasonForceGGIdle</span><span class="p">,</span> <span class="nx">traceEvGoBlock</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+		<span class="nf">gcStart</span><span class="p">(</span><span class="nx">gcTrigger</span><span class="p">{</span><span class="nx">kind</span><span class="p">:</span> <span class="nx">gcTriggerTime</span><span class="p">,</span> <span class="nx">now</span><span class="p">:</span> <span class="nf">nanotime</span><span class="p">()})</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>To reduce the use of computational resources, the Goroutine calls runtime.goparkunlock in a loop to actively hibernate and wait for other Goroutines to wake up. runtime.forcegchelper is hibernated most of the time, but it is woken up by the system monitor runtime. sysmon wakes up when the garbage collection conditions are met.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">sysmon</span><span class="p">()</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="o">...</span>
+		<span class="k">if</span> <span class="nx">t</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">gcTrigger</span><span class="p">{</span><span class="nx">kind</span><span class="p">:</span> <span class="nx">gcTriggerTime</span><span class="p">,</span> <span class="nx">now</span><span class="p">:</span> <span class="nx">now</span><span class="p">});</span> <span class="nx">t</span><span class="p">.</span><span class="nf">test</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">idle</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+			<span class="nx">forcegc</span><span class="p">.</span><span class="nx">idle</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="kd">var</span> <span class="nx">list</span> <span class="nx">gList</span>
+			<span class="nx">list</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">g</span><span class="p">)</span>
+			<span class="nf">injectglist</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">list</span><span class="p">)</span>
+			<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">forcegc</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The system monitor actively builds a runtime.gcTrigger in each loop and checks if the trigger condition for garbage collection is met. If the condition is met, the system monitor adds the Goroutine held in the runtime.forcegc state to the global queue waiting to be dispatched by the scheduler.</p>
+<h4 id="manually-triggered">manually triggered</h4>
+<p>The user program is actively notified of runtime execution during program runtime via the runtime.GC function, which when called blocks the caller until the current garbage collection loop is complete, and may also pause the entire program during garbage collection via STW.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">GC</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">n</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">cycles</span><span class="p">)</span>
+	<span class="nf">gcWaitOnMark</span><span class="p">(</span><span class="nx">n</span><span class="p">)</span>
+	<span class="nf">gcStart</span><span class="p">(</span><span class="nx">gcTrigger</span><span class="p">{</span><span class="nx">kind</span><span class="p">:</span> <span class="nx">gcTriggerCycle</span><span class="p">,</span> <span class="nx">n</span><span class="p">:</span> <span class="nx">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">})</span>
+	<span class="nf">gcWaitOnMark</span><span class="p">(</span><span class="nx">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+
+	<span class="k">for</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">cycles</span><span class="p">)</span> <span class="o">==</span> <span class="nx">n</span><span class="o">+</span><span class="mi">1</span> <span class="o">&amp;&amp;</span> <span class="nf">sweepone</span><span class="p">()</span> <span class="o">!=</span> <span class="p">^</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">sweep</span><span class="p">.</span><span class="nx">nbgsweep</span><span class="o">++</span>
+		<span class="nf">Gosched</span><span class="p">()</span>
+	<span class="p">}</span>
+
+	<span class="k">for</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">cycles</span><span class="p">)</span> <span class="o">==</span> <span class="nx">n</span><span class="o">+</span><span class="mi">1</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">mheap_</span><span class="p">.</span><span class="nx">sweepers</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">Gosched</span><span class="p">()</span>
+	<span class="p">}</span>
+
+	<span class="nx">mp</span> <span class="o">:=</span> <span class="nf">acquirem</span><span class="p">()</span>
+	<span class="nx">cycle</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">cycles</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">cycle</span> <span class="o">==</span> <span class="nx">n</span><span class="o">+</span><span class="mi">1</span> <span class="o">||</span> <span class="p">(</span><span class="nx">gcphase</span> <span class="o">==</span> <span class="nx">_GCmark</span> <span class="o">&amp;&amp;</span> <span class="nx">cycle</span> <span class="o">==</span> <span class="nx">n</span><span class="o">+</span><span class="mi">2</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nf">mProf_PostSweep</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="nf">releasem</span><span class="p">(</span><span class="nx">mp</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ol>
+<li>the runtime needs to wait for the completion of the mark termination, mark and clear termination phases of the previous loop via runtime.gcWaitOnMark before formally starting garbage collection.</li>
+<li>calling runtime.gcStart to trigger a new round of garbage collection and waiting for the mark termination phase of that round to finish properly via runtime.gcWaitOnMark.</li>
+<li>continuously call runtime.sweepone to clean up all pending memory management units and wait for all cleanup to complete, while waiting for runtime.Gosched to let the processor out.</li>
+<li>after completing the current round of garbage collection cleanup, publish a snapshot of the heap memory state for that phase via runtime.mProf_PostSweep, which allows us to obtain the memory state at that point.</li>
+</ol>
+<p>Manually triggering garbage collection is not particularly common and generally only occurs in runtime test code, although we can call the method directly if we think it is necessary to trigger active garbage collection, but the authors do not consider this a recommended practice.</p>
+<h4 id="requesting-memory">requesting memory</h4>
+<p>The last thing that may trigger garbage collection is runtime.mallocgc. As we described in the previous section on memory allocators, the runtime will divide the objects on the heap into three categories by size: micro-objects, small objects, and large objects, the creation of which may trigger a new garbage collection loop.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+	<span class="nx">shouldhelpgc</span> <span class="o">:=</span> <span class="kc">false</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">size</span> <span class="o">&lt;=</span> <span class="nx">maxSmallSize</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">noscan</span> <span class="o">&amp;&amp;</span> <span class="nx">size</span> <span class="p">&lt;</span> <span class="nx">maxTinySize</span> <span class="p">{</span>
+			<span class="o">...</span>
+			<span class="nx">v</span> <span class="o">:=</span> <span class="nf">nextFreeFast</span><span class="p">(</span><span class="nx">span</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">v</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nx">v</span><span class="p">,</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">shouldhelpgc</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">nextFree</span><span class="p">(</span><span class="nx">tinySpanClass</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="o">...</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="o">...</span>
+			<span class="nx">v</span> <span class="o">:=</span> <span class="nf">nextFreeFast</span><span class="p">(</span><span class="nx">span</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">v</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nx">v</span><span class="p">,</span> <span class="nx">span</span><span class="p">,</span> <span class="nx">shouldhelpgc</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">nextFree</span><span class="p">(</span><span class="nx">spc</span><span class="p">)</span>
+			<span class="p">}</span>
+		  <span class="o">...</span>
+		<span class="p">}</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="nx">shouldhelpgc</span> <span class="p">=</span> <span class="kc">true</span>
+		<span class="o">...</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">shouldhelpgc</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">t</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">gcTrigger</span><span class="p">{</span><span class="nx">kind</span><span class="p">:</span> <span class="nx">gcTriggerHeap</span><span class="p">});</span> <span class="nx">t</span><span class="p">.</span><span class="nf">test</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nf">gcStart</span><span class="p">(</span><span class="nx">t</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="k">return</span> <span class="nx">x</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ol>
+<li>when there is no free space in the memory management unit of the current thread, creating micro- and small objects requires calling runtime.mcache.nextFree to get a new management unit from the central cache or page heap, at which point garbage collection may be triggered; and</li>
+<li>the runtime.gcTrigger struct must be constructed to try to trigger garbage collection when a user program requests the allocation of a large object of 32KB or more.</li>
+</ol>
+<p>Triggering garbage collection from heap memory requires comparing two fields in runtime.mstats - heap_live, which indicates the number of bytes of live objects in garbage collection, and gc_trigger, which indicates the size of the heap memory that triggered the token; when the number of bytes of live objects in memory is greater than the size of the heap that triggered the garbage collection, a new round of garbage collection starts when the number of bytes of objects alive in memory is larger than the heap size that triggers garbage collection. Here, we will describe the calculation of these two values separately.</p>
+<ol>
+<li>heap_live - to reduce lock contention, the runtime will only update when the central cache allocates or frees memory management units and when large objects are allocated on the heap.</li>
+<li>gc_trigger - call runtime.gcSetTriggerRatio during the mark termination phase to update the heap size for triggering the next garbage collection.</li>
+</ol>
+<p>runtime.gcController calculates the trigger ratio at the end of each loop and sets gc_trigger via runtime.gcSetTriggerRatio, which determines when to trigger garbage collection and how many flagged tasks are processed by the user program and the background, using a feedback-controlled algorithm to determine the timing of triggering garbage collection based on heap growth and garbage The timing of triggering garbage collection is determined by a feedback-controlled algorithm based on heap growth and garbage collection CPU utilization.</p>
+<p>You can find the garbage collection pacing algorithm proposed in v1.5 in runtime.gcControllerState.endCycle, and the soft and hard heap target separation algorithm introduced in v1.10 in runtime.gcControllerState.revise.</p>
+<h3 id="garbage-collection-start">Garbage collection start</h3>
+<p>Garbage collection in the startup process will definitely call runtime.gcStart, although the implementation of this function is more complex, its main responsibility is to modify the global garbage collection state to _GCmark and do some preparatory work, we will introduce the implementation of this function in the following stages.</p>
+<ol>
+<li>two calls to runtime.gcTrigger.test to check whether the garbage collection conditions are met.</li>
+<li>suspending the program, starting the work Goroutine in the background for the tagging task, making sure that all memory management units are cleaned up, and other preparations before the tagging phase begins.</li>
+<li>entering the tagging phase, preparing the tagging job in the background, the tagging job for the root object and the microobject, resuming the user program, and entering the concurrent scanning and tagging phase.</li>
+</ol>
+<p>While verifying the garbage collection condition, this method also calls runtime.sweepone in the loop to clean up the memory cells that have been marked, completing the last garbage collection loop.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcStart</span><span class="p">(</span><span class="nx">trigger</span> <span class="nx">gcTrigger</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">trigger</span><span class="p">.</span><span class="nf">test</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="nf">sweepone</span><span class="p">()</span> <span class="o">!=</span> <span class="p">^</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">sweep</span><span class="p">.</span><span class="nx">nbgsweep</span><span class="o">++</span>
+	<span class="p">}</span>
+
+	<span class="nf">semacquire</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">startSema</span><span class="p">)</span>
+	<span class="k">if</span> <span class="p">!</span><span class="nx">trigger</span><span class="p">.</span><span class="nf">test</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nf">semrelease</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">startSema</span><span class="p">)</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>After verifying the garbage collection conditions and completing the wrap-up, the method obtains the global worldsema semaphore via semacquire, calls runtime.gcBgMarkStartWorkers to start background marker tasks, calls runtime.stopTheWorldWithSema on the system stack to pause the program and call runtime.finishsweep_m to ensure that the last memory cell is reclaimed properly.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcStart</span><span class="p">(</span><span class="nx">trigger</span> <span class="nx">gcTrigger</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nf">semacquire</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">worldsema</span><span class="p">)</span>
+	<span class="nf">gcBgMarkStartWorkers</span><span class="p">()</span>
+	<span class="nx">work</span><span class="p">.</span><span class="nx">stwprocs</span><span class="p">,</span> <span class="nx">work</span><span class="p">.</span><span class="nx">maxprocs</span> <span class="p">=</span> <span class="nx">gomaxprocs</span><span class="p">,</span> <span class="nx">gomaxprocs</span>
+	<span class="o">...</span>
+
+	<span class="nf">systemstack</span><span class="p">(</span><span class="nx">stopTheWorldWithSema</span><span class="p">)</span>
+	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nf">finishsweep_m</span><span class="p">()</span>
+	<span class="p">})</span>
+
+	<span class="nx">work</span><span class="p">.</span><span class="nx">cycles</span><span class="o">++</span>
+	<span class="nx">gcController</span><span class="p">.</span><span class="nf">startCycle</span><span class="p">()</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In addition, the above procedure modifies the state held by the global variable runtime.work, including the number of Goroutines needed for garbage collection and the number of completed loops.</p>
+<p>After all the preparatory work is done, the method enters the final stage of execution. In this phase, we modify the global garbage collection state to _GCmark and perform the following steps in sequence.</p>
+<ol>
+<li>call runtime.gcBgMarkPrepare to initialize the state needed for background scanning.</li>
+<li>calling runtime.gcMarkRootPrepare to scan for root objects on the stack, global variables, etc. and add them to the queue.</li>
+<li>setting the global variable runtime.gcBlackenEnabled, where user programs and marker tasks can blacken objects.</li>
+<li>call runtime.startTheWorldWithSema to start the program and the background task will also start marking objects in the heap.</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcStart</span><span class="p">(</span><span class="nx">trigger</span> <span class="nx">gcTrigger</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nf">setGCPhase</span><span class="p">(</span><span class="nx">_GCmark</span><span class="p">)</span>
+
+	<span class="nf">gcBgMarkPrepare</span><span class="p">()</span>
+	<span class="nf">gcMarkRootPrepare</span><span class="p">()</span>
+
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gcBlackenEnabled</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">now</span> <span class="p">=</span> <span class="nf">startTheWorldWithSema</span><span class="p">(</span><span class="nx">trace</span><span class="p">.</span><span class="nx">enabled</span><span class="p">)</span>
+		<span class="nx">work</span><span class="p">.</span><span class="nx">pauseNS</span> <span class="o">+=</span> <span class="nx">now</span> <span class="o">-</span> <span class="nx">work</span><span class="p">.</span><span class="nx">pauseStart</span>
+		<span class="nx">work</span><span class="p">.</span><span class="nx">tMark</span> <span class="p">=</span> <span class="nx">now</span>
+	<span class="p">})</span>
+	<span class="nf">semrelease</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">startSema</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In analyzing the garbage collection startup process, we have omitted several key processes, including suspending and resuming the application and background task startup, and we will analyze the implementation principles of these processes in detail below.</p>
+<h4 id="suspend-and-resume-programs">Suspend and Resume Programs</h4>
+<p>runtime.stopTheWorldWithSema and runtime.startTheWorldWithSema are a pair of core functions used to pause and resume programs. They have exactly the opposite function, but the program pause will be more complicated than resume, let&rsquo;s look at the implementation of the former principle: the</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">stopTheWorldWithSema</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">_g_</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="nx">sched</span><span class="p">.</span><span class="nx">stopwait</span> <span class="p">=</span> <span class="nx">gomaxprocs</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">gcwaiting</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="nf">preemptall</span><span class="p">()</span>
+	<span class="nx">_g_</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">p</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">status</span> <span class="p">=</span> <span class="nx">_Pgcstop</span>
+	<span class="nx">sched</span><span class="p">.</span><span class="nx">stopwait</span><span class="o">--</span>
+	<span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">p</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">allp</span> <span class="p">{</span>
+		<span class="nx">s</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">status</span>
+		<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="nx">_Psyscall</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">p</span><span class="p">.</span><span class="nx">status</span><span class="p">,</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">_Pgcstop</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">p</span><span class="p">.</span><span class="nx">syscalltick</span><span class="o">++</span>
+			<span class="nx">sched</span><span class="p">.</span><span class="nx">stopwait</span><span class="o">--</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">p</span> <span class="o">:=</span> <span class="nf">pidleget</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">p</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+		<span class="nx">p</span><span class="p">.</span><span class="nx">status</span> <span class="p">=</span> <span class="nx">_Pgcstop</span>
+		<span class="nx">sched</span><span class="p">.</span><span class="nx">stopwait</span><span class="o">--</span>
+	<span class="p">}</span>
+	<span class="nx">wait</span> <span class="o">:=</span> <span class="nx">sched</span><span class="p">.</span><span class="nx">stopwait</span> <span class="p">&gt;</span> <span class="mi">0</span>
+	<span class="k">if</span> <span class="nx">wait</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="p">{</span>
+			<span class="k">if</span> <span class="nf">notetsleep</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">stopnote</span><span class="p">,</span> <span class="mi">100</span><span class="o">*</span><span class="mi">1000</span><span class="p">)</span> <span class="p">{</span>
+				<span class="nf">noteclear</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">stopnote</span><span class="p">)</span>
+				<span class="k">break</span>
+			<span class="p">}</span>
+			<span class="nf">preemptall</span><span class="p">()</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>preemptall, which calls runtime.preemptone, which we introduced earlier. Since the maximum number of active processors in the program is gomaxprocs, runtime.stopTheWorldWithSema will subtract one from this variable each time it finds a stopped processor. will decrement this variable by one each time a stopped processor is found, until all processors have stopped running. The function stops the current processor, waits for a processor on a system call, and fetches and grabs an idle processor in turn, and the status of the processor is updated to _Pgcstop when the function returns, pending a re-wake from the garbage collector.</p>
+<p>The program resumes using runtime.startTheWorldWithSema, which is also relatively simple to implement.</p>
+<ol>
+<li>call runtime.netpoll to fetch pending tasks from the network poller and add them to the global queue.</li>
+<li>calling runtime.procresize to expand or reduce the global processor capacity.</li>
+<li>call runtime.notewakeup or runtime.newm to wake up the processor or create a new thread for the processor in turn.</li>
+<li>creating additional processors to assist in completing tasks if there are too many Goroutines currently waiting to be processed.</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">startTheWorldWithSema</span><span class="p">(</span><span class="nx">emitTraceEvent</span> <span class="kt">bool</span><span class="p">)</span> <span class="kt">int64</span> <span class="p">{</span>
+	<span class="nx">mp</span> <span class="o">:=</span> <span class="nf">acquirem</span><span class="p">()</span>
+	<span class="k">if</span> <span class="nf">netpollinited</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">list</span> <span class="o">:=</span> <span class="nf">netpoll</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+		<span class="nf">injectglist</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">list</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nx">procs</span> <span class="o">:=</span> <span class="nx">gomaxprocs</span>
+	<span class="nx">p1</span> <span class="o">:=</span> <span class="nf">procresize</span><span class="p">(</span><span class="nx">procs</span><span class="p">)</span>
+	<span class="nx">sched</span><span class="p">.</span><span class="nx">gcwaiting</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="o">...</span>
+	<span class="k">for</span> <span class="nx">p1</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">p</span> <span class="o">:=</span> <span class="nx">p1</span>
+		<span class="nx">p1</span> <span class="p">=</span> <span class="nx">p1</span><span class="p">.</span><span class="nx">link</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nx">m</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">mp</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span>
+			<span class="nx">p</span><span class="p">.</span><span class="nx">m</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="nx">mp</span><span class="p">.</span><span class="nx">nextp</span><span class="p">.</span><span class="nf">set</span><span class="p">(</span><span class="nx">p</span><span class="p">)</span>
+			<span class="nf">notewakeup</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">mp</span><span class="p">.</span><span class="nx">park</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nf">newm</span><span class="p">(</span><span class="kc">nil</span><span class="p">,</span> <span class="nx">p</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">npidle</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">nmspinning</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nf">wakep</span><span class="p">()</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The process of suspending and starting a program is relatively simple. Suspending a program will use runtime.preemptall to preempt all processors, and resuming a program will use runtime.notewakeup or runtime.newm to wake up the processors in the program.</p>
+<h4 id="background-marking-mode">Background Marking Mode</h4>
+<p>During garbage collection startup, the runtime will call runtime.gcBgMarkStartWorkers to create Goroutines for each processor globally to perform background marking tasks, each Goroutine will run runtime.gcBgMarkWorker, all Goroutines running runtime. All Goroutines running runtime.gcBgMarkWorker fall into hibernation after startup and wait for the scheduler to wake them up: gcBgMarkWorker</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcBgMarkStartWorkers</span><span class="p">()</span> <span class="p">{</span>
+	<span class="k">for</span> <span class="nx">gcBgMarkWorkerCount</span> <span class="p">&lt;</span> <span class="nx">gomaxprocs</span> <span class="p">{</span>
+		<span class="k">go</span> <span class="nf">gcBgMarkWorker</span><span class="p">()</span>
+
+		<span class="nf">notetsleepg</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">bgMarkReady</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+		<span class="nf">noteclear</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">bgMarkReady</span><span class="p">)</span>
+
+		<span class="nx">gcBgMarkWorkerCount</span><span class="o">++</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>These Goroutines have a one-to-one relationship with the processor, and runtime.findrunnable executes the Goroutine&rsquo;s auxiliary concurrent object tagging on the current processor when garbage collection is in the tagging phase and the current processor does not need to do any tasks.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/02ced502333247a0a30f5ba86367b7ca.png" alt=""></p>
+<p>The scheduler can also obtain and execute tasks for background marking in the scheduling loop runtime.schedule via the garbage collection controller&rsquo;s runtime.gcControllerState.findRunnabledGCWorker.</p>
+<p>There are three different modes of Goroutine for concurrently scanning objects runtime.gcMarkWorkerMode, and the three different modes of Goroutine use completely different strategies for marking objects, and the garbage collection controller executes different types of work co-workers as needed.</p>
+<ul>
+<li>gcMarkWorkerDedicatedMode - the processor is dedicated to marking objects that will not be preempted by the scheduler.</li>
+<li>gcMarkWorkerFractionalMode - when the garbage collection&rsquo;s background CPU usage does not reach the expected rate (default is 25%), a worker concurrent of this type is started to help the garbage collection reach the utilization target, as it takes only part of the resources of the same CPU and therefore can be scheduled.</li>
+<li>gcMarkWorkerIdleMode - when the processor has no Goroutine available for execution, it runs the garbage collection&rsquo;s marker task until it is preempted.</li>
+</ul>
+<p>runtime.gcControllerState.startCycle calculates the above dedicatedMarkWorkersNeeded and fractionalUtilizationGoal based on the number of global processors and the CPU utilization of garbage collection to determine the number of worker co-processes in different modes of different modes.</p>
+<p>Since the CPU utilization of the background marker task is 25%, if the host is 4 or 8 cores, then garbage collection requires 1 or 2 Goroutines dedicated to the task in question; however, if the host is 3 or 6 cores, since it is not divisible by 4, then it requires 0 or 1 Goroutine dedicated to garbage collection, which will take some The CPU utilization is guaranteed by using the gcMarkWorkerFractionalMode co-processing.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/e698e32b27e141c1a16004531053d15a.png" alt=""></p>
+<p>The garbage collection controller will set the processor&rsquo;s gcMarkWorkerMode in the runtime.gcControllerState.findRunnabledGCWorker method.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">gcControllerState</span><span class="p">)</span> <span class="nf">findRunnableGCWorker</span><span class="p">(</span><span class="nx">_p_</span> <span class="o">*</span><span class="nx">p</span><span class="p">)</span> <span class="o">*</span><span class="nx">g</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="nf">decIfPositive</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">dedicatedMarkWorkersNeeded</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">_p_</span><span class="p">.</span><span class="nx">gcMarkWorkerMode</span> <span class="p">=</span> <span class="nx">gcMarkWorkerDedicatedMode</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fractionalUtilizationGoal</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">return</span> <span class="kc">nil</span>
+	<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+		<span class="nx">delta</span> <span class="o">:=</span> <span class="nf">nanotime</span><span class="p">()</span> <span class="o">-</span> <span class="nx">gcController</span><span class="p">.</span><span class="nx">markStartTime</span>
+		<span class="k">if</span> <span class="nx">delta</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nb">float64</span><span class="p">(</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">gcFractionalMarkTime</span><span class="p">)</span><span class="o">/</span><span class="nb">float64</span><span class="p">(</span><span class="nx">delta</span><span class="p">)</span> <span class="p">&gt;</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fractionalUtilizationGoal</span> <span class="p">{</span>
+			<span class="k">return</span> <span class="kc">nil</span>
+		<span class="p">}</span>
+		<span class="nx">_p_</span><span class="p">.</span><span class="nx">gcMarkWorkerMode</span> <span class="p">=</span> <span class="nx">gcMarkWorkerFractionalMode</span>
+	<span class="p">}</span>
+
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nx">_p_</span><span class="p">.</span><span class="nx">gcBgMarkWorker</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span>
+	<span class="nf">casgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Gwaiting</span><span class="p">,</span> <span class="nx">_Grunnable</span><span class="p">)</span>
+	<span class="k">return</span> <span class="nx">gp</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The implementation of the above approach is relatively clear, as the controller determines the number of Goroutines dedicated to the marker task through dedicatedMarkWorkersNeeded and decides whether to start a Goroutine in gcMarkWorkerFractionalMode based on the time spent performing the marker task and the total time; in addition to these In addition to these two controller-required worker co-processes, the scheduler also performs garbage collection in runtime.findrunnable using idle processors to speed up the process.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">findrunnable</span><span class="p">()</span> <span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">,</span> <span class="nx">inheritTime</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+<span class="nx">stop</span><span class="p">:</span>
+	<span class="k">if</span> <span class="nx">gcBlackenEnabled</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">_p_</span><span class="p">.</span><span class="nx">gcBgMarkWorker</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nf">gcMarkWorkAvailable</span><span class="p">(</span><span class="nx">_p_</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">_p_</span><span class="p">.</span><span class="nx">gcMarkWorkerMode</span> <span class="p">=</span> <span class="nx">gcMarkWorkerIdleMode</span>
+		<span class="nx">gp</span> <span class="o">:=</span> <span class="nx">_p_</span><span class="p">.</span><span class="nx">gcBgMarkWorker</span><span class="p">.</span><span class="nf">ptr</span><span class="p">()</span>
+		<span class="nf">casgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Gwaiting</span><span class="p">,</span> <span class="nx">_Grunnable</span><span class="p">)</span>
+		<span class="k">return</span> <span class="nx">gp</span><span class="p">,</span> <span class="kc">false</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The three different modes of worker co-processing work in concert with each other to ensure that the CPU utilization of garbage collection reaches the desired threshold and that the marking task is completed before reaching the target heap size.</p>
+<h3 id="concurrent-scanning-with-tagging-assistance">Concurrent scanning with tagging assistance</h3>
+<p>runtime.gcBgMarkWorker is a background function for the execution of the marker task. The loop of this function performs the scanning and marking of the object graph in memory, and we present the principle of the implementation of this function in three parts.</p>
+<ol>
+<li>getting the current processor and the Goroutine wrapped into a structure of type runtime.gcBgMarkWorkerNode and actively falling into hibernation waiting to be woken up.</li>
+<li>determine the strategy for scanning tasks based on the gcMarkWorkerMode mode on the processor.</li>
+<li>calling the runtime.gcMarkDone method to complete the marking phase after all marking tasks have been completed.</li>
+</ol>
+<p>First let&rsquo;s look at the preparation of the background marker task, where the runtime creates runtime.gcBgMarkWorkerNode, a structure that will pre-store the processor and the current Goroutine, and when we call runtime.gopark to trigger a hibernation, the runtime will safely establish the binding between the processor and the background marker task in the system stack relationship.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcBgMarkWorker</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">preemptoff</span> <span class="p">=</span> <span class="s">&#34;GC worker init&#34;</span>
+	<span class="nx">node</span> <span class="o">:=</span> <span class="nb">new</span><span class="p">(</span><span class="nx">gcBgMarkWorkerNode</span><span class="p">)</span>
+	<span class="nx">gp</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">preemptoff</span> <span class="p">=</span> <span class="s">&#34;&#34;</span>
+
+	<span class="nx">node</span><span class="p">.</span><span class="nx">gp</span><span class="p">.</span><span class="nf">set</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+
+	<span class="nx">node</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nf">set</span><span class="p">(</span><span class="nf">acquirem</span><span class="p">())</span>
+	<span class="nf">notewakeup</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">bgMarkReady</span><span class="p">)</span>
+
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nf">gopark</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">g</span> <span class="o">*</span><span class="nx">g</span><span class="p">,</span> <span class="nx">parkp</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+			<span class="nx">node</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">gcBgMarkWorkerNode</span><span class="p">)(</span><span class="nx">nodep</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">mp</span> <span class="o">:=</span> <span class="nx">node</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nf">ptr</span><span class="p">();</span> <span class="nx">mp</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+				<span class="nf">releasem</span><span class="p">(</span><span class="nx">mp</span><span class="p">)</span>
+			<span class="p">}</span>
+
+			<span class="nx">gcBgMarkWorkerPool</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">node</span><span class="p">.</span><span class="nx">node</span><span class="p">)</span>
+			<span class="k">return</span> <span class="kc">true</span>
+		<span class="p">},</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">node</span><span class="p">),</span> <span class="nx">waitReasonGCWorkerIdle</span><span class="p">,</span> <span class="nx">traceEvGoBlock</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>A dormant Goroutine via runtime.gopark does not enter the run queue, it only waits for a direct wakeup from the garbage collection controller or scheduler; upon wakeup, we choose a different marker execution strategy depending on the processor gcMarkWorkerMode, and the different execution strategies call runtime.gcDrain Scan work buffer runtime.gcWork.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">		<span class="nx">node</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nf">set</span><span class="p">(</span><span class="nf">acquirem</span><span class="p">())</span>
+
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">nwait</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+		<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+			<span class="nf">casgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">,</span> <span class="nx">_Gwaiting</span><span class="p">)</span>
+			<span class="k">switch</span> <span class="nx">pp</span><span class="p">.</span><span class="nx">gcMarkWorkerMode</span> <span class="p">{</span>
+			<span class="k">case</span> <span class="nx">gcMarkWorkerDedicatedMode</span><span class="p">:</span>
+				<span class="nf">gcDrain</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">gcw</span><span class="p">,</span> <span class="nx">gcDrainUntilPreempt</span><span class="p">|</span><span class="nx">gcDrainFlushBgCredit</span><span class="p">)</span>
+				<span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">preempt</span> <span class="p">{</span>
+					<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+					<span class="k">for</span> <span class="p">{</span>
+						<span class="nx">gp</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nf">runqget</span><span class="p">(</span><span class="nx">_p_</span><span class="p">)</span>
+						<span class="k">if</span> <span class="nx">gp</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+							<span class="k">break</span>
+						<span class="p">}</span>
+						<span class="nf">globrunqput</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+					<span class="p">}</span>
+					<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sched</span><span class="p">.</span><span class="nx">lock</span><span class="p">)</span>
+				<span class="p">}</span>
+				<span class="nf">gcDrain</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">gcw</span><span class="p">,</span> <span class="nx">gcDrainFlushBgCredit</span><span class="p">)</span>
+			<span class="k">case</span> <span class="nx">gcMarkWorkerFractionalMode</span><span class="p">:</span>
+				<span class="nf">gcDrain</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">gcw</span><span class="p">,</span> <span class="nx">gcDrainFractional</span><span class="p">|</span><span class="nx">gcDrainUntilPreempt</span><span class="p">|</span><span class="nx">gcDrainFlushBgCredit</span><span class="p">)</span>
+			<span class="k">case</span> <span class="nx">gcMarkWorkerIdleMode</span><span class="p">:</span>
+				<span class="nf">gcDrain</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">_p_</span><span class="p">.</span><span class="nx">gcw</span><span class="p">,</span> <span class="nx">gcDrainIdle</span><span class="p">|</span><span class="nx">gcDrainUntilPreempt</span><span class="p">|</span><span class="nx">gcDrainFlushBgCredit</span><span class="p">)</span>
+			<span class="p">}</span>
+			<span class="nf">casgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Gwaiting</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">)</span>
+		<span class="p">})</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Note that tasks in gcMarkWorkerDedicatedMode cannot be preempted. To reduce additional overhead, preemption is allowed on the first call to runtime.gcDrain, but once the processor is preempted, the current Goroutine will transfer all runnable Goroutines on the processor to the global queue to ensure garbage collection of occupied CPU resources.</p>
+<p>When all background tasks are waiting and there is no work left, we consider the marking phase of the garbage collection round to be over and call runtime.gcMarkDone at that point.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">		<span class="nx">incnwait</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">nwait</span><span class="p">,</span> <span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">incnwait</span> <span class="o">==</span> <span class="nx">work</span><span class="p">.</span><span class="nx">nproc</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nf">gcMarkWorkAvailable</span><span class="p">(</span><span class="kc">nil</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nf">releasem</span><span class="p">(</span><span class="nx">node</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nf">ptr</span><span class="p">())</span>
+			<span class="nx">node</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nf">set</span><span class="p">(</span><span class="kc">nil</span><span class="p">)</span>
+
+			<span class="nf">gcMarkDone</span><span class="p">()</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.gcDrain is the core method for scanning and marking objects in heap memory. In addition to this method, we will also cover the implementation principles of work pools, write barriers, and marking assistance.</p>
+<h4 id="work-pools">Work pools</h4>
+<p>When calling runtime.gcDrain, the runtime will pass in runtime.gcWork on the processor. This structure is an abstraction of the work pool in the garbage collector, which implements a producer and consumer model, and we can use this structure as a starting point for understanding tagged work as a whole:</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/d4a440a3078b4888991c9ecd39938d8b.png" alt=""></p>
+<p>Write barriers, root object scans, and stack scans all add additional gray objects to the work pool waiting to be processed, while the object scanning process marks gray objects as black and may also find new gray objects, and the whole scanning process ends when the work queue does not contain gray objects.</p>
+<p>To reduce lock contention, the runtime keeps separate pending scans on each processor, however this runs into the same problem as the scheduler - uneven resources across processors, leaving some processors with nothing to do. The scheduler introduces work stealing to solve this problem, and the garbage collector uses a similar mechanism to balance the pending tasks across processors.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/b8bf7f2ba939494384ba569abc212df2.png" alt=""></p>
+<p>runtime.gcWork.balance puts a portion of the processor&rsquo;s local work back into the global queue for other processors to handle, ensuring load balancing across processors.</p>
+<p>runtime.gcWork provides an abstraction of production and consumption tasks for the garbage collector. This structure holds two important work buffers, wbuf1 and wbuf2, which are the primary and backup buffers, respectively.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">gcWork</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">wbuf1</span><span class="p">,</span> <span class="nx">wbuf2</span> <span class="o">*</span><span class="nx">workbuf</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">workbufhdr</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">node</span> <span class="nx">lfnode</span> <span class="c1">// must be first
+</span><span class="c1"></span>	<span class="nx">nobj</span> <span class="kt">int</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">workbuf</span> <span class="kd">struct</span> <span class="p">{</span>
+	<span class="nx">workbufhdr</span>
+	<span class="nx">obj</span> <span class="p">[(</span><span class="nx">_WorkbufSize</span> <span class="o">-</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">workbufhdr</span><span class="p">{}))</span> <span class="o">/</span> <span class="nx">sys</span><span class="p">.</span><span class="nx">PtrSize</span><span class="p">]</span><span class="kt">uintptr</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When we add or delete objects to this structure, it will always operate the main buffer first, once the main buffer space is insufficient or there is no object, it will trigger the switch between the main and backup buffers; and when both buffers are insufficient or empty, it will insert or get the object from the global working buffer, the implementation of the related methods of this structure are very simple, so we won&rsquo;t start the analysis here.</p>
+<h4 id="scanning-objects">Scanning objects</h4>
+<p>The runtime will use runtime.gcDrain to scan the working buffer for gray objects, and it will choose a different strategy depending on the gcDrainFlags passed in.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcDrain</span><span class="p">(</span><span class="nx">gcw</span> <span class="o">*</span><span class="nx">gcWork</span><span class="p">,</span> <span class="nx">flags</span> <span class="nx">gcDrainFlags</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">().</span><span class="nx">m</span><span class="p">.</span><span class="nx">curg</span>
+	<span class="nx">preemptible</span> <span class="o">:=</span> <span class="nx">flags</span><span class="o">&amp;</span><span class="nx">gcDrainUntilPreempt</span> <span class="o">!=</span> <span class="mi">0</span>
+	<span class="nx">flushBgCredit</span> <span class="o">:=</span> <span class="nx">flags</span><span class="o">&amp;</span><span class="nx">gcDrainFlushBgCredit</span> <span class="o">!=</span> <span class="mi">0</span>
+	<span class="nx">idle</span> <span class="o">:=</span> <span class="nx">flags</span><span class="o">&amp;</span><span class="nx">gcDrainIdle</span> <span class="o">!=</span> <span class="mi">0</span>
+
+	<span class="nx">initScanWork</span> <span class="o">:=</span> <span class="nx">gcw</span><span class="p">.</span><span class="nx">scanWork</span>
+	<span class="nx">checkWork</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">63</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+	<span class="kd">var</span> <span class="nx">check</span> <span class="kd">func</span><span class="p">()</span> <span class="kt">bool</span>
+	<span class="k">if</span> <span class="nx">flags</span><span class="o">&amp;</span><span class="p">(</span><span class="nx">gcDrainIdle</span><span class="p">|</span><span class="nx">gcDrainFractional</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">checkWork</span> <span class="p">=</span> <span class="nx">initScanWork</span> <span class="o">+</span> <span class="nx">drainCheckThreshold</span>
+		<span class="k">if</span> <span class="nx">idle</span> <span class="p">{</span>
+			<span class="nx">check</span> <span class="p">=</span> <span class="nx">pollWork</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">flags</span><span class="o">&amp;</span><span class="nx">gcDrainFractional</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">check</span> <span class="p">=</span> <span class="nx">pollFractionalWorkerExit</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>gcDrainUntilPreempt - returned when the preempt field of the Goroutine is set to true.</li>
+<li>gcDrainIdle - call runtime.pollWork, returned when the processor contains other pending Goroutines.</li>
+<li>gcDrainFractional - call runtime.pollFractionalWorkerExit, returned when CPU usage exceeds 20% of fractionalUtilizationGoal; * gcDrainFractional - call runtime.pollFractionalWorkerExit, returned when CPU usage exceeds 20% of fractionalUtilizationGoal.</li>
+<li>gcDrainFlushBgCredit - call runtime.gcFlushBgCredit to calculate the amount of tagging tasks completed in the background to reduce the workload of user programs that assist in garbage collection during concurrent tagging.</li>
+</ul>
+<p>The runtime will use the check in the local variable to check if the tagging task should currently be exited and the processor given up. Once we are done with the preparation, we can start scanning the global variables for the root object, which is the first task that needs to be executed in the markup phase</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcDrain</span><span class="p">(</span><span class="nx">gcw</span> <span class="o">*</span><span class="nx">gcWork</span><span class="p">,</span> <span class="nx">flags</span> <span class="nx">gcDrainFlags</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">work</span><span class="p">.</span><span class="nx">markrootNext</span> <span class="p">&lt;</span> <span class="nx">work</span><span class="p">.</span><span class="nx">markrootJobs</span> <span class="p">{</span>
+		<span class="k">for</span> <span class="p">!(</span><span class="nx">preemptible</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">preempt</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">job</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">markrootNext</span><span class="p">,</span> <span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="o">-</span> <span class="mi">1</span>
+			<span class="k">if</span> <span class="nx">job</span> <span class="o">&gt;=</span> <span class="nx">work</span><span class="p">.</span><span class="nx">markrootJobs</span> <span class="p">{</span>
+				<span class="k">break</span>
+			<span class="p">}</span>
+			<span class="nf">markroot</span><span class="p">(</span><span class="nx">gcw</span><span class="p">,</span> <span class="nx">job</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">check</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nf">check</span><span class="p">()</span> <span class="p">{</span>
+				<span class="k">goto</span> <span class="nx">done</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Scanning the root object requires runtime.markroot, which scans the cache, data segments, BSS segments holding global and static variables, and the Goroutine&rsquo;s stack memory; once the scan of the root object is complete, the current Goroutine starts fetching pending tasks from the local and global work cache pools:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcDrain</span><span class="p">(</span><span class="nx">gcw</span> <span class="o">*</span><span class="nx">gcWork</span><span class="p">,</span> <span class="nx">flags</span> <span class="nx">gcDrainFlags</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">for</span> <span class="p">!(</span><span class="nx">preemptible</span> <span class="o">&amp;&amp;</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">preempt</span><span class="p">)</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">work</span><span class="p">.</span><span class="nx">full</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">gcw</span><span class="p">.</span><span class="nf">balance</span><span class="p">()</span>
+		<span class="p">}</span>
+
+		<span class="nx">b</span> <span class="o">:=</span> <span class="nx">gcw</span><span class="p">.</span><span class="nf">tryGetFast</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">b</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">b</span> <span class="p">=</span> <span class="nx">gcw</span><span class="p">.</span><span class="nf">tryGet</span><span class="p">()</span>
+			<span class="k">if</span> <span class="nx">b</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nf">wbBufFlush</span><span class="p">(</span><span class="kc">nil</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+				<span class="nx">b</span> <span class="p">=</span> <span class="nx">gcw</span><span class="p">.</span><span class="nf">tryGet</span><span class="p">()</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">b</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+		<span class="nf">scanobject</span><span class="p">(</span><span class="nx">b</span><span class="p">,</span> <span class="nx">gcw</span><span class="p">)</span>
+
+		<span class="k">if</span> <span class="nx">gcw</span><span class="p">.</span><span class="nx">scanWork</span> <span class="o">&gt;=</span> <span class="nx">gcCreditSlack</span> <span class="p">{</span>
+			<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xaddint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gcController</span><span class="p">.</span><span class="nx">scanWork</span><span class="p">,</span> <span class="nx">gcw</span><span class="p">.</span><span class="nx">scanWork</span><span class="p">)</span>
+			<span class="k">if</span> <span class="nx">flushBgCredit</span> <span class="p">{</span>
+				<span class="nf">gcFlushBgCredit</span><span class="p">(</span><span class="nx">gcw</span><span class="p">.</span><span class="nx">scanWork</span> <span class="o">-</span> <span class="nx">initScanWork</span><span class="p">)</span>
+				<span class="nx">initScanWork</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="p">}</span>
+			<span class="nx">checkWork</span> <span class="o">-=</span> <span class="nx">gcw</span><span class="p">.</span><span class="nx">scanWork</span>
+			<span class="nx">gcw</span><span class="p">.</span><span class="nx">scanWork</span> <span class="p">=</span> <span class="mi">0</span>
+
+			<span class="k">if</span> <span class="nx">checkWork</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="p">{</span>
+				<span class="nx">checkWork</span> <span class="o">+=</span> <span class="nx">drainCheckThreshold</span>
+				<span class="k">if</span> <span class="nx">check</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nf">check</span><span class="p">()</span> <span class="p">{</span>
+					<span class="k">break</span>
+				<span class="p">}</span>
+			<span class="p">}</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Scanning for objects will use runtime.scanobject, which will start scanning from the location passed in and during the scan will call runtime.greyobject to color the active objects found.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcDrain</span><span class="p">(</span><span class="nx">gcw</span> <span class="o">*</span><span class="nx">gcWork</span><span class="p">,</span> <span class="nx">flags</span> <span class="nx">gcDrainFlags</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+<span class="nx">done</span><span class="p">:</span>
+	<span class="k">if</span> <span class="nx">gcw</span><span class="p">.</span><span class="nx">scanWork</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xaddint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gcController</span><span class="p">.</span><span class="nx">scanWork</span><span class="p">,</span> <span class="nx">gcw</span><span class="p">.</span><span class="nx">scanWork</span><span class="p">)</span>
+		<span class="k">if</span> <span class="nx">flushBgCredit</span> <span class="p">{</span>
+			<span class="nf">gcFlushBgCredit</span><span class="p">(</span><span class="nx">gcw</span><span class="p">.</span><span class="nx">scanWork</span> <span class="o">-</span> <span class="nx">initScanWork</span><span class="p">)</span>
+		<span class="p">}</span>
+		<span class="nx">gcw</span><span class="p">.</span><span class="nx">scanWork</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When the current scan is interrupted due to a change in external conditions, this function records the number of memory bytes scanned to reduce the workload of auxiliary markers via runtime.gcFlushBgCredit.</p>
+<p>The process of scanning and marking objects in memory involves many bit operations and pointer operations, and the related code implementation is rather complicated, so we will not go into the related contents here, and interested readers can use runtime.gcDrain as an entry point to study the specific process of three-color marking.</p>
+<h4 id="write-barriers">Write Barriers</h4>
+<p>Writebarrier is an indispensable technique for securing concurrent markup in Go. We need to use hybrid writebarrier to maintain weak tricolor invariance of the object graph, however, the implementation of writebarrier requires the collaboration of compiler and runtime. In the SSA intermediate code generation phase, the compiler adds write barriers to the Store, Move, and Zero operations using cmd/compile/internal/ssa.writebarrier to generate code as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="k">if</span> <span class="nx">writeBarrier</span><span class="p">.</span><span class="nx">enabled</span> <span class="p">{</span>
+  <span class="nf">gcWriteBarrier</span><span class="p">(</span><span class="nx">ptr</span><span class="p">,</span> <span class="nx">val</span><span class="p">)</span>
+<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+  <span class="o">*</span><span class="nx">ptr</span> <span class="p">=</span> <span class="nx">val</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When Go enters the garbage collection phase, the enabled field in the global variable runtime.writeBarrier is set to on and all write operations call runtime.gcWriteBarrier.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">TEXT</span> <span class="nx">runtime</span><span class="err">·</span><span class="nf">gcWriteBarrier</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span><span class="nx">NOSPLIT</span><span class="p">,</span><span class="err">$</span><span class="mi">28</span>
+	<span class="o">...</span>
+	<span class="nf">get_tls</span><span class="p">(</span><span class="nx">BX</span><span class="p">)</span>
+	<span class="nx">MOVL</span>	<span class="nf">g</span><span class="p">(</span><span class="nx">BX</span><span class="p">),</span> <span class="nx">BX</span>
+	<span class="nx">MOVL</span>	<span class="nf">g_m</span><span class="p">(</span><span class="nx">BX</span><span class="p">),</span> <span class="nx">BX</span>
+	<span class="nx">MOVL</span>	<span class="nf">m_p</span><span class="p">(</span><span class="nx">BX</span><span class="p">),</span> <span class="nx">BX</span>
+	<span class="nf">MOVL</span>	<span class="p">(</span><span class="nx">p_wbBuf</span><span class="o">+</span><span class="nx">wbBuf_next</span><span class="p">)(</span><span class="nx">BX</span><span class="p">),</span> <span class="nx">CX</span>
+	<span class="nx">LEAL</span>	<span class="mi">8</span><span class="p">(</span><span class="nx">CX</span><span class="p">),</span> <span class="nx">CX</span>
+	<span class="nx">MOVL</span>	<span class="nx">CX</span><span class="p">,</span> <span class="p">(</span><span class="nx">p_wbBuf</span><span class="o">+</span><span class="nx">wbBuf_next</span><span class="p">)(</span><span class="nx">BX</span><span class="p">)</span>
+	<span class="nx">CMPL</span>	<span class="nx">CX</span><span class="p">,</span> <span class="p">(</span><span class="nx">p_wbBuf</span><span class="o">+</span><span class="nx">wbBuf_end</span><span class="p">)(</span><span class="nx">BX</span><span class="p">)</span>
+	<span class="nx">MOVL</span>	<span class="nx">AX</span><span class="p">,</span> <span class="o">-</span><span class="mi">8</span><span class="p">(</span><span class="nx">CX</span><span class="p">)</span>	<span class="c1">// 记录值
+</span><span class="c1"></span>	<span class="nf">MOVL</span>	<span class="p">(</span><span class="nx">DI</span><span class="p">),</span> <span class="nx">BX</span>
+	<span class="nx">MOVL</span>	<span class="nx">BX</span><span class="p">,</span> <span class="o">-</span><span class="mi">4</span><span class="p">(</span><span class="nx">CX</span><span class="p">)</span>	<span class="c1">// 记录 *slot
+</span><span class="c1"></span>	<span class="nx">JEQ</span>	<span class="nx">flush</span>
+<span class="nx">ret</span><span class="p">:</span>
+	<span class="nx">MOVL</span>	<span class="mi">20</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">CX</span>
+	<span class="nx">MOVL</span>	<span class="mi">24</span><span class="p">(</span><span class="nx">SP</span><span class="p">),</span> <span class="nx">BX</span>
+	<span class="nx">MOVL</span>	<span class="nx">AX</span><span class="p">,</span> <span class="p">(</span><span class="nx">DI</span><span class="p">)</span> <span class="c1">// 触发写操作
+</span><span class="c1"></span>	<span class="nx">RET</span>
+
+<span class="nx">flush</span><span class="p">:</span>
+  <span class="o">...</span>
+	<span class="nx">CALL</span>	<span class="nx">runtime</span><span class="err">·</span><span class="nf">wbBufFlush</span><span class="p">(</span><span class="nx">SB</span><span class="p">)</span>
+  <span class="o">...</span>
+	<span class="nx">JMP</span>	<span class="nx">ret</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the above assembly function, the DI register is the destination address of the write operation, and the AX register stores the overwritten value. The function will overwrite the original value and notify the garbage collector via runtime.wbBufFlush to add the original value and the new value to the current processor&rsquo;s work queue, because the implementation of this write barrier is relatively complex, so the write barrier still has a relatively large impact on the performance of the program The write barrier has a significant impact on the performance of the program, as it now requires dozens of instructions for work that previously required only one instruction to complete.</p>
+<p>We mentioned above that the hybrid write barrier consisting of Dijkstra and Yuasa write barriers requires all newly created objects to be painted directly black when they are turned on, where the marking process is done by runtime.gcmarknewobject</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">gcphase</span> <span class="o">!=</span> <span class="nx">_GCoff</span> <span class="p">{</span>
+		<span class="nf">gcmarknewobject</span><span class="p">(</span><span class="nx">span</span><span class="p">,</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">x</span><span class="p">),</span> <span class="nx">size</span><span class="p">,</span> <span class="nx">scanSize</span><span class="p">)</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">gcmarknewobject</span><span class="p">(</span><span class="nx">span</span> <span class="o">*</span><span class="nx">mspan</span><span class="p">,</span> <span class="nx">obj</span><span class="p">,</span> <span class="nx">size</span><span class="p">,</span> <span class="nx">scanSize</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">objIndex</span> <span class="o">:=</span> <span class="nx">span</span><span class="p">.</span><span class="nf">objIndex</span><span class="p">(</span><span class="nx">obj</span><span class="p">)</span>
+	<span class="nx">span</span><span class="p">.</span><span class="nf">markBitsForIndex</span><span class="p">(</span><span class="nx">objIndex</span><span class="p">).</span><span class="nf">setMarked</span><span class="p">()</span>
+
+	<span class="nx">arena</span><span class="p">,</span> <span class="nx">pageIdx</span><span class="p">,</span> <span class="nx">pageMask</span> <span class="o">:=</span> <span class="nf">pageIndexOf</span><span class="p">(</span><span class="nx">span</span><span class="p">.</span><span class="nf">base</span><span class="p">())</span>
+	<span class="k">if</span> <span class="nx">arena</span><span class="p">.</span><span class="nx">pageMarks</span><span class="p">[</span><span class="nx">pageIdx</span><span class="p">]</span><span class="o">&amp;</span><span class="nx">pageMask</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Or8</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">arena</span><span class="p">.</span><span class="nx">pageMarks</span><span class="p">[</span><span class="nx">pageIdx</span><span class="p">],</span> <span class="nx">pageMask</span><span class="p">)</span>
+	<span class="p">}</span>
+
+	<span class="nx">gcw</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nf">getg</span><span class="p">().</span><span class="nx">m</span><span class="p">.</span><span class="nx">p</span><span class="p">.</span><span class="nf">ptr</span><span class="p">().</span><span class="nx">gcw</span>
+	<span class="nx">gcw</span><span class="p">.</span><span class="nx">bytesMarked</span> <span class="o">+=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">size</span><span class="p">)</span>
+	<span class="nx">gcw</span><span class="p">.</span><span class="nx">scanWork</span> <span class="o">+=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">scanSize</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>runtime.mallocgc will call this function after garbage collection starts, get the memory cell corresponding to the object and the marker bit runtime.markBits and call runtime.markBits.setMarked to directly paint the new object black.</p>
+<h4 id="mark-assist">Mark Assist</h4>
+<p>To ensure that the user program does not allocate memory faster than the background task can tag, the runtime also introduces tagging assistance, which follows a very simple and uncomplicated principle of allocating as much memory as is needed to complete the tagging task. Each Goroutine holds the gcAssistBytes field, which stores the number of bytes of objects that the Goroutine is currently assisting in tagging. During the concurrent tagging phase, when a Goroutine calls runtime.mallocgc to allocate a new object, this function checks to see if the Goroutine requesting memory is in a state of overrunning.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">size</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">,</span> <span class="nx">needzero</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="kd">var</span> <span class="nx">assistG</span> <span class="o">*</span><span class="nx">g</span>
+	<span class="k">if</span> <span class="nx">gcBlackenEnabled</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">assistG</span> <span class="p">=</span> <span class="nf">getg</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">assistG</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">curg</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="nx">assistG</span> <span class="p">=</span> <span class="nx">assistG</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">curg</span>
+		<span class="p">}</span>
+		<span class="nx">assistG</span><span class="p">.</span><span class="nx">gcAssistBytes</span> <span class="o">-=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">size</span><span class="p">)</span>
+
+		<span class="k">if</span> <span class="nx">assistG</span><span class="p">.</span><span class="nx">gcAssistBytes</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nf">gcAssistAlloc</span><span class="p">(</span><span class="nx">assistG</span><span class="p">)</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+	<span class="k">return</span> <span class="nx">x</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>gcAssistAlloc, called when requesting memory, and runtime.gcFlushBgCredit, called when scanning memory, are responsible for borrowing and repaying debt, respectively, and through this debt management system, we can ensure that Goroutine runs properly without putting too much pressure on garbage collection and that the heap size target is reached when The marking phase is completed when the heap size target is reached.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/cdedecfb5fae4c5588a1ba6ecd041727.png" alt=""></p>
+<p>The gcAssistBytes held by each Goroutine indicates the number of bytes of the current concurrent auxiliary token, and the bgScanCredit held by the global garbage collection controller indicates the number of bytes of the background concurrent auxiliary token, which can be reimbursed using the common credit bgScanCredit when the local Goroutine has allocated a larger number of objects. Let&rsquo;s start by analyzing the runtime.gcAssistAlloc implementation.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcAssistAlloc</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+<span class="nx">retry</span><span class="p">:</span>
+	<span class="nx">debtBytes</span> <span class="o">:=</span> <span class="o">-</span><span class="nx">gp</span><span class="p">.</span><span class="nx">gcAssistBytes</span>
+	<span class="nx">scanWork</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">gcController</span><span class="p">.</span><span class="nx">assistWorkPerByte</span> <span class="o">*</span> <span class="nb">float64</span><span class="p">(</span><span class="nx">debtBytes</span><span class="p">))</span>
+	<span class="k">if</span> <span class="nx">scanWork</span> <span class="p">&lt;</span> <span class="nx">gcOverAssistWork</span> <span class="p">{</span>
+		<span class="nx">scanWork</span> <span class="p">=</span> <span class="nx">gcOverAssistWork</span>
+		<span class="nx">debtBytes</span> <span class="p">=</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">gcController</span><span class="p">.</span><span class="nx">assistBytesPerWork</span> <span class="o">*</span> <span class="nb">float64</span><span class="p">(</span><span class="nx">scanWork</span><span class="p">))</span>
+	<span class="p">}</span>
+
+	<span class="nx">bgScanCredit</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Loadint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gcController</span><span class="p">.</span><span class="nx">bgScanCredit</span><span class="p">)</span>
+	<span class="nx">stolen</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">bgScanCredit</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">bgScanCredit</span> <span class="p">&lt;</span> <span class="nx">scanWork</span> <span class="p">{</span>
+			<span class="nx">stolen</span> <span class="p">=</span> <span class="nx">bgScanCredit</span>
+			<span class="nx">gp</span><span class="p">.</span><span class="nx">gcAssistBytes</span> <span class="o">+=</span> <span class="mi">1</span> <span class="o">+</span> <span class="nb">int64</span><span class="p">(</span><span class="nx">gcController</span><span class="p">.</span><span class="nx">assistBytesPerWork</span><span class="o">*</span><span class="nb">float64</span><span class="p">(</span><span class="nx">stolen</span><span class="p">))</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">stolen</span> <span class="p">=</span> <span class="nx">scanWork</span>
+			<span class="nx">gp</span><span class="p">.</span><span class="nx">gcAssistBytes</span> <span class="o">+=</span> <span class="nx">debtBytes</span>
+		<span class="p">}</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xaddint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gcController</span><span class="p">.</span><span class="nx">bgScanCredit</span><span class="p">,</span> <span class="o">-</span><span class="nx">stolen</span><span class="p">)</span>
+		<span class="nx">scanWork</span> <span class="o">-=</span> <span class="nx">stolen</span>
+
+		<span class="k">if</span> <span class="nx">scanWork</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="k">return</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This function will first calculate the number of marker tasks to be completed based on the Goroutine&rsquo;s gcAssistBytes and the garbage collection controller&rsquo;s configuration. If there are available points in the global credit bgScanCredit, then that number of points will be subtracted, because the concurrent execution is not locked, so the global credit may be updated to a negative value, however this is not a more important issue in the long run.</p>
+<p>If the global credit is not sufficient to cover the local debt, the runtime will call runtime.gcAssistAlloc1 on the system stack to perform the marker task, which will directly call runtime.gcDrainN to complete the specified number of marker tasks and return.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcAssistAlloc</span><span class="p">(</span><span class="nx">gp</span> <span class="o">*</span><span class="nx">g</span><span class="p">)</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nf">gcAssistAlloc1</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">scanWork</span><span class="p">)</span>
+	<span class="p">})</span>
+	<span class="o">...</span>
+	<span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">gcAssistBytes</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">if</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">preempt</span> <span class="p">{</span>
+			<span class="nf">Gosched</span><span class="p">()</span>
+			<span class="k">goto</span> <span class="nx">retry</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="p">!</span><span class="nf">gcParkAssist</span><span class="p">()</span> <span class="p">{</span>
+			<span class="k">goto</span> <span class="nx">retry</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If the current Goroutine is still underrun and the Goroutine is not preempted after completing the marker assist task, the runtime will execute runtime.gcParkAssist; if the global credit is still underrun, the runtime will put the current Goroutine into hibernation via runtime.gcParkAssist and adds it to the global queue of helper markers and waits for the background marker task to wake up.</p>
+<p>The implementation of runtime.gcFlushBgCredit for debt repayment is relatively simple, as the current credit is added directly to the global credit bgScanCredit if there is no waiting Goroutine in the auxiliary queue.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcFlushBgCredit</span><span class="p">(</span><span class="nx">scanWork</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="k">if</span> <span class="nx">work</span><span class="p">.</span><span class="nx">assistQueue</span><span class="p">.</span><span class="nx">q</span><span class="p">.</span><span class="nf">empty</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xaddint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gcController</span><span class="p">.</span><span class="nx">bgScanCredit</span><span class="p">,</span> <span class="nx">scanWork</span><span class="p">)</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+
+	<span class="nx">scanBytes</span> <span class="o">:=</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">scanWork</span><span class="p">)</span> <span class="o">*</span> <span class="nx">gcController</span><span class="p">.</span><span class="nx">assistBytesPerWork</span><span class="p">)</span>
+	<span class="k">for</span> <span class="p">!</span><span class="nx">work</span><span class="p">.</span><span class="nx">assistQueue</span><span class="p">.</span><span class="nx">q</span><span class="p">.</span><span class="nf">empty</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="nx">scanBytes</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">gp</span> <span class="o">:=</span> <span class="nx">work</span><span class="p">.</span><span class="nx">assistQueue</span><span class="p">.</span><span class="nx">q</span><span class="p">.</span><span class="nf">pop</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">scanBytes</span><span class="o">+</span><span class="nx">gp</span><span class="p">.</span><span class="nx">gcAssistBytes</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="p">{</span>
+			<span class="nx">scanBytes</span> <span class="o">+=</span> <span class="nx">gp</span><span class="p">.</span><span class="nx">gcAssistBytes</span>
+			<span class="nx">gp</span><span class="p">.</span><span class="nx">gcAssistBytes</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="nf">ready</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="kc">false</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">gp</span><span class="p">.</span><span class="nx">gcAssistBytes</span> <span class="o">+=</span> <span class="nx">scanBytes</span>
+			<span class="nx">scanBytes</span> <span class="p">=</span> <span class="mi">0</span>
+			<span class="nx">work</span><span class="p">.</span><span class="nx">assistQueue</span><span class="p">.</span><span class="nx">q</span><span class="p">.</span><span class="nf">pushBack</span><span class="p">(</span><span class="nx">gp</span><span class="p">)</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="k">if</span> <span class="nx">scanBytes</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="nx">scanWork</span> <span class="p">=</span> <span class="nb">int64</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">scanBytes</span><span class="p">)</span> <span class="o">*</span> <span class="nx">gcController</span><span class="p">.</span><span class="nx">assistWorkPerByte</span><span class="p">)</span>
+		<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xaddint64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gcController</span><span class="p">.</span><span class="nx">bgScanCredit</span><span class="p">,</span> <span class="nx">scanWork</span><span class="p">)</span>
+	<span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If the auxiliary queue is not empty, the above function decides whether to wake up the dormant Goroutines based on the number of debts and completed work for each Goroutine; if there are still marker tasks left after waking up all Goroutines, these marker tasks are added to the global credit.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/05/7656ba42ae704a0880c8629f2efc5d33.png" alt=""></p>
+<p>The core purpose of user program assisted tagging is to avoid user program memory allocation from affecting the expected time for the garbage collector to complete the tagging job. It ensures that the user program does not overburden the garbage collection by maintaining the account system, and once the user program allocates a large amount of memory, that user program balances the book by assisted tagging, a process that will reach relative balance at the end, ensuring that the tagging task completes when the desired heap size is reached.</p>
+<h3 id="marker-termination">Marker termination</h3>
+<p>When all the processor&rsquo;s local tasks are completed and there are no remaining working Goroutines, the background concurrent tasks or the user program that assisted in marking them will call runtime.gcMarkDone to notify the garbage collector. When all reachable objects are marked, this function switches the state of garbage collection to _GCmarktermination; if there are still pending tasks in the local queue, the current method adds all tasks to the global queue and waits for other Goroutines to finish processing.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcMarkDone</span><span class="p">()</span> <span class="p">{</span>
+	<span class="o">...</span>
+<span class="nx">top</span><span class="p">:</span>
+	<span class="k">if</span> <span class="p">!(</span><span class="nx">gcphase</span> <span class="o">==</span> <span class="nx">_GCmark</span> <span class="o">&amp;&amp;</span> <span class="nx">work</span><span class="p">.</span><span class="nx">nwait</span> <span class="o">==</span> <span class="nx">work</span><span class="p">.</span><span class="nx">nproc</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nf">gcMarkWorkAvailable</span><span class="p">(</span><span class="kc">nil</span><span class="p">))</span> <span class="p">{</span>
+		<span class="k">return</span>
+	<span class="p">}</span>
+
+	<span class="nx">gcMarkDoneFlushed</span> <span class="p">=</span> <span class="mi">0</span>
+	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nx">gp</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">().</span><span class="nx">m</span><span class="p">.</span><span class="nx">curg</span>
+		<span class="nf">casgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">,</span> <span class="nx">_Gwaiting</span><span class="p">)</span>
+		<span class="nf">forEachP</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">_p_</span> <span class="o">*</span><span class="nx">p</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nf">wbBufFlush1</span><span class="p">(</span><span class="nx">_p_</span><span class="p">)</span>
+			<span class="nx">_p_</span><span class="p">.</span><span class="nx">gcw</span><span class="p">.</span><span class="nf">dispose</span><span class="p">()</span>
+			<span class="k">if</span> <span class="nx">_p_</span><span class="p">.</span><span class="nx">gcw</span><span class="p">.</span><span class="nx">flushedWork</span> <span class="p">{</span>
+				<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadd</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gcMarkDoneFlushed</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+				<span class="nx">_p_</span><span class="p">.</span><span class="nx">gcw</span><span class="p">.</span><span class="nx">flushedWork</span> <span class="p">=</span> <span class="kc">false</span>
+			<span class="p">}</span>
+		<span class="p">})</span>
+		<span class="nf">casgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Gwaiting</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">)</span>
+	<span class="p">})</span>
+
+	<span class="k">if</span> <span class="nx">gcMarkDoneFlushed</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+		<span class="k">goto</span> <span class="nx">top</span>
+	<span class="p">}</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If the runtime contains no global tasks and there are no local tasks in the processor, then all gray objects in the current garbage collection loop are also marked black and we can start triggering the garbage collection phase migration:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcMarkDone</span><span class="p">()</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="nf">getg</span><span class="p">().</span><span class="nx">m</span><span class="p">.</span><span class="nx">preemptoff</span> <span class="p">=</span> <span class="s">&#34;gcing&#34;</span>
+	<span class="nf">systemstack</span><span class="p">(</span><span class="nx">stopTheWorldWithSema</span><span class="p">)</span>
+
+	<span class="o">...</span>
+
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gcBlackenEnabled</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+	<span class="nf">gcWakeAllAssists</span><span class="p">()</span>
+	<span class="nf">schedEnableUser</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+	<span class="nx">nextTriggerRatio</span> <span class="o">:=</span> <span class="nx">gcController</span><span class="p">.</span><span class="nf">endCycle</span><span class="p">()</span>
+	<span class="nf">gcMarkTermination</span><span class="p">(</span><span class="nx">nextTriggerRatio</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The above function ends by closing the hybrid write barrier, waking up all user programs assisting in garbage collection, resuming scheduling of the user Goroutine and calling runtime.gcMarkTermination to enter the mark termination phase.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">gcMarkTermination</span><span class="p">(</span><span class="nx">nextTriggerRatio</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">{</span>
+	<span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">gcBlackenEnabled</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+	<span class="nf">setGCPhase</span><span class="p">(</span><span class="nx">_GCmarktermination</span><span class="p">)</span>
+
+	<span class="nx">_g_</span> <span class="o">:=</span> <span class="nf">getg</span><span class="p">()</span>
+	<span class="nx">gp</span> <span class="o">:=</span> <span class="nx">_g_</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">curg</span>
+	<span class="nf">casgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">,</span> <span class="nx">_Gwaiting</span><span class="p">)</span>
+
+	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nf">gcMark</span><span class="p">(</span><span class="nx">startTime</span><span class="p">)</span>
+	<span class="p">})</span>
+	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nf">setGCPhase</span><span class="p">(</span><span class="nx">_GCoff</span><span class="p">)</span>
+		<span class="nf">gcSweep</span><span class="p">(</span><span class="nx">work</span><span class="p">.</span><span class="nx">mode</span><span class="p">)</span>
+	<span class="p">})</span>
+	<span class="nf">casgstatus</span><span class="p">(</span><span class="nx">gp</span><span class="p">,</span> <span class="nx">_Gwaiting</span><span class="p">,</span> <span class="nx">_Grunning</span><span class="p">)</span>
+	<span class="nf">gcSetTriggerRatio</span><span class="p">(</span><span class="nx">nextTriggerRatio</span><span class="p">)</span>
+	<span class="nf">wakeScavenger</span><span class="p">()</span>
+
+	<span class="o">...</span>
+
+	<span class="nf">injectglist</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">work</span><span class="p">.</span><span class="nx">sweepWaiters</span><span class="p">.</span><span class="nx">list</span><span class="p">)</span>
+	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span> <span class="nf">startTheWorldWithSema</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span> <span class="p">})</span>
+	<span class="nf">prepareFreeWorkbufs</span><span class="p">()</span>
+	<span class="nf">systemstack</span><span class="p">(</span><span class="nx">freeStackSpans</span><span class="p">)</span>
+	<span class="nf">systemstack</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+		<span class="nf">forEachP</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">_p_</span> <span class="o">*</span><span class="nx">p</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">_p_</span><span class="p">.</span><span class="nx">mcache</span><span class="p">.</span><span class="nf">prepareForSweep</span><span class="p">()</span>
+		<span class="p">})</span>
+	<span class="p">})</span>
+	<span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We omitted a lot of statistics in this function, including the size of the memory being used, the pause time of the current round of garbage collection, CPU utilization, etc. These data can help the controller decide the heap size for the next round of triggered garbage collection, and in addition to the statistics, this function also calls runtime.gcSweep to reset the relevant state of the cleanup phase and block if needed. The _GCmarktermination state does not last long in garbage collection, it quickly transitions to _GCoff and resumes the application, where the full process of garbage collection is essentially over and the user program is inert to reclaim memory when it requests it.</p>
+<h3 id="memory-cleanup">Memory cleanup</h3>
+<p>The garbage collection cleanup includes object reclaimers (Reclaimers) and memory cell reclaimers, which use different algorithms to clean up heap memory:</p>
+<ul>
+<li>The object reclaimers look for and release untagged objects in the memory management unit, but if all objects in runtime.mspan are untagged, the entire unit is reclaimed directly, which is triggered asynchronously by runtime.mcentral.cacheSpan or runtime.sweepone.</li>
+<li>the memory unit reclaimer looks for runtime.mspan in memory where all objects are untagged, the process is triggered by runtime.mheap.reclaim.</li>
+</ul>
+<p>runtime.sweepone is a function we often see during garbage collection, which looks in heap memory for memory management units to be cleaned up.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">sweepone</span><span class="p">()</span> <span class="kt">uintptr</span> <span class="p">{</span>
+	<span class="o">...</span>
+	<span class="kd">var</span> <span class="nx">s</span> <span class="o">*</span><span class="nx">mspan</span>
+	<span class="nx">sg</span> <span class="o">:=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nx">sweepgen</span>
+	<span class="k">for</span> <span class="p">{</span>
+		<span class="nx">s</span> <span class="p">=</span> <span class="nx">mheap_</span><span class="p">.</span><span class="nf">nextSpanForSweep</span><span class="p">()</span>
+		<span class="k">if</span> <span class="nx">s</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">state</span> <span class="o">:=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">state</span><span class="p">.</span><span class="nf">get</span><span class="p">();</span> <span class="nx">state</span> <span class="o">!=</span> <span class="nx">mSpanInUse</span> <span class="p">{</span>
+			<span class="k">continue</span>
+		<span class="p">}</span>
+		<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span> <span class="o">==</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span> <span class="o">&amp;&amp;</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Cas</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">s</span><span class="p">.</span><span class="nx">sweepgen</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">2</span><span class="p">,</span> <span class="nx">sg</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+			<span class="k">break</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="nx">npages</span> <span class="o">:=</span> <span class="p">^</span><span class="nb">uintptr</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+	<span class="k">if</span> <span class="nx">s</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+		<span class="nx">npages</span> <span class="p">=</span> <span class="nx">s</span><span class="p">.</span><span class="nx">npages</span>
+		<span class="k">if</span> <span class="nx">s</span><span class="p">.</span><span class="nf">sweep</span><span class="p">(</span><span class="kc">false</span><span class="p">)</span> <span class="p">{</span>
+			<span class="nx">atomic</span><span class="p">.</span><span class="nf">Xadduintptr</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">mheap_</span><span class="p">.</span><span class="nx">reclaimCredit</span><span class="p">,</span> <span class="nx">npages</span><span class="p">)</span>
+		<span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+			<span class="nx">npages</span> <span class="p">=</span> <span class="mi">0</span>
+		<span class="p">}</span>
+	<span class="p">}</span>
+
+	<span class="nx">_g_</span><span class="p">.</span><span class="nx">m</span><span class="p">.</span><span class="nx">locks</span><span class="o">--</span>
+	<span class="k">return</span> <span class="nx">npages</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>When looking for a memory management unit, the state and sweepgen fields are used to determine if the current unit needs to be processed. If the sweepgen of the memory cell is equal to mheap.sweepgen - 2, then the current cell needs to be cleaned up, and if it is equal to mheap.sweepgen - 1, then the current management cell is being cleaned up.</p>
+<p>All recycling is ultimately done by runtime.mspan.sweep, which recovers the garbage in the memory cell based on the concurrent marker phase and clears the marker to avoid affecting the next round of garbage collection.</p>
+<h2 id="summary">Summary</h2>
+<p>Go language garbage collector implementation is very complex, the authors believe that this is the most complex module in the programming language, the complexity of the scheduler and garbage collector is not at all a level, we had to omit many implementation details in the analysis of the garbage collector, including the process of concurrently marking objects, the specific implementation of clearing garbage, these processes design a large number of underlying bit operations and pointer operations, this section contains links to all the relevant code, interested readers can explore on their own.</p>
+<p>Garbage collection is a very old technology, its execution speed and utilization largely determines the speed of the program, Go language in order to achieve a high-performance concurrent garbage collector, the use of three-color abstraction, concurrent incremental recycling, mixed write barriers, step adjustment algorithm and user program assistance and other mechanisms to optimize the garbage collection pause time to less than milliseconds, from the early version to see today, we can appreciate the engineering design and evolution, the authors feel that the study of garbage collection is the principle of implementation is still very worthwhile.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2021-12/go-faker/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">go-faker: a mock data generator</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2021-12/golang-stack-management/">
+            <span class="next-text nav-default">Stack memory and escape analysis in Go language</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

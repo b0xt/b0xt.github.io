@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Kubernetes HPA Controlled Elastic Scaling based on Prometheus Custom Metrics - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="There are three main types of elastic scaling in Kubernetes: HPA, VPA, and CA. Here we will focus on Pod Horizontal Scaling HPA.
+With the release of Kubernetes v1.23, the HPA API came to a stable version autoscaling/v2:
+ Scaling based on custom metrics Scaling based on multiple metrics Configurable scaling behaviour  From the initial v1 version of HPA, which only supported CPU and memory utilisation scaling, to the later support for custom metrics and aggregation layer APIs, to v1." /><meta name="keywords" content="k8s Hpa, Prometheus" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/k8s-hpa-prometheus/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Kubernetes HPA Controlled Elastic Scaling based on Prometheus Custom Metrics" />
+<meta property="og:description" content="There are three main types of elastic scaling in Kubernetes: HPA, VPA, and CA. Here we will focus on Pod Horizontal Scaling HPA.
+With the release of Kubernetes v1.23, the HPA API came to a stable version autoscaling/v2:
+ Scaling based on custom metrics Scaling based on multiple metrics Configurable scaling behaviour  From the initial v1 version of HPA, which only supported CPU and memory utilisation scaling, to the later support for custom metrics and aggregation layer APIs, to v1." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/k8s-hpa-prometheus/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-19T15:37:00+08:00" />
+<meta property="article:modified_time" content="2022-01-19T15:37:00+08:00" />
+
+<meta itemprop="name" content="Kubernetes HPA Controlled Elastic Scaling based on Prometheus Custom Metrics">
+<meta itemprop="description" content="There are three main types of elastic scaling in Kubernetes: HPA, VPA, and CA. Here we will focus on Pod Horizontal Scaling HPA.
+With the release of Kubernetes v1.23, the HPA API came to a stable version autoscaling/v2:
+ Scaling based on custom metrics Scaling based on multiple metrics Configurable scaling behaviour  From the initial v1 version of HPA, which only supported CPU and memory utilisation scaling, to the later support for custom metrics and aggregation layer APIs, to v1."><meta itemprop="datePublished" content="2022-01-19T15:37:00+08:00" />
+<meta itemprop="dateModified" content="2022-01-19T15:37:00+08:00" />
+<meta itemprop="wordCount" content="1389">
+<meta itemprop="keywords" content="k8s,prometheus," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Kubernetes HPA Controlled Elastic Scaling based on Prometheus Custom Metrics"/>
+<meta name="twitter:description" content="There are three main types of elastic scaling in Kubernetes: HPA, VPA, and CA. Here we will focus on Pod Horizontal Scaling HPA.
+With the release of Kubernetes v1.23, the HPA API came to a stable version autoscaling/v2:
+ Scaling based on custom metrics Scaling based on multiple metrics Configurable scaling behaviour  From the initial v1 version of HPA, which only supported CPU and memory utilisation scaling, to the later support for custom metrics and aggregation layer APIs, to v1."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Kubernetes HPA Controlled Elastic Scaling based on Prometheus Custom Metrics</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-19 15:37:00 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1389 words </span>
+          <span class="more-meta"> 7 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#overall-architecture">Overall architecture</a></li>
+        <li><a href="#environment-build">Environment build</a>
+          <ul>
+            <li><a href="#k3s">K3s</a></li>
+            <li><a href="#example-application">Example application</a></li>
+            <li><a href="#prometheus">Prometheus</a></li>
+            <li><a href="#prometheus-adapter">Prometheus Adapter</a></li>
+            <li><a href="#hpa">HPA</a></li>
+          </ul>
+        </li>
+        <li><a href="#testing">Testing</a></li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>There are three main types of elastic scaling in Kubernetes: HPA, VPA, and CA. Here we will focus on Pod Horizontal Scaling <a href="https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/">HPA</a>.</p>
+<p>With the release of Kubernetes v1.23, the HPA API came to a stable version <code>autoscaling/v2</code>:</p>
+<ul>
+<li>Scaling based on custom metrics</li>
+<li>Scaling based on multiple metrics</li>
+<li>Configurable scaling behaviour</li>
+</ul>
+<p>From the initial v1 version of HPA, which only supported CPU and memory utilisation scaling, to the later support for custom metrics and aggregation layer APIs, to v1.18, which added support for configurable scaling behaviour, HPA has become more and more usable and reliable.</p>
+<p>Scaling on CPU or memory metrics is not used by all systems and does not appear to be as reliable. For most web backend systems, elastic scaling based on RPS (requests per second) to handle bursts of traffic is more reliable.</p>
+<p>Prometheus is a popular open source monitoring system that provides access to real-time traffic load metrics, so today we&rsquo;ll be trying out a custom metric based on Prometheus for elastic scaling.</p>
+<p><strong>Note: The current HPA scale to 0 requires the alpha version of <code>HPAScaleToZero</code> to be turned on at the feature gate and an object or external metric to be configured. Even if it is turned on, the scaling from 0 to 1 requires scheduling, IP allocation, mirror pulling, etc., which has some overhead. How to reduce this overhead is not covered here, but will be added in a subsequent article.</strong></p>
+<p>All code used in the article can be <a href="https://github.com/addozhang/hpa-on-prometheus-metrics">downloaded from here</a>.</p>
+<h2 id="overall-architecture">Overall architecture</h2>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/19/3171db05b90e4e49aad9de75e59baebd.png" alt="sobyte"></p>
+<p>The HPA is to obtain metrics data from Prometheus. Here the <a href="https://github.com/kubernetes-sigs/prometheus-adapter">Prometheus Adapter</a>  component is introduced, which implements the <a href="https://github.com/kubernetes/community/blob/master/contributors/design-proposals/instrumentation/resource-metrics-api.md">resource metrics</a>, <a href="https://github.com/kubernetes/community/blob/master/contributors/design-proposals/instrumentation/custom-metrics-api.md">custom metrics</a>  and <a href="https://github.com/kubernetes/community/blob/master/contributors/design-proposals/instrumentation/external-metrics-api.md">external metrics APIs</a>  APIs and supports <strong>autoscaling/v2</strong> HPAs.</p>
+<p>Once the metrics data is obtained, the number of examples of workloads is adjusted according to predefined rules.</p>
+<h2 id="environment-build">Environment build</h2>
+<h3 id="k3s">K3s</h3>
+<p>We use the latest 1.23 version of K3s as our Kubernetes environment.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nb">export</span> <span class="nv">INSTALL_K3S_VERSION</span><span class="o">=</span>v1.23.1+k3s2
+curl -sfL https://get.k3s.io <span class="p">|</span> sh -s - --write-kubeconfig-mode <span class="m">644</span> --write-kubeconfig ~/.kube/config
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="example-application">Example application</h3>
+<p>We prepare a simple web application that records the number of requests and outputs the metric <code>http_requests_total</code> in Prometheus format via the <code>/metrics</code> endpoint.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+	<span class="nx">metrics</span> <span class="o">:=</span> <span class="nx">prometheus</span><span class="p">.</span><span class="nf">NewCounterVec</span><span class="p">(</span>
+		<span class="nx">prometheus</span><span class="p">.</span><span class="nx">CounterOpts</span><span class="p">{</span>
+			<span class="nx">Name</span><span class="p">:</span>        <span class="s">&#34;http_requests_total&#34;</span><span class="p">,</span>
+			<span class="nx">Help</span><span class="p">:</span>        <span class="s">&#34;Number of total http requests&#34;</span><span class="p">,</span>
+		<span class="p">},</span>
+		<span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">&#34;status&#34;</span><span class="p">},</span>
+	<span class="p">)</span>
+	<span class="nx">prometheus</span><span class="p">.</span><span class="nf">MustRegister</span><span class="p">(</span><span class="nx">metrics</span><span class="p">)</span>
+
+	<span class="nx">http</span><span class="p">.</span><span class="nf">HandleFunc</span><span class="p">(</span><span class="s">&#34;/&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+		<span class="nx">path</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">URL</span><span class="p">.</span><span class="nx">Path</span>
+		<span class="nx">statusCode</span> <span class="o">:=</span> <span class="mi">200</span>
+		<span class="k">switch</span> <span class="nx">path</span> <span class="p">{</span>
+		<span class="k">case</span> <span class="s">&#34;/metrics&#34;</span><span class="p">:</span>
+			<span class="nx">promhttp</span><span class="p">.</span><span class="nf">Handler</span><span class="p">().</span><span class="nf">ServeHTTP</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="nx">r</span><span class="p">)</span>
+		<span class="k">default</span><span class="p">:</span>
+			<span class="nx">w</span><span class="p">.</span><span class="nf">WriteHeader</span><span class="p">(</span><span class="nx">statusCode</span><span class="p">)</span>
+			<span class="nx">w</span><span class="p">.</span><span class="nf">Write</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;Hello World!&#34;</span><span class="p">))</span>
+		<span class="p">}</span>
+		<span class="nx">metrics</span><span class="p">.</span><span class="nf">WithLabelValues</span><span class="p">(</span><span class="nx">strconv</span><span class="p">.</span><span class="nf">Itoa</span><span class="p">(</span><span class="nx">statusCode</span><span class="p">)).</span><span class="nf">Inc</span><span class="p">()</span>
+	<span class="p">})</span>
+	<span class="nx">http</span><span class="p">.</span><span class="nf">ListenAndServe</span><span class="p">(</span><span class="s">&#34;:3000&#34;</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Deploying applications to clusters.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">kubectl apply -f kubernetes/sample-httpserver-deployment.yaml
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="prometheus">Prometheus</h3>
+<p>To install Prometheus using Helm, first add the chart repository for prometheus.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+</code></pre></td></tr></table>
+</div>
+</div><p>Only prometheus-server is used for this test, and other components are disabled during installation. <strong>Also, to demonstrate the effectiveness of the effect, the pull interval of the indicator is set to <code>10s</code></strong>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="c1"># install prometheus with some components disabled</span>
+<span class="c1"># set scrape interval to 10s</span>
+helm install prometheus prometheus-community/prometheus -n default --set alertmanager.enabled<span class="o">=</span>false,pushgateway.enabled<span class="o">=</span>false,nodeExporter.enabled<span class="o">=</span>false,kubeStateMetrics.enabled<span class="o">=</span>false,server.global.scrape_interval<span class="o">=</span>10s
+</code></pre></td></tr></table>
+</div>
+</div><p>Port forwarding allows web pages to be accessed in a browser.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="c1"># port forward</span>
+kubectl port-forward svc/prometheus-server 9090:80 -n prometheus
+</code></pre></td></tr></table>
+</div>
+</div><p>Here the RPS of the Pod is queried using the <code>sum(rate(http_requests_total[30s])) by (pod)</code> statement.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/19/9712dbc4585448c980717a9abe18e320.png" alt="sobyte"></p>
+<h3 id="prometheus-adapter">Prometheus Adapter</h3>
+<p>The Produmetheus Adapter is also installed using Helm, with additional configuration here.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">helm install prometheus-adapter prometheus-community/prometheus-adapter -n default -f kubernetes/values-adapter.yaml
+</code></pre></td></tr></table>
+</div>
+</div><p>In addition to configuring how the Prometheus server is accessed, it is also important to configure the rules for calculating custom metrics, telling the adapter how to get the metrics from Prometheus and calculate the metrics we need.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="nt">rules</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span><span class="nt">default</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span><span class="w">
+</span><span class="w">  </span><span class="nt">custom</span><span class="p">:</span><span class="w">
+</span><span class="w">   </span>- <span class="nt">seriesQuery</span><span class="p">:</span><span class="w"> </span><span class="s1">&#39;{__name__=~&#34;^http_requests.*_total$&#34;,container!=&#34;POD&#34;,namespace!=&#34;&#34;,pod!=&#34;&#34;}&#39;</span><span class="w">
+</span><span class="w">     </span><span class="nt">resources</span><span class="p">:</span><span class="w">
+</span><span class="w">       </span><span class="nt">overrides</span><span class="p">:</span><span class="w">
+</span><span class="w">         </span><span class="nt">namespace</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">resource</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;namespace&#34;</span><span class="w"> </span>}<span class="w">
+</span><span class="w">         </span><span class="nt">pod</span><span class="p">:</span><span class="w"> </span>{<span class="w"> </span><span class="nt">resource</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;pod&#34;</span><span class="w"> </span>}<span class="w">
+</span><span class="w">     </span><span class="nt">name</span><span class="p">:</span><span class="w">
+</span><span class="w">       </span><span class="nt">matches</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;(.*)_total&#34;</span><span class="w">
+</span><span class="w">       </span><span class="nt">as</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;${1}_qps&#34;</span><span class="w">
+</span><span class="w">     </span><span class="nt">metricsQuery</span><span class="p">:</span><span class="w"> </span><span class="l">sum(rate(&lt;&lt;.Series&gt;&gt;{&lt;&lt;.LabelMatchers&gt;&gt;}[30s])) by (&lt;&lt;.GroupBy&gt;&gt;)</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>You can refer to the detailed <a href="https://github.com/kubernetes-sigs/prometheus-adapter/blob/master/docs/sample-config.yaml">Adapter configuration</a>.</p>
+<p>After the promethues-adapter pod has successfully run, you can execute the <code>custom.metrics.k8s.io</code> request.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">kubectl get --raw <span class="s1">&#39;/apis/custom.metrics.k8s.io/v1beta1/namespaces/default/pods/*/http_requests_qps&#39;</span> <span class="p">|</span> jq .
+<span class="o">{</span>
+  <span class="s2">&#34;kind&#34;</span>: <span class="s2">&#34;MetricValueList&#34;</span>,
+  <span class="s2">&#34;apiVersion&#34;</span>: <span class="s2">&#34;custom.metrics.k8s.io/v1beta1&#34;</span>,
+  <span class="s2">&#34;metadata&#34;</span>: <span class="o">{</span>
+    <span class="s2">&#34;selfLink&#34;</span>: <span class="s2">&#34;/apis/custom.metrics.k8s.io/v1beta1/namespaces/default/pods/%2A/http_requests_qps&#34;</span>
+  <span class="o">}</span>,
+  <span class="s2">&#34;items&#34;</span>: <span class="o">[</span>
+    <span class="o">{</span>
+      <span class="s2">&#34;describedObject&#34;</span>: <span class="o">{</span>
+        <span class="s2">&#34;kind&#34;</span>: <span class="s2">&#34;Pod&#34;</span>,
+        <span class="s2">&#34;namespace&#34;</span>: <span class="s2">&#34;default&#34;</span>,
+        <span class="s2">&#34;name&#34;</span>: <span class="s2">&#34;sample-httpserver-64c495844f-b58pl&#34;</span>,
+        <span class="s2">&#34;apiVersion&#34;</span>: <span class="s2">&#34;/v1&#34;</span>
+      <span class="o">}</span>,
+      <span class="s2">&#34;metricName&#34;</span>: <span class="s2">&#34;http_requests_qps&#34;</span>,
+      <span class="s2">&#34;timestamp&#34;</span>: <span class="s2">&#34;2022-01-18T03:32:51Z&#34;</span>,
+      <span class="s2">&#34;value&#34;</span>: <span class="s2">&#34;100m&#34;</span>,
+      <span class="s2">&#34;selector&#34;</span>: null
+    <span class="o">}</span>
+  <span class="o">]</span>
+<span class="o">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><strong>Note: Here <code>value: 100m</code>, the suffix &ldquo;m&rdquo; identifies <code>milli-requests per seconds</code>, so 100m here means 0.1/s 0.1 requests per second.</strong></p>
+<h3 id="hpa">HPA</h3>
+<p>Finally, the configuration of the HPA is as follows</p>
+<ol>
+<li>the minimum and maximum number of replicas is set to 1 and 10 respectively</li>
+<li>to test the effectiveness of the effect, set the behavior of the scaling <code>behavior</code>.</li>
+<li>specify the metric <code>http_requests_qps</code>, the type <code>Pods</code> and the target value <code>50,000m</code>: the average RPS per pod is <code>50</code>. For example, with 300 RPS accesses, the number of replicas is 300/50=6.</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-yaml" data-lang="yaml"><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">HorizontalPodAutoscaler</span><span class="w">
+</span><span class="w"></span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">autoscaling/v2</span><span class="w">
+</span><span class="w"></span><span class="nt">metadata</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sample-httpserver</span><span class="w">
+</span><span class="w"></span><span class="nt">spec</span><span class="p">:</span><span class="w">
+</span><span class="w">  </span><span class="nt">scaleTargetRef</span><span class="p">:</span><span class="w">
+</span><span class="w">    </span><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l">apps/v1</span><span class="w">
+</span><span class="w">    </span><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l">Deployment</span><span class="w">
+</span><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">sample-httpserver</span><span class="w">
+</span><span class="w">  </span><span class="nt">minReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">1</span><span class="w">
+</span><span class="w">  </span><span class="nt">maxReplicas</span><span class="p">:</span><span class="w"> </span><span class="m">10</span><span class="w">
+</span><span class="w">  </span><span class="nt">behavior</span><span class="p">:</span><span class="w">
+</span><span class="w">    </span><span class="nt">scaleDown</span><span class="p">:</span><span class="w">
+</span><span class="w">      </span><span class="nt">stabilizationWindowSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">30</span><span class="w">
+</span><span class="w">      </span><span class="nt">policies</span><span class="p">:</span><span class="w">
+</span><span class="w">        </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Percent</span><span class="w">
+</span><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="m">100</span><span class="w">
+</span><span class="w">          </span><span class="nt">periodSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">15</span><span class="w">
+</span><span class="w">    </span><span class="nt">scaleUp</span><span class="p">:</span><span class="w">
+</span><span class="w">      </span><span class="nt">stabilizationWindowSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">0</span><span class="w">
+</span><span class="w">      </span><span class="nt">policies</span><span class="p">:</span><span class="w">
+</span><span class="w">        </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Percent</span><span class="w">
+</span><span class="w">          </span><span class="nt">value</span><span class="p">:</span><span class="w"> </span><span class="m">100</span><span class="w">
+</span><span class="w">          </span><span class="nt">periodSeconds</span><span class="p">:</span><span class="w"> </span><span class="m">15</span><span class="w">
+</span><span class="w">  </span><span class="nt">metrics</span><span class="p">:</span><span class="w">
+</span><span class="w">    </span>- <span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">Pods</span><span class="w">
+</span><span class="w">      </span><span class="nt">pods</span><span class="p">:</span><span class="w">
+</span><span class="w">        </span><span class="nt">metric</span><span class="p">:</span><span class="w">
+</span><span class="w">          </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">http_requests_qps</span><span class="w">
+</span><span class="w">        </span><span class="nt">target</span><span class="p">:</span><span class="w">
+</span><span class="w">          </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l">AverageValue</span><span class="w">
+</span><span class="w">          </span><span class="nt">averageValue</span><span class="p">:</span><span class="w"> </span><span class="l">50000m</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><h2 id="testing">Testing</h2>
+<p>The test tool is <a href="https://github.com/tsenart/vegeta"><code>vegeta</code></a> because it can specify the RPS.</p>
+<p>First create the NodePort service for the application.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">kubectl expose deploy sample-httpserver --name sample-httpserver-host --type NodePort --target-port <span class="m">3000</span>
+
+kubectl get svc sample-httpserver-host
+NAME                     TYPE       CLUSTER-IP     EXTERNAL-IP   PORT<span class="o">(</span>S<span class="o">)</span>          AGE
+sample-httpserver-host   NodePort   10.43.66.206   &lt;none&gt;        3000:31617/TCP   12h
+</code></pre></td></tr></table>
+</div>
+</div><p>Requests are initiated using RPS of <code>240</code>, <code>120</code> and <code>40</code> respectively.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="c1"># 240</span>
+<span class="nb">echo</span> <span class="s2">&#34;GET http://192.168.1.92:31617&#34;</span> <span class="p">|</span> vegeta attack -duration 60s -connections <span class="m">10</span> -rate <span class="m">240</span> <span class="p">|</span> vegeta report
+<span class="c1"># 120</span>
+<span class="nb">echo</span> <span class="s2">&#34;GET http://192.168.1.92:31617&#34;</span> <span class="p">|</span> vegeta attack -duration 60s -connections <span class="m">10</span> -rate <span class="m">120</span> <span class="p">|</span> vegeta report
+<span class="c1"># 40</span>
+<span class="nb">echo</span> <span class="s2">&#34;GET http://192.168.1.92:31617&#34;</span> <span class="p">|</span> vegeta attack -duration 60s -connections <span class="m">10</span> -rate <span class="m">40</span> <span class="p">|</span> vegeta report
+</code></pre></td></tr></table>
+</div>
+</div><p>Observe the change in the number of requests versus the number of examples from the Prometheus web interface.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/19/376cc408a6c0435e85559c25e82d1835.png" alt="sobyte"></p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/19/874e0fe36f484b09af0779d2104b75b5.png" alt="sobyte"></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">kubectl describe hpa sample-httpserver
+Warning: autoscaling/v2beta2 HorizontalPodAutoscaler is deprecated in v1.23+, unavailable in v1.26+<span class="p">;</span> use autoscaling/v2 HorizontalPodAutoscaler
+Name:                           sample-httpserver
+Namespace:                      default
+Labels:                         &lt;none&gt;
+Annotations:                    &lt;none&gt;
+CreationTimestamp:              Mon, <span class="m">17</span> Jan <span class="m">2022</span> 23:18:46 +0800
+Reference:                      Deployment/sample-httpserver
+Metrics:                        <span class="o">(</span> current / target <span class="o">)</span>
+  <span class="s2">&#34;http_requests_qps&#34;</span> on pods:  100m / <span class="m">50</span>
+Min replicas:                   <span class="m">1</span>
+Max replicas:                   <span class="m">10</span>
+Behavior:
+  Scale Up:
+    Stabilization Window: <span class="m">0</span> seconds
+    Select Policy: Max
+    Policies:
+      - Type: Percent  Value: <span class="m">100</span>  Period: <span class="m">15</span> seconds
+  Scale Down:
+    Stabilization Window: <span class="m">30</span> seconds
+    Select Policy: Max
+    Policies:
+      - Type: Percent  Value: <span class="m">100</span>  Period: <span class="m">15</span> seconds
+Deployment pods:       <span class="m">1</span> current / <span class="m">1</span> desired
+Conditions:
+  Type            Status  Reason              Message
+  ----            ------  ------              -------
+  AbleToScale     True    ReadyForNewScale    recommended size matches current size
+  ScalingActive   True    ValidMetricFound    the HPA was able to successfully calculate a replica count from pods metric http_requests_qps
+  ScalingLimited  False   DesiredWithinRange  the desired count is within the acceptable range
+Events:
+  Type    Reason             Age                  From                       Message
+  ----    ------             ----                 ----                       -------
+  Normal  SuccessfulRescale  25m                  horizontal-pod-autoscaler  New size: 6<span class="p">;</span> reason: pods metric http_requests_qps above target
+  Normal  SuccessfulRescale  19m                  horizontal-pod-autoscaler  New size: 4<span class="p">;</span> reason: All metrics below target
+  Normal  SuccessfulRescale  12m <span class="o">(</span>x2 over 9h<span class="o">)</span>     horizontal-pod-autoscaler  New size: 4<span class="p">;</span> reason: pods metric http_requests_qps above target
+  Normal  SuccessfulRescale  11m                  horizontal-pod-autoscaler  New size: 5<span class="p">;</span> reason: pods metric http_requests_qps above target
+  Normal  SuccessfulRescale  9m40s <span class="o">(</span>x2 over 12m<span class="o">)</span>  horizontal-pod-autoscaler  New size: 2<span class="p">;</span> reason: pods metric http_requests_qps above target
+  Normal  SuccessfulRescale  9m24s <span class="o">(</span>x4 over 10h<span class="o">)</span>  horizontal-pod-autoscaler  New size: 3<span class="p">;</span> reason: pods metric http_requests_qps above target
+  Normal  SuccessfulRescale  7m54s <span class="o">(</span>x3 over 9h<span class="o">)</span>   horizontal-pod-autoscaler  New size: 2<span class="p">;</span> reason: All metrics below target
+  Normal  SuccessfulRescale  7m39s <span class="o">(</span>x4 over 9h<span class="o">)</span>   horizontal-pod-autoscaler  New size: 1<span class="p">;</span> reason: All metrics below target
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="summary">Summary</h2>
+<p>Horizontal scaling of applications based on custom metrics such as requests per second is more reliable than CPU/memory and is suitable for most web systems. Promeheus is a popular application monitoring system that can be used as a scaling metric with the support of the Adapter and Aggregate APIs.</p>
+<p>HPA&rsquo;s <em>scale to 0</em> is currently in alpha and needs to focus on the effectiveness of scaling from 0 to N replicas. If the minimum number of replicas is greater than 0, it will again be resource intensive for some services. Next, we will try to address the performance of 0 to N, and the resource consumption issues.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/k8s/">k8s</a>
+          <a href="/tags/prometheus/">prometheus</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/jetpack/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Shortcomings of the Jetpack-LiveData component and strategies for dealing with them</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/deep-link-deferred-deeplink/">
+            <span class="next-text nav-default">App Deep Linking and Delayed Deep Linking</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

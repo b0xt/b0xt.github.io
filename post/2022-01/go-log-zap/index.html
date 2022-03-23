@@ -1,0 +1,1007 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Design and implementation of zap, a high-performance Go logging library - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Recently I&amp;rsquo;ve been learning how to make code run more efficiently in development, and while browsing through various good logging designs, I came across a logging library called zap from uber that caught my attention, with its main feature of extreme performance and memory allocation optimizations. For me, I was originally using logrus as log output in my project, but when I saw the benchmark of zap, I felt that" /><meta name="keywords" content="golang, Log, Zap" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/go-log-zap/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Design and implementation of zap, a high-performance Go logging library" />
+<meta property="og:description" content="Recently I&rsquo;ve been learning how to make code run more efficiently in development, and while browsing through various good logging designs, I came across a logging library called zap from uber that caught my attention, with its main feature of extreme performance and memory allocation optimizations. For me, I was originally using logrus as log output in my project, but when I saw the benchmark of zap, I felt that" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/go-log-zap/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-22T11:25:10+08:00" />
+<meta property="article:modified_time" content="2022-01-22T11:25:10+08:00" />
+
+<meta itemprop="name" content="Design and implementation of zap, a high-performance Go logging library">
+<meta itemprop="description" content="Recently I&rsquo;ve been learning how to make code run more efficiently in development, and while browsing through various good logging designs, I came across a logging library called zap from uber that caught my attention, with its main feature of extreme performance and memory allocation optimizations. For me, I was originally using logrus as log output in my project, but when I saw the benchmark of zap, I felt that"><meta itemprop="datePublished" content="2022-01-22T11:25:10+08:00" />
+<meta itemprop="dateModified" content="2022-01-22T11:25:10+08:00" />
+<meta itemprop="wordCount" content="2929">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Design and implementation of zap, a high-performance Go logging library"/>
+<meta name="twitter:description" content="Recently I&rsquo;ve been learning how to make code run more efficiently in development, and while browsing through various good logging designs, I came across a logging library called zap from uber that caught my attention, with its main feature of extreme performance and memory allocation optimizations. For me, I was originally using logrus as log output in my project, but when I saw the benchmark of zap, I felt that"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Design and implementation of zap, a high-performance Go logging library</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-22 11:25:10 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2929 words </span>
+          <span class="more-meta"> 6 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#zap-design">zap design</a>
+          <ul>
+            <li><a href="#instantiation-of-log">Instantiation of log</a></li>
+            <li><a href="#output-of-log-data">Output of log data</a></li>
+            <li><a href="#interface-and-framework-design">Interface and framework design</a></li>
+            <li><a href="#performance">Performance</a></li>
+          </ul>
+        </li>
+        <li><a href="#zap-code-analysis">zap code analysis</a>
+          <ul>
+            <li><a href="#initialization">Initialization</a></li>
+            <li><a href="#printing-the-log">Printing the log</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Recently I&rsquo;ve been learning how to make code run more efficiently in development, and while browsing through various good logging designs, I came across a logging library called zap from uber that caught my attention, with its main feature of extreme performance and memory allocation optimizations.</p>
+<p>For me, I was originally using logrus as log output in my project, but when I saw the benchmark of zap, I felt that it beat logrus in terms of performance, so that&rsquo;s what drove me to see how it was optimized.</p>
+<p>Of course, besides that, I wanted to get more familiar with it so that I could use the library more efficiently and avoid being unable to locate it when problems arise.</p>
+<p>Here is the benchmark to give you some motivation to read on.</p>
+<table>
+<thead>
+<tr>
+<th>Package</th>
+<th>Time</th>
+<th>Time % to zap</th>
+<th>Objects Allocated</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>zap</td>
+<td>862 ns/op</td>
+<td>+0%</td>
+<td>5 allocs/op</td>
+</tr>
+<tr>
+<td>zap (sugared)</td>
+<td>1250 ns/op</td>
+<td>+45%</td>
+<td>11 allocs/op</td>
+</tr>
+<tr>
+<td>zerolog</td>
+<td>4021 ns/op</td>
+<td>+366%</td>
+<td>76 allocs/op</td>
+</tr>
+<tr>
+<td>go-kit</td>
+<td>4542 ns/op</td>
+<td>+427%</td>
+<td>105 allocs/op</td>
+</tr>
+<tr>
+<td>apex/log</td>
+<td>26785 ns/op</td>
+<td>+3007%</td>
+<td>115 allocs/op</td>
+</tr>
+<tr>
+<td>logrus</td>
+<td>29501 ns/op</td>
+<td>+3322%</td>
+<td>125 allocs/op</td>
+</tr>
+<tr>
+<td>log15</td>
+<td>29906 ns/op</td>
+<td>+3369%</td>
+<td>122 allocs/op</td>
+</tr>
+</tbody>
+</table>
+<h2 id="zap-design">zap design</h2>
+<h3 id="instantiation-of-log">Instantiation of log</h3>
+<p>To get started, we can use the official example to understand the internal components of zap.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">log</span> <span class="o">:=</span> <span class="nx">zap</span><span class="p">.</span><span class="nf">NewExample</span><span class="p">()</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The NewExample function shows a Core structure to be created by NewCore, which we should be able to guess is the core of zap based on its name.</p>
+<p>For a logging library, there are three main categories.</p>
+<ol>
+<li>how the input data needs to be serialized.</li>
+<li>where to store the input data after serialization, be it console or file, or somewhere else.</li>
+<li>and then the level of logging, whether it is Debug, Info or Error.</li>
+</ol>
+<p>Similarly with zap, the three parameters that need to be passed when creating a Core structure with NewCore are: Encoder for the input data, WriteSyncer for the log data, and LevelEnabler for the log level.</p>
+<p>In addition to the NewExample constructor, zap also provides NewProduction and NewDevelopment to construct log instances.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">log</span><span class="p">,</span> <span class="nx">_</span>  <span class="p">=</span> <span class="nx">zap</span><span class="p">.</span><span class="nf">NewProduction</span><span class="p">()</span>
+<span class="nx">log</span><span class="p">,</span> <span class="nx">_</span>  <span class="p">=</span> <span class="nx">zap</span><span class="p">.</span><span class="nf">NewDevelopment</span><span class="p">()</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>These two functions create the parameters needed for NewCore by constructing a Config structure and then calling the Build method, which then instantiates the log instance.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/223c7d0abc7c40febbec67f88a724cf8.png" alt="zap"></p>
+<h3 id="output-of-log-data">Output of log data</h3>
+<p>After initializing the log instance, you can print the log using Info, Debug, Error, etc.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">    <span class="nx">log</span>  <span class="p">=</span> <span class="nx">zap</span><span class="p">.</span><span class="nf">NewExample</span><span class="p">()</span>
+    <span class="nx">url</span> <span class="o">:=</span> <span class="s">&#34;http://example.org/api&#34;</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Info</span><span class="p">(</span><span class="s">&#34;failed to fetch URL&#34;</span><span class="p">,</span>
+        <span class="nx">zap</span><span class="p">.</span><span class="nf">String</span><span class="p">(</span><span class="s">&#34;url&#34;</span><span class="p">,</span> <span class="nx">url</span><span class="p">),</span>
+        <span class="nx">zap</span><span class="p">.</span><span class="nf">Int</span><span class="p">(</span><span class="s">&#34;attempt&#34;</span><span class="p">,</span> <span class="mi">3</span><span class="p">),</span>
+        <span class="nx">zap</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="s">&#34;backoff&#34;</span><span class="p">,</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Hour</span><span class="p">),</span>
+    <span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s take a look at the steps for zap to print a structured log:</p>
+<ol>
+<li>first check the logging configuration level, for example, the Error logging configuration level must not output the Debug log.</li>
+<li>then the log data is encapsulated into an Entry instance.</li>
+<li>add multiple Cores to the CheckedEntry instance because multiCore can be passed in the zap.</li>
+<li>iterate through the Cores in the CheckedEntry instance.
+<ol>
+<li>serialize the log data into the Buffer according to the Encoder in the Core;</li>
+<li>the WriteSyncer then outputs the log data from the Buffer.</li>
+</ol>
+</li>
+</ol>
+<h3 id="interface-and-framework-design">Interface and framework design</h3>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/8251f2e328ee4684aa04bbfa96a1fe25.png" alt="zap"></p>
+<p>The code structure is designed with a simple interface encapsulation to achieve a variety of styles of configuration combinations to meet various needs. The top-level design implements three logs used to achieve different functions.</p>
+<p><strong>Logger</strong> : more cumbersome to use, only structured output can be used, but better performance.</p>
+<p><strong>SugaredLogger</strong>: can use Printf to output logs, performance is about 40% worse than Logger; <strong>zapgrpc</strong>: can use Printf to output logs, performance is about 40% worse than Logger.</p>
+<p><strong>zapgrpc</strong>: used for grpc logging output.</p>
+<p>Logger can be easily converted to SugaredLogger and zapgrpc by design; these Loggers require passing in a Core interface implementation class to create.</p>
+<p><strong>Core interface</strong>: zap also provides a variety of implementation options: NewNopCore, ioCore, multiCore, hook.</p>
+<p>The most commonly used are ioCore, multiCore, from the name you can see that multiCore is a configuration that can contain multiple ioCore, for example, you can make the Error log output one log format and set a log output destination, so that the Info log output in another log format to another place.</p>
+<p>As mentioned above, the Core implementation class ioCore requires three objects to be passed in: Encoder, the encoder of the input data, WriteSyncer, the destination of the log data, and LevelEnabler, the log level.</p>
+<p><strong>Encoder interface</strong>: zap provides implementations of consoleEncoder, jsonEncoder, which provide log output in console format and JSON format respectively, and these Encoders have their own serialization implementations, which allows for faster formatting of code.</p>
+<p><strong>EncoderConfig</strong> : The Encoder described above also allows the user to flexibly configure the log output format according to the EncoderConfig configuration, from the key name of the log message, the log level name, to the definition of the time format output, the definition of the method name can be flexibly configured through it.</p>
+<p><strong>WriteSyncer interface</strong> : zap provides a single log output implementation of writerWrapper and a multiWriteSyncer implementation that can output logs to multiple locations.</p>
+<p><strong>Entry</strong> : With the configuration out of the way, it&rsquo;s time to encapsulate the log data. First, the log data will be encapsulated into an Entry, which contains the log name, log time, log level, and log data information, no Field information, and then experience Core&rsquo;s Check method to generate a CheckedEntry instance after the log level is verified.</p>
+<p><strong>CheckedEntry</strong> contains all the information about the log data, including the above-mentioned Entry, call stack information, etc.</p>
+<h3 id="performance">Performance</h3>
+<h4 id="using-object-pools">Using Object Pools</h4>
+<p>zap reuses a large number of objects that can be reused through the object pools provided by sync.</p>
+<p>zap When instantiating CheckedEntry, Buffer, Encoder and other objects, it will get them directly from the object pool, instead of instantiating a new one directly, so that reusing objects can reduce the pressure of GC and reduce memory allocation.</p>
+<h4 id="avoid-reflection">Avoid reflection</h4>
+<p>If we use the official log library, output the log like this.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;%s login, age:%d&#34;</span><span class="p">,</span> <span class="s">&#34;luoluo&#34;</span><span class="p">,</span> <span class="mi">19</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The Printf function called by log actually calls the <code>fmt.Sprintf</code> function to format the log data for output.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">Printf</span><span class="p">(</span><span class="nx">format</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">v</span> <span class="o">...</span><span class="kd">interface</span><span class="p">{})</span> <span class="p">{</span>
+    <span class="nx">std</span><span class="p">.</span><span class="nf">Output</span><span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="nx">format</span><span class="p">,</span> <span class="nx">v</span><span class="o">...</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>However, the efficiency of <code>fmt.Sprintf</code> is actually very low, and by looking at the source code of fmt.</p>
+<ol>
+<li>the type accepted by <code>fmt.Sprintf</code> is interface{}, which uses reflection internally.</li>
+<li><code>fmt.Sprintf</code> is used for formatting strings, which requires parsing format strings such as <code>%s</code>, <code>%d</code> and so on, increasing the time spent on parsing.</li>
+</ol>
+<p>However, in zap, the built-in Encoder is used, which stitches log data in byte form through the internal Buffer, reducing the performance loss caused by reflection; and zap uses structured logs, so there are no <code>%s</code> or <code>%d</code> identifiers to parse, which is also a performance improvement.</p>
+<h4 id="a-more-efficient-and-flexible-serializer">A more efficient and flexible serializer</h4>
+<p>Both serializers can be configured flexibly according to the EncoderConfig passed in. This flexible configuration is not just the name of the log output key, but the user-defined Encoder implementation can be called by passing in a function in EncoderConfig.</p>
+<p>The standard library serialization tool is used for serializing JSON like logrus, which is also less efficient.</p>
+<h2 id="zap-code-analysis">zap code analysis</h2>
+<p>Since I feel that the zap code is still written in an elegant way, here is a little bit of source code analysis.</p>
+<h3 id="initialization">Initialization</h3>
+<h4 id="initializing-core">Initializing Core</h4>
+<p>As we learned in the diagram above, Core has 4 implementation classes, so let&rsquo;s take the most commonly used ioCore as an example to explain.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">ioCore</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">LevelEnabler</span>
+    <span class="nx">enc</span> <span class="nx">Encoder</span>
+    <span class="nx">out</span> <span class="nx">WriteSyncer</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The ioCore is very simple and requires a total of three fields: Encoder for the input data, WriteSyncer for the log data destination, and LevelEnabler for the log level.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">NewCore</span><span class="p">(</span><span class="nx">enc</span> <span class="nx">Encoder</span><span class="p">,</span> <span class="nx">ws</span> <span class="nx">WriteSyncer</span><span class="p">,</span> <span class="nx">enab</span> <span class="nx">LevelEnabler</span><span class="p">)</span> <span class="nx">Core</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">ioCore</span><span class="p">{</span>
+        <span class="nx">LevelEnabler</span><span class="p">:</span> <span class="nx">enab</span><span class="p">,</span>
+        <span class="nx">enc</span><span class="p">:</span>          <span class="nx">enc</span><span class="p">,</span>
+        <span class="nx">out</span><span class="p">:</span>          <span class="nx">ws</span><span class="p">,</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The NewCore function also returns an object pointer when used to create an ioCore.</p>
+<h4 id="initializing-a-logger">Initializing a Logger</h4>
+<p>zap will instantiate a Logger with the New function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">New</span><span class="p">(</span><span class="nx">core</span> <span class="nx">zapcore</span><span class="p">.</span><span class="nx">Core</span><span class="p">,</span> <span class="nx">options</span> <span class="o">...</span><span class="nx">Option</span><span class="p">)</span> <span class="o">*</span><span class="nx">Logger</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">core</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nf">NewNop</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="nx">log</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Logger</span><span class="p">{</span>
+        <span class="nx">core</span><span class="p">:</span>        <span class="nx">core</span><span class="p">,</span>
+        <span class="nx">errorOutput</span><span class="p">:</span> <span class="nx">zapcore</span><span class="p">.</span><span class="nf">Lock</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span><span class="p">),</span>
+        <span class="nx">addStack</span><span class="p">:</span>    <span class="nx">zapcore</span><span class="p">.</span><span class="nx">FatalLevel</span> <span class="o">+</span> <span class="mi">1</span><span class="p">,</span>
+        <span class="nx">clock</span><span class="p">:</span>       <span class="nx">_systemClock</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nx">log</span><span class="p">.</span><span class="nf">WithOptions</span><span class="p">(</span><span class="nx">options</span><span class="o">...</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The New function sets up the appropriate default fields, including the core instance, the error log output location, the output level of the stack log, the log time, etc., and then instantiates a Logger object to return a pointer.</p>
+<p>The information of the Logger structure is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Logger</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">core</span> <span class="nx">zapcore</span><span class="p">.</span><span class="nx">Core</span>
+    <span class="c1">// 是否是开发模式
+</span><span class="c1"></span>    <span class="nx">development</span> <span class="kt">bool</span>
+    <span class="c1">// 是否打印行号
+</span><span class="c1"></span>    <span class="nx">addCaller</span>   <span class="kt">bool</span>
+    <span class="nx">onFatal</span>     <span class="nx">zapcore</span><span class="p">.</span><span class="nx">CheckWriteAction</span> <span class="c1">// default is WriteThenFatal
+</span><span class="c1"></span>
+    <span class="nx">name</span>        <span class="kt">string</span>
+    <span class="c1">// 错误日志输出
+</span><span class="c1"></span>    <span class="nx">errorOutput</span> <span class="nx">zapcore</span><span class="p">.</span><span class="nx">WriteSyncer</span>
+    <span class="c1">// 输出调用堆栈
+</span><span class="c1"></span>    <span class="nx">addStack</span> <span class="nx">zapcore</span><span class="p">.</span><span class="nx">LevelEnabler</span>
+    <span class="c1">// 打印调用者的行号
+</span><span class="c1"></span>    <span class="nx">callerSkip</span> <span class="kt">int</span>
+
+    <span class="nx">clock</span> <span class="nx">Clock</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The Logger structure will contain a lot of configuration information, and we can add the corresponding parameters through WithOptions in our development. For example, add the log line number.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">log</span> <span class="o">:=</span> <span class="nx">zap</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nx">core</span><span class="p">).</span><span class="nf">WithOptions</span><span class="p">(</span><span class="nx">zap</span><span class="p">.</span><span class="nf">AddCaller</span><span class="p">())</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The AddCaller function creates a callback hook for WithOptions to execute, which is the beauty of functional programming.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">log</span> <span class="o">*</span><span class="nx">Logger</span><span class="p">)</span> <span class="nf">WithOptions</span><span class="p">(</span><span class="nx">opts</span> <span class="o">...</span><span class="nx">Option</span><span class="p">)</span> <span class="o">*</span><span class="nx">Logger</span> <span class="p">{</span>
+    <span class="nx">c</span> <span class="o">:=</span> <span class="nx">log</span><span class="p">.</span><span class="nf">clone</span><span class="p">()</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">opt</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">opts</span> <span class="p">{</span>
+    <span class="c1">// 调用 Option 接口的方法 
+</span><span class="c1"></span>        <span class="nx">opt</span><span class="p">.</span><span class="nf">apply</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nx">c</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>WithOptions you can pass in an array of Options, then iterate through the array and call the apply method.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">optionFunc</span> <span class="kd">func</span><span class="p">(</span><span class="o">*</span><span class="nx">Logger</span><span class="p">)</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">f</span> <span class="nx">optionFunc</span><span class="p">)</span> <span class="nf">apply</span><span class="p">(</span><span class="nx">log</span> <span class="o">*</span><span class="nx">Logger</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nf">f</span><span class="p">(</span><span class="nx">log</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="c1">// 定义 Option 接口
+</span><span class="c1"></span><span class="kd">type</span> <span class="nx">Option</span> <span class="kd">interface</span> <span class="p">{</span>
+    <span class="nf">apply</span><span class="p">(</span><span class="o">*</span><span class="nx">Logger</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">AddCaller</span><span class="p">()</span> <span class="nx">Option</span> <span class="p">{</span>
+  <span class="c1">// 返回 Option
+</span><span class="c1"></span>    <span class="k">return</span> <span class="nf">WithCaller</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">WithCaller</span><span class="p">(</span><span class="nx">enabled</span> <span class="kt">bool</span><span class="p">)</span> <span class="nx">Option</span> <span class="p">{</span>
+  <span class="c1">// 将 func 强转成 optionFunc 类型
+</span><span class="c1"></span>    <span class="k">return</span> <span class="nf">optionFunc</span><span class="p">(</span><span class="kd">func</span><span class="p">(</span><span class="nx">log</span> <span class="o">*</span><span class="nx">Logger</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nx">addCaller</span> <span class="p">=</span> <span class="nx">enabled</span>
+    <span class="p">})</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The code here is very interesting. In go, a function is also a type, and like a struct, it can have a method.</p>
+<p>Here optionFunc is a function type that implements the apply method, so it is equivalent to inheriting the Option interface. Then in the WithCaller, optionFunc is used to wrap a function in a layer, which looks fantastic, but is actually no different from int64(123).</p>
+<p>Then in the WithOptions function, the function returned by the WithCaller is converted to optionFunc and passed to log for execution, which is equivalent to changing the addCaller property of log.</p>
+<p>If you don&rsquo;t understand it, you can try it yourself on the compiler.</p>
+<h3 id="printing-the-log">Printing the log</h3>
+<p>The entire process of printing the log is as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/22/5a9f504e8cb743bf94884b6a7568a313.png" alt="sobyte"></p>
+<ol>
+<li>first, get the CheckedEntry instance and encapsulate the corresponding log data;</li>
+<li>then encode it according to the encoder encapsulated in the core, and put the encoded content into a buffer.</li>
+<li>output the contents of the buffer to the WriteSyncer encapsulated in the core.</li>
+</ol>
+<p>After we initialize the Logger, we can use it to call the appropriate Info, Warn, Error, etc. methods to print the log output. Since the output methods are the same for all log levels, here we will analyze them through the Info method.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">log</span> <span class="o">*</span><span class="nx">Logger</span><span class="p">)</span> <span class="nf">Info</span><span class="p">(</span><span class="nx">msg</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">fields</span> <span class="o">...</span><span class="nx">Field</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 检查该日志是否应该被打印
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">ce</span> <span class="o">:=</span> <span class="nx">log</span><span class="p">.</span><span class="nf">check</span><span class="p">(</span><span class="nx">InfoLevel</span><span class="p">,</span> <span class="nx">msg</span><span class="p">);</span> <span class="nx">ce</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="c1">// 打印日志
+</span><span class="c1"></span>        <span class="nx">ce</span><span class="p">.</span><span class="nf">Write</span><span class="p">(</span><span class="nx">fields</span><span class="o">...</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This method first calls the check method to check whether the current log data should be printed at the configured log level.</p>
+<p>For Info log level, InfoLevel is passed in, and for Error log level, ErrorLevel is passed in. zap log levels are defined by these constants.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">Level</span> <span class="kt">int8</span>
+
+<span class="kd">const</span> <span class="p">(</span> 
+    <span class="nx">DebugLevel</span> <span class="nx">Level</span> <span class="p">=</span> <span class="kc">iota</span> <span class="o">-</span> <span class="mi">1</span> 
+    <span class="nx">InfoLevel</span> 
+    <span class="nx">WarnLevel</span> 
+    <span class="nx">ErrorLevel</span> 
+    <span class="nx">DPanicLevel</span> 
+    <span class="nx">PanicLevel</span> 
+    <span class="nx">FatalLevel</span>
+
+    <span class="nx">_minLevel</span> <span class="p">=</span> <span class="nx">DebugLevel</span>
+    <span class="nx">_maxLevel</span> <span class="p">=</span> <span class="nx">FatalLevel</span>
+<span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The minimum DebugLevel starts at -1.</p>
+<h4 id="check">check</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">log</span> <span class="o">*</span><span class="nx">Logger</span><span class="p">)</span> <span class="nf">check</span><span class="p">(</span><span class="nx">lvl</span> <span class="nx">zapcore</span><span class="p">.</span><span class="nx">Level</span><span class="p">,</span> <span class="nx">msg</span> <span class="kt">string</span><span class="p">)</span> <span class="o">*</span><span class="nx">zapcore</span><span class="p">.</span><span class="nx">CheckedEntry</span> <span class="p">{</span> 
+    <span class="kd">const</span> <span class="nx">callerSkipOffset</span> <span class="p">=</span> <span class="mi">2</span>
+    <span class="c1">// 判断传入的日志等级是否应该打印
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">lvl</span> <span class="p">&lt;</span> <span class="nx">zapcore</span><span class="p">.</span><span class="nx">DPanicLevel</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nx">log</span><span class="p">.</span><span class="nx">core</span><span class="p">.</span><span class="nf">Enabled</span><span class="p">(</span><span class="nx">lvl</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="kc">nil</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 将日志数据封装成一个 Entry
+</span><span class="c1"></span>    <span class="nx">ent</span> <span class="o">:=</span> <span class="nx">zapcore</span><span class="p">.</span><span class="nx">Entry</span><span class="p">{</span>
+        <span class="nx">LoggerName</span><span class="p">:</span> <span class="nx">log</span><span class="p">.</span><span class="nx">name</span><span class="p">,</span>
+        <span class="nx">Time</span><span class="p">:</span>       <span class="nx">log</span><span class="p">.</span><span class="nx">clock</span><span class="p">.</span><span class="nf">Now</span><span class="p">(),</span>
+        <span class="nx">Level</span><span class="p">:</span>      <span class="nx">lvl</span><span class="p">,</span>
+        <span class="nx">Message</span><span class="p">:</span>    <span class="nx">msg</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="c1">//如果能写日志则返回一个 CheckedEntry 实例指针
+</span><span class="c1"></span>    <span class="nx">ce</span> <span class="o">:=</span> <span class="nx">log</span><span class="p">.</span><span class="nx">core</span><span class="p">.</span><span class="nf">Check</span><span class="p">(</span><span class="nx">ent</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+    <span class="nx">willWrite</span> <span class="o">:=</span> <span class="nx">ce</span> <span class="o">!=</span> <span class="kc">nil</span> 
+    <span class="o">...</span> 
+    <span class="k">if</span> <span class="p">!</span><span class="nx">willWrite</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nx">ce</span>
+    <span class="p">}</span>
+
+    <span class="nx">ce</span><span class="p">.</span><span class="nx">ErrorOutput</span> <span class="p">=</span> <span class="nx">log</span><span class="p">.</span><span class="nx">errorOutput</span>
+    <span class="c1">// 判断是否打印调用行号
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">log</span><span class="p">.</span><span class="nx">addCaller</span> <span class="p">{</span>
+        <span class="c1">// 获取调用者的栈帧
+</span><span class="c1"></span>        <span class="nx">frame</span><span class="p">,</span> <span class="nx">defined</span> <span class="o">:=</span> <span class="nf">getCallerFrame</span><span class="p">(</span><span class="nx">log</span><span class="p">.</span><span class="nx">callerSkip</span> <span class="o">+</span> <span class="nx">callerSkipOffset</span><span class="p">)</span>
+        <span class="k">if</span> <span class="p">!</span><span class="nx">defined</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Fprintf</span><span class="p">(</span><span class="nx">log</span><span class="p">.</span><span class="nx">errorOutput</span><span class="p">,</span> <span class="s">&#34;%v Logger.check error: failed to get caller\n&#34;</span><span class="p">,</span> <span class="nx">ent</span><span class="p">.</span><span class="nx">Time</span><span class="p">.</span><span class="nf">UTC</span><span class="p">())</span>
+            <span class="nx">log</span><span class="p">.</span><span class="nx">errorOutput</span><span class="p">.</span><span class="nf">Sync</span><span class="p">()</span>
+        <span class="p">}</span>
+        <span class="c1">// 设值调用者 entry
+</span><span class="c1"></span>        <span class="nx">ce</span><span class="p">.</span><span class="nx">Entry</span><span class="p">.</span><span class="nx">Caller</span> <span class="p">=</span> <span class="nx">zapcore</span><span class="p">.</span><span class="nx">EntryCaller</span><span class="p">{</span>
+            <span class="nx">Defined</span><span class="p">:</span>  <span class="nx">defined</span><span class="p">,</span>
+            <span class="nx">PC</span><span class="p">:</span>       <span class="nx">frame</span><span class="p">.</span><span class="nx">PC</span><span class="p">,</span>
+            <span class="nx">File</span><span class="p">:</span>     <span class="nx">frame</span><span class="p">.</span><span class="nx">File</span><span class="p">,</span>
+            <span class="nx">Line</span><span class="p">:</span>     <span class="nx">frame</span><span class="p">.</span><span class="nx">Line</span><span class="p">,</span>
+            <span class="nx">Function</span><span class="p">:</span> <span class="nx">frame</span><span class="p">.</span><span class="nx">Function</span><span class="p">,</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">log</span><span class="p">.</span><span class="nx">addStack</span><span class="p">.</span><span class="nf">Enabled</span><span class="p">(</span><span class="nx">ce</span><span class="p">.</span><span class="nx">Entry</span><span class="p">.</span><span class="nx">Level</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// 封装调用栈信息
+</span><span class="c1"></span>        <span class="nx">ce</span><span class="p">.</span><span class="nx">Entry</span><span class="p">.</span><span class="nx">Stack</span> <span class="p">=</span> <span class="nf">StackSkip</span><span class="p">(</span><span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">log</span><span class="p">.</span><span class="nx">callerSkip</span><span class="o">+</span><span class="nx">callerSkipOffset</span><span class="p">).</span><span class="nx">String</span>
+    <span class="p">}</span> 
+    <span class="k">return</span> <span class="nx">ce</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The Enabled method of the core is called first to determine if the log should be printed. Since the log level is actually an int8 type, this is a straightforward determination based on size.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">l</span> <span class="nx">Level</span><span class="p">)</span> <span class="nf">Enabled</span><span class="p">(</span><span class="nx">lvl</span> <span class="nx">Level</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nx">lvl</span> <span class="o">&gt;=</span> <span class="nx">l</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>After determining that there are no problems, the Check method is called to get the CheckedEntry instance pointer. After getting the CheckedEntry instance pointer, it will set the value according to the configuration information and then return.</p>
+<p>Here is how to get the CheckedEntry instance pointer.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">ioCore</span><span class="p">)</span> <span class="nf">Check</span><span class="p">(</span><span class="nx">ent</span> <span class="nx">Entry</span><span class="p">,</span> <span class="nx">ce</span> <span class="o">*</span><span class="nx">CheckedEntry</span><span class="p">)</span> <span class="o">*</span><span class="nx">CheckedEntry</span> <span class="p">{</span>
+    <span class="c1">// 检查该 level 日志是否应该被打印
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Enabled</span><span class="p">(</span><span class="nx">ent</span><span class="p">.</span><span class="nx">Level</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// 获取 CheckedEntry
+</span><span class="c1"></span>        <span class="k">return</span> <span class="nx">ce</span><span class="p">.</span><span class="nf">AddCore</span><span class="p">(</span><span class="nx">ent</span><span class="p">,</span> <span class="nx">c</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nx">ce</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The main thing is that the ce passed in is a nil pointer, but that doesn&rsquo;t mean that Go calls its AddCore method (which would be an error on java).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">var</span> <span class="p">(</span>
+    <span class="nx">_cePool</span> <span class="p">=</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">Pool</span><span class="p">{</span><span class="nx">New</span><span class="p">:</span> <span class="kd">func</span><span class="p">()</span> <span class="kd">interface</span><span class="p">{}</span> <span class="p">{</span>
+        <span class="c1">// Pre-allocate some space for cores.
+</span><span class="c1"></span>        <span class="k">return</span> <span class="o">&amp;</span><span class="nx">CheckedEntry</span><span class="p">{</span>
+            <span class="nx">cores</span><span class="p">:</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">Core</span><span class="p">,</span> <span class="mi">4</span><span class="p">),</span>
+        <span class="p">}</span>
+    <span class="p">}}</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">ce</span> <span class="o">*</span><span class="nx">CheckedEntry</span><span class="p">)</span> <span class="nf">AddCore</span><span class="p">(</span><span class="nx">ent</span> <span class="nx">Entry</span><span class="p">,</span> <span class="nx">core</span> <span class="nx">Core</span><span class="p">)</span> <span class="o">*</span><span class="nx">CheckedEntry</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">ce</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="c1">// 从 _cePool 里面获取 CheckedEntry 实例
+</span><span class="c1"></span>        <span class="nx">ce</span> <span class="p">=</span> <span class="nf">getCheckedEntry</span><span class="p">()</span>
+        <span class="nx">ce</span><span class="p">.</span><span class="nx">Entry</span> <span class="p">=</span> <span class="nx">ent</span>
+    <span class="p">}</span>
+    <span class="c1">// 因为可能为 multi core 所以这里需要 append 一下
+</span><span class="c1"></span>    <span class="nx">ce</span><span class="p">.</span><span class="nx">cores</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">ce</span><span class="p">.</span><span class="nx">cores</span><span class="p">,</span> <span class="nx">core</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">ce</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">getCheckedEntry</span><span class="p">()</span> <span class="o">*</span><span class="nx">CheckedEntry</span> <span class="p">{</span>
+    <span class="c1">// 从 pool 中获取对象
+</span><span class="c1"></span>    <span class="nx">ce</span> <span class="o">:=</span> <span class="nx">_cePool</span><span class="p">.</span><span class="nf">Get</span><span class="p">().(</span><span class="o">*</span><span class="nx">CheckedEntry</span><span class="p">)</span>
+    <span class="c1">// 重置对象的属性
+</span><span class="c1"></span>    <span class="nx">ce</span><span class="p">.</span><span class="nf">reset</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nx">ce</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The AddCore method is also very simple, you should take a look at it and understand, not much to say.</p>
+<h4 id="write-log-printing">Write log printing</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">ce</span> <span class="o">*</span><span class="nx">CheckedEntry</span><span class="p">)</span> <span class="nf">Write</span><span class="p">(</span><span class="nx">fields</span> <span class="o">...</span><span class="nx">Field</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">ce</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="o">...</span> 
+    <span class="kd">var</span> <span class="nx">err</span> <span class="kt">error</span>
+    <span class="c1">// 遍历所有 core 写入日志数据
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">ce</span><span class="p">.</span><span class="nx">cores</span> <span class="p">{</span>
+        <span class="nx">err</span> <span class="p">=</span> <span class="nx">multierr</span><span class="p">.</span><span class="nf">Append</span><span class="p">(</span><span class="nx">err</span><span class="p">,</span> <span class="nx">ce</span><span class="p">.</span><span class="nx">cores</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nf">Write</span><span class="p">(</span><span class="nx">ce</span><span class="p">.</span><span class="nx">Entry</span><span class="p">,</span> <span class="nx">fields</span><span class="p">))</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+    <span class="c1">// 将 CheckedEntry 放回到缓存池中
+</span><span class="c1"></span>    <span class="nf">putCheckedEntry</span><span class="p">(</span><span class="nx">ce</span><span class="p">)</span>
+    <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This is where we call the Write method of core to write log data, and continue on.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">ioCore</span><span class="p">)</span> <span class="nf">Write</span><span class="p">(</span><span class="nx">ent</span> <span class="nx">Entry</span><span class="p">,</span> <span class="nx">fields</span> <span class="p">[]</span><span class="nx">Field</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+    <span class="c1">// 调用 Encoder 的 EncodeEntry 方法将日志数据编码
+</span><span class="c1"></span>    <span class="nx">buf</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">enc</span><span class="p">.</span><span class="nf">EncodeEntry</span><span class="p">(</span><span class="nx">ent</span><span class="p">,</span> <span class="nx">fields</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nx">err</span>
+    <span class="p">}</span>
+    <span class="c1">// 将日志数据通过 WriteSyncer 写入
+</span><span class="c1"></span>    <span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">out</span><span class="p">.</span><span class="nf">Write</span><span class="p">(</span><span class="nx">buf</span><span class="p">.</span><span class="nf">Bytes</span><span class="p">())</span>
+    <span class="c1">// 将buffer放回到缓存池中
+</span><span class="c1"></span>    <span class="nx">buf</span><span class="p">.</span><span class="nf">Free</span><span class="p">()</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="nx">err</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="nx">ent</span><span class="p">.</span><span class="nx">Level</span> <span class="p">&gt;</span> <span class="nx">ErrorLevel</span> <span class="p">{</span>
+        <span class="nx">c</span><span class="p">.</span><span class="nf">Sync</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The Write method calls the EncodeEntry method of the encoder, depending on the encoder. Both the jsonEncoder and the consoleEncoder get a Buffer instance from the bufferpool in the EncodeEntry method and then encapsulate the data in the Buffer instance in a certain format.</p>
+<p>Once the data is obtained, the WriteSyncer&rsquo;s Write method is called to write the log data.</p>
+<p>Finally, the Buffer instance is released back into the bufferpool.</p>
+<h2 id="summary">Summary</h2>
+<p>This article explains the design principles and code implementation of zap. We can see that the coding structure is designed in such a way that it can be configured in a simple way to achieve rich functionality. In terms of performance, it reduces the overhead of memory allocation through the use of object pools, reduces the overhead of serialization through a built-in high-performance serializer, and reduces the overhead of formatting log data through a structured log format called <code>fmt.Sprintf</code>.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/go-json/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">A deep dive into each of the high-performance JSON parsing libraries in Go</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/css-mistakes/">
+            <span class="next-text nav-default">5 CSS mistakes to avoid</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

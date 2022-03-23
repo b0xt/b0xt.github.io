@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Thinking about memory alignment by WaitGroup in Go - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="We all know how to use WaitGroup, but we also need to know how it is implemented, so that we can avoid the panic caused by incorrect use in the project as much as possible, and this article will also write about the memory alignment aspect to do a resolution, I hope you like it. WaitGroup Introduction WaitGroup provides three methods. 1 2 3 func (wg *WaitGroup) Add(delta int) func" /><meta name="keywords" content="vim, Waitgroup, Memory Alignment" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-01/go-waitgroup-memory-alignment/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Thinking about memory alignment by WaitGroup in Go" />
+<meta property="og:description" content="We all know how to use WaitGroup, but we also need to know how it is implemented, so that we can avoid the panic caused by incorrect use in the project as much as possible, and this article will also write about the memory alignment aspect to do a resolution, I hope you like it. WaitGroup Introduction WaitGroup provides three methods. 1 2 3 func (wg *WaitGroup) Add(delta int) func" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-01/go-waitgroup-memory-alignment/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-01-25T14:09:19+08:00" />
+<meta property="article:modified_time" content="2022-01-25T14:09:19+08:00" />
+
+<meta itemprop="name" content="Thinking about memory alignment by WaitGroup in Go">
+<meta itemprop="description" content="We all know how to use WaitGroup, but we also need to know how it is implemented, so that we can avoid the panic caused by incorrect use in the project as much as possible, and this article will also write about the memory alignment aspect to do a resolution, I hope you like it. WaitGroup Introduction WaitGroup provides three methods. 1 2 3 func (wg *WaitGroup) Add(delta int) func"><meta itemprop="datePublished" content="2022-01-25T14:09:19+08:00" />
+<meta itemprop="dateModified" content="2022-01-25T14:09:19+08:00" />
+<meta itemprop="wordCount" content="2829">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Thinking about memory alignment by WaitGroup in Go"/>
+<meta name="twitter:description" content="We all know how to use WaitGroup, but we also need to know how it is implemented, so that we can avoid the panic caused by incorrect use in the project as much as possible, and this article will also write about the memory alignment aspect to do a resolution, I hope you like it. WaitGroup Introduction WaitGroup provides three methods. 1 2 3 func (wg *WaitGroup) Add(delta int) func"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Thinking about memory alignment by WaitGroup in Go</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-01-25 14:09:19 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2829 words </span>
+          <span class="more-meta"> 6 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#waitgroup-introduction">WaitGroup Introduction</a></li>
+        <li><a href="#analysis">Analysis</a>
+          <ul>
+            <li><a href="#memory-alignment">Memory alignment</a></li>
+            <li><a href="#memory-alignment-of-state-method-in-waitgroup">Memory alignment of state method in WaitGroup</a></li>
+            <li><a href="#add-method">Add method</a></li>
+            <li><a href="#wait-method">Wait method</a></li>
+            <li><a href="#waitgroup-usage-summary">waitgroup usage summary</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary-1">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>We all know how to use WaitGroup, but we also need to know how it is implemented, so that we can avoid the panic caused by incorrect use in the project as much as possible, and this article will also write about the memory alignment aspect to do a resolution, I hope you like it.</p>
+<h2 id="waitgroup-introduction">WaitGroup Introduction</h2>
+<p>WaitGroup provides three methods.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">    <span class="kd">func</span> <span class="p">(</span><span class="nx">wg</span> <span class="o">*</span><span class="nx">WaitGroup</span><span class="p">)</span> <span class="nf">Add</span><span class="p">(</span><span class="nx">delta</span> <span class="kt">int</span><span class="p">)</span>
+    <span class="kd">func</span> <span class="p">(</span><span class="nx">wg</span> <span class="o">*</span><span class="nx">WaitGroup</span><span class="p">)</span> <span class="nf">Done</span><span class="p">()</span>
+    <span class="kd">func</span> <span class="p">(</span><span class="nx">wg</span> <span class="o">*</span><span class="nx">WaitGroup</span><span class="p">)</span> <span class="nf">Wait</span><span class="p">()</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>Add, which sets the count value of the WaitGroup.</li>
+<li>Done, used to subtract 1 from the WaitGroup&rsquo;s count, which is actually a call to Add(-1).</li>
+<li>Wait, the goroutine that calls this method will keep blocking until the count of the WaitGroup becomes 0.</li>
+</ul>
+<p>I will not give examples, the Internet is a lot of, here we go straight to the point.</p>
+<h2 id="analysis">Analysis</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">noCopy</span> <span class="kd">struct</span><span class="p">{}</span>
+
+<span class="kd">type</span> <span class="nx">WaitGroup</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="c1">// 避免复制使用的一个技巧，可以告诉vet工具违反了复制使用的规则
+</span><span class="c1"></span>    <span class="nx">noCopy</span> <span class="nx">noCopy</span>
+    <span class="c1">// 一个复合值，用来表示waiter数、计数值、信号量
+</span><span class="c1"></span>    <span class="nx">state1</span> <span class="p">[</span><span class="mi">3</span><span class="p">]</span><span class="kt">uint32</span>
+<span class="p">}</span>
+<span class="c1">// 获取state的地址和信号量的地址
+</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">wg</span> <span class="o">*</span><span class="nx">WaitGroup</span><span class="p">)</span> <span class="nf">state</span><span class="p">()</span> <span class="p">(</span><span class="nx">statep</span> <span class="o">*</span><span class="kt">uint64</span><span class="p">,</span> <span class="nx">semap</span> <span class="o">*</span><span class="kt">uint32</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">wg</span><span class="p">.</span><span class="nx">state1</span><span class="p">))</span><span class="o">%</span><span class="mi">8</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="c1">// 如果地址是64bit对齐的，数组前两个元素做state，后一个元素做信号量
+</span><span class="c1"></span>        <span class="k">return</span> <span class="p">(</span><span class="o">*</span><span class="kt">uint64</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">wg</span><span class="p">.</span><span class="nx">state1</span><span class="p">)),</span> <span class="o">&amp;</span><span class="nx">wg</span><span class="p">.</span><span class="nx">state1</span><span class="p">[</span><span class="mi">2</span><span class="p">]</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="c1">// 如果地址是32bit对齐的，数组后两个元素用来做state，它可以用来做64bit的原子操作，第一个元素32bit用来做信号量
+</span><span class="c1"></span>        <span class="k">return</span> <span class="p">(</span><span class="o">*</span><span class="kt">uint64</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">wg</span><span class="p">.</span><span class="nx">state1</span><span class="p">[</span><span class="mi">1</span><span class="p">])),</span> <span class="o">&amp;</span><span class="nx">wg</span><span class="p">.</span><span class="nx">state1</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Here at the very beginning, WaitGroup shows off its muscles, let&rsquo;s see how the big bully writes his code and think about how an atomic operation operates on different architectural platforms, and let&rsquo;s take a look at memory alignment before looking at why it&rsquo;s done inside the state method.</p>
+<h3 id="memory-alignment">Memory alignment</h3>
+<p>On Wikipedia <a href="https://en.wikipedia.org/wiki/Data_structure_alignment">https://en.wikipedia.org/wiki/Data_structure_alignment</a> we can see the definition of memory alignment.</p>
+<blockquote>
+<p>A memory address a is said to be n-byte aligned when a is a multiple of n bytes (where n is a power of 2).</p>
+</blockquote>
+<p>In short, the CPU now accesses memory bytes at a time, for example, the 32-bit architecture accesses 4bytes at a time, the processor can only start reading data from memory with an address that is a multiple of 4, so the data is required to be stored at a multiple of 4 when the first address value is stored, which is called memory alignment.</p>
+<p>Since I couldn&rsquo;t find the alignment rules for Go, I checked the memory alignment rules for C, which can be matched with Go, so I refer to the following rules first.</p>
+<p>Memory alignment follows the following three principles.</p>
+<ol>
+<li>the <strong>start address</strong> of a structure variable can be divided by the size of its widest member.</li>
+<li>the offset of each member of the structure relative to the start address can be divided by its own size, or if not, by additional bytes after the preceding member.</li>
+<li>the overall size of the structure is <strong>divisible by the size of the widest member</strong> or, if not, is <strong>followed by</strong> additional bytes.</li>
+</ol>
+<p>A hands-on look at memory alignment is given by the following example.</p>
+<p>In a 32-bit architecture, int8 takes up 1byte, int32 takes up 4bytes, and int16 takes up 2bytes.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">type</span> <span class="nx">A</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">a</span> <span class="kt">int8</span>
+    <span class="nx">b</span> <span class="kt">int32</span>
+    <span class="nx">c</span> <span class="kt">int16</span>
+<span class="p">}</span>
+
+<span class="kd">type</span> <span class="nx">B</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">a</span> <span class="kt">int8</span>
+    <span class="nx">c</span> <span class="kt">int16</span>
+    <span class="nx">b</span> <span class="kt">int32</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;arrange fields to reduce size:\n&#34;</span><span class="o">+</span>
+        <span class="s">&#34;A align: %d, size: %d\n&#34;</span> <span class="p">,</span>
+        <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Alignof</span><span class="p">(</span><span class="nx">A</span><span class="p">{}),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">A</span><span class="p">{})</span> <span class="p">)</span>
+
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;arrange fields to reduce size:\n&#34;</span><span class="o">+</span>
+        <span class="s">&#34;B align: %d, size: %d\n&#34;</span> <span class="p">,</span>
+        <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Alignof</span><span class="p">(</span><span class="nx">B</span><span class="p">{}),</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Sizeof</span><span class="p">(</span><span class="nx">B</span><span class="p">{})</span> <span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">//output:
+</span><span class="c1">//arrange fields to reduce size:
+</span><span class="c1">//A align: 4, size: 12
+</span><span class="c1">//arrange fields to reduce size:
+</span><span class="c1">//B align: 4, size: 8
+</span></code></pre></td></tr></table>
+</div>
+</div><p>The following is an example of running in a 32-bit architecture.</p>
+<p>The default alignment size in a system with 32-bit architecture is 4bytes.</p>
+<p>Suppose the starting address of a in structure A is 0x0000, which can be divided by the widest data member size of 4bytes (int32), so it is stored from 0x0000 to occupy a byte that is 0x0000~0x0001; b is int32, which occupies 4bytes, so to meet condition 2, it needs to padding 3 bytes after a, starting from 0x0004 start; c is int16, accounting for 2bytes so from 0x0008 to occupy two bytes, that is, 0x0008 ~ 0x0009; this time the entire structure occupies the space is 0x0000 ~ 0x0009 occupy 10 bytes, 10%4! = 0, does not meet the third principle, so you need to add two bytes later, that is, after the final memory alignment occupies the space is 0x0000 ~ 0x000B, a total of 12 bytes.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/25/ef7691274c044766b75780caf4ef992a.png" alt="sobyte"></p>
+<p>Similarly, it is more compact compared to structure B.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/25/7978cdec8701494792b7b48621be98ab.png" alt="sobyte"></p>
+<h3 id="memory-alignment-of-state-method-in-waitgroup">Memory alignment of state method in WaitGroup</h3>
+<p>Before we talk about it, we need to note that noCopy is an empty structure with size 0, so we don&rsquo;t need to do memory alignment, so we can ignore this field when we look at it.</p>
+<p>In the WaitGroup, the uint32 array is used to construct the state1 field, and then different return values are constructed according to the number of bits in the system, so I will talk about how to build the waiter number, count value, and semaphore through the sate1 field.</p>
+<p>Pointer` to get the address value of state1 and then convert it to uintptr type, and then determine whether the address value is divisible by 8. Here, the address mod 8 is used to determine whether the address is 64-bit aligned.</p>
+<p>Because of the existence of memory alignment, in the 64-bit architecture WaitGroup structure state1 starting position is definitely 64-bit aligned, so in the 64-bit architecture with the first two elements of state1 and into uint64 to represent statep, state1 last element represents semap.</p>
+<p>So can the 64-bit architecture get the first element of state1 to represent semap, and the last two elements to be spelled into 64-bit return?</p>
+<p>The answer is naturally no, because the alignment of uint32 is guaranteed to be 4bytes, and the fixed length of a one-time transaction in the 64-bit architecture is 8bytes, so if the last two elements of state1 represent a 64-bit word field, the CPU needs to read the memory twice, which cannot guarantee atomicity.</p>
+<p>But in 32-bit architecture, a word length is 4bytes, to operate 64-bit data distributed in <strong>two data blocks</strong>, two operations are needed to complete the access. If there is a possibility of other operations modifying the data between the two operations, atomicity is not guaranteed.</p>
+<p>Similarly, if the 32-bit architecture wants to operate atomically on 8bytes, it needs to be guaranteed by the caller that its data address is 64-bit aligned, otherwise the atomic access will have an exception, as we can see here <a href="https://golang.org/pkg/sync/atomic/#pkg-note-BUG">https://golang.org/pkg/sync/atomic/#pkg-note-BUG</a> that describes.</p>
+<blockquote>
+<p>On ARM, x86-32, and 32-bit MIPS, it is the caller&rsquo;s responsibility to arrange for 64-bit alignment of 64-bit words accessed atomically. The first word in a variable or in an allocated struct, array, or slice can be relied upon to be 64-bit aligned.</p>
+</blockquote>
+<p>So to ensure 64-bit word alignment, only the first 64-bit word in variables or open structures, arrays and sliced values can be considered 64-bit word aligned. But when using WaitGroup there are nested cases and it is not guaranteed to always have WaitGroup present on the first field of the structure, so we need to add padding to make it 64-bit word aligned.</p>
+<p>In 32-bit architecture, WaitGroup is allocated memory address randomly when it is initialized, so the location of the start of WaitGroup structure state1 is not necessarily 64-bit aligned, it may be: <code>uintptr(unsafe.Pointer(&amp;wg.state1))%8 = 4</code> , if such a situation occurs , then you need to use the first element of state1 for padding and the last two elements of state1 to merge into uint64 for statep.</p>
+<h4 id="summary">Summary</h4>
+<p>Here is a small summary, because it took a lot of consulting to complete the above content to come up with this result. So here is a small summary, in the 64-bit architecture, the word length of each CPU operation is 8bytes, the compiler will automatically help us to initialize the address of the first field of the structure to 64-bit alignment, so the 64-bit architecture with the first two elements of state1 and into uint64 to represent statep, state1 last element represents semap.</p>
+<p>Then in the 32-bit architecture, when initializing the WaitGroup, the compiler can only guarantee 32-bit alignment, not 64-bit alignment, so by <code>uintptr(unsafe.Pointer(&amp;wg.state1))%8</code> to determine if it is equal to 0 to see if the state1 memory address is 64-bit aligned, if it is, then also and 64-bit architecture is the same, use the first two elements of state1 and merge into uint64 to represent statep, the last element of state1 represents semap, otherwise use the first element of state1 for padding, use the last two elements of state1 and merge into uint64 to represent statep.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/25/31174f541ad243a28d0e4a830a50b767.png" alt="sobyte"></p>
+<h3 id="add-method">Add method</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">wg</span> <span class="o">*</span><span class="nx">WaitGroup</span><span class="p">)</span> <span class="nf">Add</span><span class="p">(</span><span class="nx">delta</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 获取状态值
+</span><span class="c1"></span>    <span class="nx">statep</span><span class="p">,</span> <span class="nx">semap</span> <span class="o">:=</span> <span class="nx">wg</span><span class="p">.</span><span class="nf">state</span><span class="p">()</span>
+    <span class="o">...</span>
+    <span class="c1">// 高32bit是计数值v，所以把delta左移32，增加到计数上
+</span><span class="c1"></span>    <span class="nx">state</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">AddUint64</span><span class="p">(</span><span class="nx">statep</span><span class="p">,</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">delta</span><span class="p">)</span><span class="o">&lt;&lt;</span><span class="mi">32</span><span class="p">)</span>
+    <span class="c1">// 获取计数器的值
+</span><span class="c1"></span>    <span class="nx">v</span> <span class="o">:=</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">state</span> <span class="o">&gt;&gt;</span> <span class="mi">32</span><span class="p">)</span>
+    <span class="c1">// 获取waiter的值
+</span><span class="c1"></span>    <span class="nx">w</span> <span class="o">:=</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">state</span><span class="p">)</span>
+    <span class="o">...</span>
+    <span class="c1">// 任务计数器不能为负数
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">v</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="s">&#34;sync: negative WaitGroup counter&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// wait不等于0说明已经执行了Wait，此时不容许Add
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">w</span> <span class="o">!=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">delta</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">v</span> <span class="o">==</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">delta</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="s">&#34;sync: WaitGroup misuse: Add called concurrently with Wait&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// 计数器的值大于或者没有waiter在等待,直接返回
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">v</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">w</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="k">return</span>
+    <span class="p">}</span> 
+    <span class="k">if</span> <span class="o">*</span><span class="nx">statep</span> <span class="o">!=</span> <span class="nx">state</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="s">&#34;sync: WaitGroup misuse: Add called concurrently with Wait&#34;</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="c1">// 此时，counter一定等于0，而waiter一定大于0
+</span><span class="c1"></span>    <span class="c1">// 先把counter置为0，再释放waiter个数的信号量
+</span><span class="c1"></span>    <span class="o">*</span><span class="nx">statep</span> <span class="p">=</span> <span class="mi">0</span>
+    <span class="k">for</span> <span class="p">;</span> <span class="nx">w</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">w</span><span class="o">--</span> <span class="p">{</span>
+        <span class="c1">//释放信号量，执行一次释放一个，唤醒一个等待者
+</span><span class="c1"></span>        <span class="nf">runtime_Semrelease</span><span class="p">(</span><span class="nx">semap</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ol>
+<li>
+<p>The first thing the add method does is to call the state method to get the values of statep and semap. statep is a value of type uint64, the high 32 bits are used to record the sum of the delta values passed in by the add method; the low 32 bits are used to indicate the number of goroutines waiting by calling the wait method, that is, the number of waiters. It is as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/01/25/a2c7608f6c4f40f8b6f86e47972ab92f.png" alt="sobyte"></p>
+</li>
+<li>
+<p>the add method calls the <code>atomic.AddUint64</code> method to shift the incoming delta 32 bits to the left, that is, to add the value of the counter to the delta.</p>
+</li>
+<li>
+<p>int32 to get the counter value because the counter counter may be negative, waiter cannot be negative, so uint32 is used to get it.</p>
+</li>
+<li>
+<p>Next is a series of checks, v can not be less than zero means that the task counter can not be negative, otherwise it will panic; w is not equal to, and the value of v is equal to delta means that the wait method is executed before the add method, at this time will also panic, because the waitgroup does not allow to call the add method after calling the Wait method.</p>
+</li>
+<li>
+<p>v is greater than zero or w is equal to zero is returned directly, indicating that the waiter does not need to be released at this time, so it is returned directly.</p>
+</li>
+<li>
+<p><code>*statep ! = state</code> By the time this check is done, the state can only be waiter greater than zero and counter zero. When the waiter is greater than zero, it is not allowed to call the add method, and the wait method cannot be called when the counter is zero, so the value of state is used here to compare with the address value of the memory to see if add or wait is called to cause the state to change, if so, it is an illegal call that will cause panic.</p>
+</li>
+<li>
+<p>finally reset the value of statep to zero and then release all waiters.</p>
+</li>
+</ol>
+<h3 id="wait-method">Wait method</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">wg</span> <span class="o">*</span><span class="nx">WaitGroup</span><span class="p">)</span> <span class="nf">Wait</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">statep</span><span class="p">,</span> <span class="nx">semap</span> <span class="o">:=</span> <span class="nx">wg</span><span class="p">.</span><span class="nf">state</span><span class="p">()</span>
+    <span class="o">...</span>
+    <span class="k">for</span> <span class="p">{</span>
+        <span class="nx">state</span> <span class="o">:=</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">LoadUint64</span><span class="p">(</span><span class="nx">statep</span><span class="p">)</span>
+        <span class="c1">// 获取counter
+</span><span class="c1"></span>        <span class="nx">v</span> <span class="o">:=</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">state</span> <span class="o">&gt;&gt;</span> <span class="mi">32</span><span class="p">)</span>
+        <span class="c1">// 获取waiter
+</span><span class="c1"></span>        <span class="nx">w</span> <span class="o">:=</span> <span class="nb">uint32</span><span class="p">(</span><span class="nx">state</span><span class="p">)</span>
+        <span class="c1">// counter为零,不需要等待直接返回
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">v</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+            <span class="o">...</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+        <span class="c1">// 使用CAS将waiter加1
+</span><span class="c1"></span>        <span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">CompareAndSwapUint64</span><span class="p">(</span><span class="nx">statep</span><span class="p">,</span> <span class="nx">state</span><span class="p">,</span> <span class="nx">state</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+            <span class="o">...</span>
+            <span class="c1">// 挂起等待唤醒
+</span><span class="c1"></span>            <span class="nf">runtime_Semacquire</span><span class="p">(</span><span class="nx">semap</span><span class="p">)</span>
+            <span class="c1">// 唤醒之后statep不为零,表示WaitGroup又被重复使用,这回panic
+</span><span class="c1"></span>            <span class="k">if</span> <span class="o">*</span><span class="nx">statep</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+                <span class="nb">panic</span><span class="p">(</span><span class="s">&#34;sync: WaitGroup is reused before previous Wait has returned&#34;</span><span class="p">)</span>
+            <span class="p">}</span>
+            <span class="o">...</span>
+            <span class="c1">// 直接返回   
+</span><span class="c1"></span>            <span class="k">return</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ol>
+<li>the Wait method first also calls the state method to get the state value.</li>
+<li>after entering the for loop Load statep value, and then get the counter and counter respectively.</li>
+<li>if counter is already zero, then return directly without waiting.</li>
+<li>counter is not zero, then use CAS to add waiter by 1. Since CAS may fail, the for loop will come back here again for CAS until it succeeds.</li>
+<li>call runtime_Semacquire to hang and wait for wakeup.</li>
+<li><code>*statep ! = 0</code> After waking up, statep is not zero, which means that the WaitGroup is reused again, which will panic.</li>
+</ol>
+<h3 id="waitgroup-usage-summary">waitgroup usage summary</h3>
+<p>After reading the add method and wait method of waitgroup, we found that there are many checks in it, and improper use will lead to panic, so we need to summarize how to use it correctly.</p>
+<ul>
+<li>The counter cannot be set to a negative number, otherwise panic will occur; note that there are two ways to cause the counter to be negative, one is to pass a negative number when calling Add, and the second is to call the Done method too many times, exceeding the count value of the WaitGroup.</li>
+<li>When using a WaitGroup, be sure to wait until all Add methods are called before calling Wait, otherwise it may result in a panic.</li>
+<li>WaitGroup can be reused before wait is finished. waitGroup can be reused, but you need to wait for the last batch of goroutine to finish calling wait before you can continue to reuse WaitGroup.</li>
+</ul>
+<h2 id="summary-1">Summary</h2>
+<p>The code inside waitgroup is actually very simple and this article is mainly about the concept of memory alignment introduced by waitgroup. The waitgroup takes us through how the concept of memory alignment is used in real code and how to atomically manipulate 64-bit long fields in a 32-bit operating system.</p>
+<p>In addition to the concept of memory alignment, we also learn through the source code what we need to do when using waitgroup in order to be compliant with the specification and not trigger a panic.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-01/go-channel-source-code/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Detailed analysis of the Channel source code in Go</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-01/java-atomic/">
+            <span class="next-text nav-default">Atomic atomic classes and their underlying principles CAS</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

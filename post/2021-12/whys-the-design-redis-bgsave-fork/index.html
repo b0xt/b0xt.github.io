@@ -1,0 +1,418 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Why Redis Snapshots Use Subprocesses - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Although we often think of Redis as a purely in-memory key-value storage system, we also use its persistence features, and RDB and AOF are two of the persistence tools Redis provides us, with RDB being a snapshot of Redis data.
+In this article, we want to analyze why Redis needs to use subprocesses when persisting snapshots of data, rather than exporting the in-memory data structures directly to disk for storage." /><meta name="keywords" content="redis, Bgsave, Fork" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2021-12/whys-the-design-redis-bgsave-fork/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Why Redis Snapshots Use Subprocesses" />
+<meta property="og:description" content="Although we often think of Redis as a purely in-memory key-value storage system, we also use its persistence features, and RDB and AOF are two of the persistence tools Redis provides us, with RDB being a snapshot of Redis data.
+In this article, we want to analyze why Redis needs to use subprocesses when persisting snapshots of data, rather than exporting the in-memory data structures directly to disk for storage." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2021-12/whys-the-design-redis-bgsave-fork/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2021-12-09T15:20:21+08:00" />
+<meta property="article:modified_time" content="2021-12-09T15:20:21+08:00" />
+
+<meta itemprop="name" content="Why Redis Snapshots Use Subprocesses">
+<meta itemprop="description" content="Although we often think of Redis as a purely in-memory key-value storage system, we also use its persistence features, and RDB and AOF are two of the persistence tools Redis provides us, with RDB being a snapshot of Redis data.
+In this article, we want to analyze why Redis needs to use subprocesses when persisting snapshots of data, rather than exporting the in-memory data structures directly to disk for storage."><meta itemprop="datePublished" content="2021-12-09T15:20:21+08:00" />
+<meta itemprop="dateModified" content="2021-12-09T15:20:21+08:00" />
+<meta itemprop="wordCount" content="1764">
+<meta itemprop="keywords" content="redis," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Why Redis Snapshots Use Subprocesses"/>
+<meta name="twitter:description" content="Although we often think of Redis as a purely in-memory key-value storage system, we also use its persistence features, and RDB and AOF are two of the persistence tools Redis provides us, with RDB being a snapshot of Redis data.
+In this article, we want to analyze why Redis needs to use subprocesses when persisting snapshots of data, rather than exporting the in-memory data structures directly to disk for storage."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Why Redis Snapshots Use Subprocesses</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2021-12-09 15:20:21 </span>
+        <div class="post-category">
+            <a href="/categories/skills/"> skills </a>
+            </div>
+          <span class="more-meta"> 1764 words </span>
+          <span class="more-meta"> 9 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#design">Design</a>
+          <ul>
+            <li><a href="#subprocesses">Subprocesses</a></li>
+            <li><a href="#copy-on-write">Copy-on-write</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Although we often think of Redis as a purely in-memory key-value storage system, we also use its persistence features, and RDB and AOF are two of the persistence tools Redis provides us, with RDB being a snapshot of Redis data.</p>
+<p>In this article, we want to analyze why Redis needs to use subprocesses when persisting snapshots of data, rather than exporting the in-memory data structures directly to disk for storage.</p>
+<h2 id="overview">Overview</h2>
+<p>Before analyzing today&rsquo;s problem, we first need to understand what Redis' persistent storage mechanism, RDB, is. RDB takes snapshots of the current data set in the Redis service every once in a while, and in addition to the Redis configuration file, which can be set for the snapshot interval, the Redis client also provides two commands to generate RDB storage files, <code>SAVE</code> and <code>BGSAVE</code>, and we can guess the difference between these two commands by their names.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/09/b2ac1f434a254b4caa95c59ff64020e9.png" alt=""></p>
+<p>The <code>SAVE</code> command blocks the current thread when executed, and since Redis is <a href="https://draveness.me/whys-the-design-redis-single-thread">single-threaded</a>, the <code>SAVE</code> command blocks all other requests from the client, which is unacceptable for many This is often unacceptable for Redis services that need to provide strong availability guarantees.</p>
+<p>When we use the <code>BGSAVE</code> command, Redis will immediately <code>fork</code> a child process, which will perform the process of <code>saving the data in memory to disk in RDB format</code>, while the Redis service can still handle requests from the client during the <code>BGSAVE</code> process.</p>
+<p><a href="https://github.com/antirez/redis/blob/e916058f0ba59e964f5de3dee17f46ae08f1d385/src/rdb.c#L1343-L1378"> <code>rdbSaveBackground</code> </a> is used to handle the process of saving data to disk in the function that saves data to disk in the background:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">rdbSaveBackground</span><span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="n">filename</span><span class="p">,</span> <span class="n">rdbSaveInfo</span> <span class="o">*</span><span class="n">rsi</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">pid_t</span> <span class="n">childpid</span><span class="p">;</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">hasActiveChildProcess</span><span class="p">())</span> <span class="k">return</span> <span class="n">C_ERR</span><span class="p">;</span>
+    <span class="p">...</span>
+
+    <span class="k">if</span> <span class="p">((</span><span class="n">childpid</span> <span class="o">=</span> <span class="n">redisFork</span><span class="p">())</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="kt">int</span> <span class="n">retval</span><span class="p">;</span>
+
+        <span class="cm">/* Child */</span>
+        <span class="n">redisSetProcTitle</span><span class="p">(</span><span class="s">&#34;redis-rdb-bgsave&#34;</span><span class="p">);</span>
+        <span class="n">retval</span> <span class="o">=</span> <span class="n">rdbSave</span><span class="p">(</span><span class="n">filename</span><span class="p">,</span><span class="n">rsi</span><span class="p">);</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">retval</span> <span class="o">==</span> <span class="n">C_OK</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">sendChildCOWInfo</span><span class="p">(</span><span class="n">CHILD_INFO_TYPE_RDB</span><span class="p">,</span> <span class="s">&#34;RDB&#34;</span><span class="p">);</span>
+        <span class="p">}</span>
+        <span class="n">exitFromChild</span><span class="p">((</span><span class="n">retval</span> <span class="o">==</span> <span class="n">C_OK</span><span class="p">)</span> <span class="o">?</span> <span class="mi">0</span> <span class="o">:</span> <span class="mi">1</span><span class="p">);</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="cm">/* Parent */</span>
+        <span class="p">...</span>
+    <span class="p">}</span>
+    <span class="p">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The Redis server will call the <code>redisFork</code> function when <code>BGSAVE</code> is triggered to create a child process and call <code>rdbSave</code> to persist the data in the child process, we have omitted some of the contents of the function here, but the overall structure is still very clear, interested readers can click on the above link to understand the entire function implementation.</p>
+<p>The purpose of using <code>fork</code> must ultimately be to improve the availability of the Redis service without blocking the main process, but here we can actually find two problems:</p>
+<ol>
+<li>why is the child process after <code>fork</code> able to access the data in the parent process' memory?</li>
+<li>Does the <code>fork</code> function introduce additional performance overhead, and how can we avoid it?</li>
+</ol>
+<p>Since Redis has chosen to use <code>fork</code> to solve the snapshot persistence problem, these two questions have already been answered. First, the child process after <code>fork</code> can access the data in the parent&rsquo;s memory, and the additional performance overhead of <code>fork</code> must be acceptable compared to blocking the main thread, which is the only way Redis will eventually choose this solution.</p>
+<h2 id="design">Design</h2>
+<p>In order to analyze the two issues raised in the previous section, we need to understand here the following, which are the prerequisites for the Redis server to use the <code>fork</code> function and which ultimately motivate it to choose this implementation.</p>
+<ol>
+<li>the parent and child processes spawned by <code>fork</code> will share resources, including memory space.</li>
+<li>the <code>fork</code> function does not incur a significant performance overhead, especially for making large copies of memory, and it defers the work of copying memory until it is really needed through write-time copying.</li>
+</ol>
+<h3 id="subprocesses">Subprocesses</h3>
+<p>In the field of computer programming, especially in Unix and Unix-like systems, <code>fork</code> is an operation used by a process to create a copy of itself. It is often a system call implemented by the operating system kernel and is the main method used by the operating system to create new processes in *nix systems.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/09/8db97eac4b7542a897826efd45852d35.png" alt=""></p>
+<p>Once the program calls the <code>fork</code> method, we can use the return value of <code>fork</code> to determine the parent and child processes and thus perform different actions.</p>
+<ul>
+<li>When the <code>fork</code> function returns 0, it means that the current process is a child process.</li>
+<li>When the <code>fork</code> function returns non-zero, it means that the current process is the parent process and the return value is the <code>pid</code> of the child process.</li>
+</ul>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">fork</span><span class="p">()</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// child process
+</span><span class="c1"></span>    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="c1">// parent process
+</span><span class="c1"></span>    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the <a href="http://man7.org/linux/man-pages/man2/fork.2.html">manual</a> of <code>fork</code>, we find that the parent and child processes after calling <code>fork</code> will run in different memory spaces, and when <code>fork</code> happens both memory spaces have exactly the same content, and the memory writing and When <code>fork</code> occurs, the memory spaces of both processes have exactly the same contents, and writes and modifications to memory and file mapping are independent, and the two processes do not affect each other.</p>
+<blockquote>
+<p>The child process and the parent process run in separate memory spaces. At the time of fork() both memory spaces have the same content. Memory writes, file mappings (mmap(2)), and unmappings (munmap(2)) performed by one of the processes do not affect other.</p>
+</blockquote>
+<p>In addition, the child process is an almost exact duplicate of the parent process, but the two processes differ to a lesser extent in the following ways.</p>
+<ul>
+<li>The child process uses a separate and unique process ID.</li>
+<li>The parent process ID of the child process is identical to the parent process ID.</li>
+<li>The child process does not inherit the memory locks of the parent process.</li>
+<li>The child process resets the process resource utilization and CPU timer.</li>
+<li>&hellip;</li>
+</ul>
+<p>The key point is that the memory of the parent and child processes is identical at the time of <code>fork</code>, and writes and modifications after <code>fork</code> will not affect each other, which in fact solves the problem of the snapshot scenario perfectly &ndash; only the data in memory at a certain point in time is needed, and the parent process can continue to make changes to its own memory without blocking or affecting the generated snapshot.</p>
+<h3 id="copy-on-write">Copy-on-write</h3>
+<p>Since the parent and child processes have exactly the same memory space and neither writes to memory, does this mean that the child process needs to make a full copy of the parent&rsquo;s memory when <code>forking</code>? Assuming that the child process needs to make a copy of the parent&rsquo;s memory is basically catastrophic for the Redis service, especially in the following two scenarios.</p>
+<ol>
+<li>a large amount of data is stored in memory, and copying the memory space during <code>fork</code> consumes a lot of time and resources, which can cause the program to be unavailable for a while.</li>
+<li>Redis takes up 10G of memory, while the resource limit of a physical or virtual machine is only 16G, at which point we cannot persist the data in Redis, which means that Redis cannot utilize more than 50% of the maximum memory resources on the machine.</li>
+</ol>
+<p>If you can&rsquo;t solve the two problems above, using <code>fork</code> to generate a memory image doesn&rsquo;t really get off the ground and is not a method that can really be used in a project.</p>
+<blockquote>
+<p>Suppose we need to execute a command at the command line, we need to create a new process via <code>fork</code> and then execute it via <code>exec</code>. The large amount of memory space copied by <code>fork</code> may be of no use at all to the child process, but it introduces a huge additional overhead.</p>
+</blockquote>
+<p>Copy-on-Write was introduced to solve this problem, and as we described at the beginning of this section, the main purpose of Copy-on-Write is to <strong>delay copying until the write operation actually occurs</strong>, which avoids a lot of pointless copy operations. On some early *nix systems, the system call <code>fork</code> did immediately make a copy of the parent process' memory space, but on most systems today, <code>fork</code> does not immediately trigger this process.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/12/09/d2159384446645ebb1c4025878501575.png" alt=""></p>
+<p>At the time of the <code>fork</code> function call, the parent and child processes are allocated by the Kernel to different virtual memory spaces, so it appears to the two processes that they are accessing different memory: * When actually accessing the virtual memory space, the Kernel maps the virtual memory to physical memory, so the parent and child processes share the physical memory space.</p>
+<ul>
+<li>When actually accessing the virtual memory space, the Kernel maps the virtual memory to physical memory, so the parent and child processes share the physical memory space.</li>
+<li>The shared memory is only ** copied on a page-by-page basis** when the parent or child process makes changes to the shared memory, and the parent process keeps the original physical space while the child process uses the new physical space after the copy.</li>
+</ul>
+<p>For most Redis services or databases, write requests are often much smaller than read requests, so using <code>fork</code> with the copy-on-write mechanism can bring very good performance and make the implementation of <code>BGSAVE</code> very easy.</p>
+<h2 id="summary">Summary</h2>
+<p>The way Redis implements the background snapshot is very clever, through the <code>fork</code> and copy-on-write feature provided by the operating system, this feature is easily implemented, from here we can see that the author&rsquo;s knowledge of the operating system is still very solid, most people in the face of similar scenarios, the method may be to manually implement a similar <code>copy-on-write</code> feature, but this not only increases the workload, but also increases the possibility of program problems.</p>
+<p>Let&rsquo;s briefly summarize why Redis implements snapshots by means of subprocesses when using RDB:</p>
+<ol>
+<li>the child process created by <code>fork</code> can get exactly the same memory space as the parent process, and the memory changes made by the parent process are not visible to the child process, so they do not affect each other.</li>
+<li>the creation of a child process by <code>fork</code> does not immediately trigger a large number of memory copies, and memory is copied on a page-by-page basis when it is modified, which avoids the performance problems caused by a large number of memory copies.</li>
+</ol>
+<p>One of these two reasons, one to support child process access to the parent process and the other to reduce additional overhead, are the reasons why Redis uses child processes for snapshot persistence. To conclude, let&rsquo;s look at some more open-ended related issues, and the interested reader can ponder the following questions.</p>
+<ul>
+<li>What other services use this feature when Nginx&rsquo;s main process <code>forks</code> a set of subprocesses at runtime that can handle requests separately?</li>
+<li>Write-time copy is actually a relatively common mechanism, where else would it be used outside of Redis?</li>
+</ul>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/redis/">redis</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2021-12/whys-the-design-mysql-b-plus-tree/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Why MySQL Uses B&#43; Tree</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2021-12/whys-the-design-tcp-performance/">
+            <span class="next-text nav-default">Why the TCP protocol has performance problems</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
