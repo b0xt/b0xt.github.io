@@ -1,0 +1,1799 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>In-depth understanding of mmap - kernel code analysis and driver demo examples - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article first introduces the process address space and mmap, then analyzes the kernel code to understand its implementation, and finally deepens the understanding of mmap with a simple demo driver example." /><meta name="keywords" content="linux, mmap" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/mmap/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="In-depth understanding of mmap - kernel code analysis and driver demo examples" />
+<meta property="og:description" content="This article first introduces the process address space and mmap, then analyzes the kernel code to understand its implementation, and finally deepens the understanding of mmap with a simple demo driver example." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/mmap/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-24T09:01:30+08:00" />
+<meta property="article:modified_time" content="2022-03-24T09:01:30+08:00" />
+
+<meta itemprop="name" content="In-depth understanding of mmap - kernel code analysis and driver demo examples">
+<meta itemprop="description" content="This article first introduces the process address space and mmap, then analyzes the kernel code to understand its implementation, and finally deepens the understanding of mmap with a simple demo driver example."><meta itemprop="datePublished" content="2022-03-24T09:01:30+08:00" />
+<meta itemprop="dateModified" content="2022-03-24T09:01:30+08:00" />
+<meta itemprop="wordCount" content="5647">
+<meta itemprop="keywords" content="linux," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="In-depth understanding of mmap - kernel code analysis and driver demo examples"/>
+<meta name="twitter:description" content="This article first introduces the process address space and mmap, then analyzes the kernel code to understand its implementation, and finally deepens the understanding of mmap with a simple demo driver example."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">In-depth understanding of mmap - kernel code analysis and driver demo examples</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-24 09:01:30 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 5647 words </span>
+          <span class="more-meta"> 12 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#process-address-space-and-vma">Process address space and vma</a>
+          <ul>
+            <li><a href="#virtual-memory-mapping">Virtual Memory Mapping</a></li>
+            <li><a href="#vma">VMA</a></li>
+          </ul>
+        </li>
+        <li><a href="#mmap-introduction">mmap introduction</a>
+          <ul>
+            <li><a href="#flag-flag">flag flag</a></li>
+            <li><a href="#4-types-of-mappings">4 types of mappings</a></li>
+            <li><a href="#mmap-memory-mapping-principle">mmap memory mapping principle</a></li>
+          </ul>
+        </li>
+        <li><a href="#kernel-code-analysis">Kernel code analysis</a></li>
+        <li><a href="#driver-demo">driver demo</a></li>
+        <li><a href="#test-program">Test program</a>
+          <ul>
+            <li><a href="#installing-the-driver">Installing the driver</a></li>
+            <li><a href="#test-program-1">Test program 1</a></li>
+            <li><a href="#test-program-2">Test program 2</a></li>
+            <li><a href="#test-program-3">Test program 3</a></li>
+            <li><a href="#test-program-4">Test program 4</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>mmap is a very common system call in user space, whether it is allocating memory, reading and writing large files, linking dynamic library files, or sharing memory between multiple processes. This article first introduces the process address space and mmap, then analyzes the kernel code to understand its implementation, and finally deepens the understanding of mmap with a simple demo driver example.</p>
+<h2 id="process-address-space-and-vma">Process address space and vma</h2>
+<p>As a pre-knowledge, let&rsquo;s start with a brief introduction to process address space to better understand what follows. Modern operating systems cannot manage memory without hardware support, such as segmentation mechanisms and paging mechanisms. They are used for memory isolation, protection and efficient use. The address space between processes is isolated from each other, and each process has a set of page tables that implement the conversion from linear to physical addresses.</p>
+<h3 id="virtual-memory-mapping">Virtual Memory Mapping</h3>
+<p>The following is the process address space layout for a 32-bit system (x86)</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/24/f71b8e1f7d6a4303bfdccc228f664771.png" alt="process address space layout for a 32-bit system (x86)"></p>
+<p>The 0 to 3G section is the user space address, and the 3G to 4G section is the kernel address space. The virtual addresses from low to high are code segment, data segment (initialized static variables), bss segment (uninitialized static variables), heap heap, mmap mapped area, stack, command line parameters, and environment variables.</p>
+<p>Starting from 0xc0000000 is the kernel address space. The kernel address space is further divided into linear memory area and high end memory area. The high end memory area is used for the vmalloc mechanism, fixmap, etc. In x86 systems, the minimum 16MB of physical memory is the DMA memory area, which is used to perform DMA operations.</p>
+<p>On 64-bit systems (x86_64), the available space for memory addresses is 0x0000000000000000 <code>~</code> 0xFFFFFFFFFFFFFFFF, which is a very large address space. Linux actually uses only the lower 47 bits (128T) and the upper 17 bits for expansion. The actual address space used is <strong>0x0000000000000000 <code>~</code> 0x00007FFFFFFFFFFF</strong> (user space) and <strong>0xFFFF800000000000 <code>~</code> 0xFFFFFFFFFFFFFFFFFFFF</strong> (kernel space).</p>
+<p>In 64-bit processors, there is no need for high-end memory as a management area since there is enough kernel space to map physical memory linearly. More detailed information can be found in the <a href="https://www.kernel.org/doc/Documentation/x86/x86_64/mm.txt">kernel documentation</a>.</p>
+<h3 id="vma">VMA</h3>
+<p>Process address spaces are described in the Linux kernel using <code>struct vm_area_struct</code>, or <strong>VMA</strong> for short. Since these address spaces are attributed to individual user processes, they have corresponding members in the <code>struct mm_struct</code> of the user process. Processes can dynamically add or remove these memory areas through the kernel&rsquo;s memory management mechanism.</p>
+<p>Each memory area has associated permissions, such as readable, writable, and executable. If a process accesses a memory area that is not in the valid range, or if it accesses memory illegally, then the processor will report a missing page exception, or in severe cases, a segment error.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="c1">// include/linux/mm_types.h
+</span><span class="c1"></span>
+<span class="cm">/*
+</span><span class="cm"> * This struct defines a memory VMM memory area. There is one of these
+</span><span class="cm"> * per VM-area/task.  A VM area is any part of the process virtual memory
+</span><span class="cm"> * space that has a special rule for the page-fault handlers (ie a shared
+</span><span class="cm"> * library, the executable area etc).
+</span><span class="cm"> */</span>
+<span class="k">struct</span> <span class="n">vm_area_struct</span> <span class="p">{</span>
+    <span class="cm">/* The first cache line has the info for VMA tree walking. */</span>
+
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">vm_start</span><span class="p">;</span>     <span class="cm">/* Our start address within vm_mm. */</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">vm_end</span><span class="p">;</span>       <span class="cm">/* The first byte after our end address
+</span><span class="cm">                       within vm_mm. */</span>
+
+    <span class="cm">/* linked list of VM areas per task, sorted by address */</span>
+    <span class="k">struct</span> <span class="n">vm_area_struct</span> <span class="o">*</span><span class="n">vm_next</span><span class="p">,</span> <span class="o">*</span><span class="n">vm_prev</span><span class="p">;</span>
+
+    <span class="k">struct</span> <span class="n">rb_node</span> <span class="n">vm_rb</span><span class="p">;</span>
+
+    <span class="cm">/*
+</span><span class="cm">     * Largest free memory gap in bytes to the left of this VMA.
+</span><span class="cm">     * Either between this VMA and vma-&gt;vm_prev, or between one of the
+</span><span class="cm">     * VMAs below us in the VMA rbtree and its -&gt;vm_prev. This helps
+</span><span class="cm">     * get_unmapped_area find a free area of the right size.
+</span><span class="cm">     */</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">rb_subtree_gap</span><span class="p">;</span>
+
+    <span class="cm">/* Second cache line starts here. */</span>
+
+    <span class="k">struct</span> <span class="n">mm_struct</span> <span class="o">*</span><span class="n">vm_mm</span><span class="p">;</span>    <span class="cm">/* The address space we belong to. */</span>
+    <span class="n">pgprot_t</span> <span class="n">vm_page_prot</span><span class="p">;</span>      <span class="cm">/* Access permissions of this VMA. */</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">vm_flags</span><span class="p">;</span>     <span class="cm">/* Flags, see mm.h. */</span>
+
+    <span class="cm">/*
+</span><span class="cm">     * For areas with an address space and backing store,
+</span><span class="cm">     * linkage into the address_space-&gt;i_mmap interval tree.
+</span><span class="cm">     */</span>
+    <span class="k">struct</span> <span class="p">{</span>
+        <span class="k">struct</span> <span class="n">rb_node</span> <span class="n">rb</span><span class="p">;</span>
+        <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">rb_subtree_last</span><span class="p">;</span>
+    <span class="p">}</span> <span class="n">shared</span><span class="p">;</span>
+
+    <span class="cm">/*
+</span><span class="cm">     * A file&#39;s MAP_PRIVATE vma can be in both i_mmap tree and anon_vma
+</span><span class="cm">     * list, after a COW of one of the file pages.  A MAP_SHARED vma
+</span><span class="cm">     * can only be in the i_mmap tree.  An anonymous MAP_PRIVATE, stack
+</span><span class="cm">     * or brk vma (with NULL file) can only be in an anon_vma list.
+</span><span class="cm">     */</span>
+    <span class="k">struct</span> <span class="n">list_head</span> <span class="n">anon_vma_chain</span><span class="p">;</span> <span class="cm">/* Serialized by mmap_sem &amp;
+</span><span class="cm">                      * page_table_lock */</span>
+    <span class="k">struct</span> <span class="n">anon_vma</span> <span class="o">*</span><span class="n">anon_vma</span><span class="p">;</span>  <span class="cm">/* Serialized by page_table_lock */</span>
+
+    <span class="cm">/* Function pointers to deal with this struct. */</span>
+    <span class="k">const</span> <span class="k">struct</span> <span class="n">vm_operations_struct</span> <span class="o">*</span><span class="n">vm_ops</span><span class="p">;</span>
+
+    <span class="cm">/* Information about our backing store: */</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">vm_pgoff</span><span class="p">;</span>     <span class="cm">/* Offset (within vm_file) in PAGE_SIZE
+</span><span class="cm">                       units */</span>
+    <span class="k">struct</span> <span class="n">file</span> <span class="o">*</span> <span class="n">vm_file</span><span class="p">;</span>      <span class="cm">/* File we map to (can be NULL). */</span>
+    <span class="kt">void</span> <span class="o">*</span> <span class="n">vm_private_data</span><span class="p">;</span>     <span class="cm">/* was vm_pte (shared mem) */</span>
+
+    <span class="n">atomic_long_t</span> <span class="n">swap_readahead_info</span><span class="p">;</span>
+<span class="cp">#ifndef CONFIG_MMU
+</span><span class="cp"></span>    <span class="k">struct</span> <span class="n">vm_region</span> <span class="o">*</span><span class="n">vm_region</span><span class="p">;</span>    <span class="cm">/* NOMMU mapping region */</span>
+<span class="cp">#endif
+</span><span class="cp">#ifdef CONFIG_NUMA
+</span><span class="cp"></span>    <span class="k">struct</span> <span class="n">mempolicy</span> <span class="o">*</span><span class="n">vm_policy</span><span class="p">;</span>    <span class="cm">/* NUMA policy for the VMA */</span>
+<span class="cp">#endif
+</span><span class="cp"></span>    <span class="k">struct</span> <span class="n">vm_userfaultfd_ctx</span> <span class="n">vm_userfaultfd_ctx</span><span class="p">;</span>
+<span class="p">}</span> <span class="n">__randomize_layout</span><span class="p">;</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Explain a few key members.</p>
+<ul>
+<li>vm_start and vm_end: denote the start and end addresses of vma, subtracting them is the length of vma</li>
+<li>vm_next and vm_prev: chain table pointers</li>
+<li>vm_rb: red-black tree node</li>
+<li>vm_mm: memory descriptor mm_struct data structure of the process it belongs to</li>
+<li>vm_page_prot: access rights of vma</li>
+<li>vm_flags: flags of vma</li>
+<li>anon_vma_chain and anon_vma: used to manage RMAP reverse mapping</li>
+<li>vm_ops: points to the operation method structure</li>
+<li>vm_pgoff: offset of the file mapping.</li>
+<li>vm_file: points to the mapped file</li>
+</ul>
+<h2 id="mmap-introduction">mmap introduction</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="c1">// include&lt;sys/mman.h&gt;
+</span><span class="c1"></span><span class="kt">void</span> <span class="o">*</span><span class="nf">mmap</span><span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="n">addr</span><span class="p">,</span> <span class="n">size_t</span> <span class="n">length</span><span class="p">,</span> <span class="kt">int</span> <span class="n">prot</span><span class="p">,</span> <span class="kt">int</span> <span class="n">flags</span><span class="p">,</span> <span class="kt">int</span> <span class="n">fd</span><span class="p">,</span> <span class="n">off_t</span> <span class="n">offset</span><span class="p">);</span>
+<span class="kt">int</span> <span class="nf">munmap</span><span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="n">addr</span><span class="p">,</span> <span class="n">size_t</span> <span class="n">length</span><span class="p">);</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>addr: specify the starting address, generally set to NULL for portability</li>
+<li>length: indicates the size of the mapped process address space</li>
+<li>prot: read and write attributes, PROT_EXEC, PROT_READ, PROT_WRITE, PROT_NONE</li>
+<li>flags: flags, such as shared mapping, private mapping</li>
+<li>fd: file descriptor, set to -1 for anonymous mapping.</li>
+<li>offset: for file mapping, indicates offset</li>
+</ul>
+<h3 id="flag-flag">flag flag</h3>
+<ul>
+<li>MAP_SHARED: create a shared mapping area. Multiple processes can map the same file in this way, and the modified content will be synchronized to the disk file.</li>
+<li>MAP_PRIVATE: Creates a private mapping for copy-on-write. Multiple processes can map the same file privately, and the modifications are not synchronized to disk.</li>
+<li>MAP_ANONYMOUS: Creates anonymous mappings, i.e., mappings that are not associated with a file.</li>
+<li>MAP_FIXED: Creates a mapping with the parameter addr, and returns failure if the specified address cannot be mapped. addr requires page alignment. If the specified address space overlaps with an existing VMA, the overlapping area will be destroyed first.</li>
+<li>MAP_POPULATE: For file mapping, it will pre-read the file content to the mapping area in advance, this feature only supports private mapping.</li>
+</ul>
+<h3 id="4-types-of-mappings">4 types of mappings</h3>
+<p>Depending on the different combinations of prot and flags, there are 4 types of mappings as follows.</p>
+<ul>
+<li>private anonymous: usually used for memory allocation (large blocks)</li>
+<li>private file: usually used for loading dynamic libraries</li>
+<li>Shared anonymous: usually used for sharing memory between processes, with the special device file <code>/dev/zero</code> open by default</li>
+<li>Shared files: usually used for memory mapping I/O, inter-process communication</li>
+</ul>
+<h3 id="mmap-memory-mapping-principle">mmap memory mapping principle</h3>
+<ul>
+<li>When mmap is called in user space, the system looks for a contiguous segment of virtual addresses that meet the requirements and then creates a new vma to insert into the mm system&rsquo;s chain and red-black tree.</li>
+<li>Call kernel space mmap to establish a mapping between the physical address of the file block/device and the process virtual address vma
+<ul>
+<li>If it is a disk file, this is just to establish the mapping without actually allocating memory if no special flags are set.</li>
+<li>If it is a device file, the mapping from the device physical address to the virtual address is established directly by the remap_pfn_range function.</li>
+</ul>
+</li>
+<li>(If it is a disk file mapping) When the process accesses this mapped address space, a page-out exception is raised and the data is copied from disk to physical memory. The user space can then read and write directly to this physical memory in the kernel space, eliminating the need for a copy between the user space and the kernel space.</li>
+</ul>
+<h2 id="kernel-code-analysis">Kernel code analysis</h2>
+<p>When we call mmap in user space, we first enter the kernel space through a system call, and we can see that here the offset is converted to a page-based unit.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="c1">// arch/x86/kernel/sys_x86_64.c
+</span><span class="c1"></span><span class="n">SYSCALL_DEFINE6</span><span class="p">(</span><span class="n">mmap</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span> <span class="n">addr</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span>
+        <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span> <span class="n">prot</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span>
+        <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span> <span class="n">fd</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span> <span class="n">off</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="kt">long</span> <span class="n">error</span><span class="p">;</span>
+    <span class="n">error</span> <span class="o">=</span> <span class="o">-</span><span class="n">EINVAL</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">off</span> <span class="o">&amp;</span> <span class="o">~</span><span class="n">PAGE_MASK</span><span class="p">)</span>
+        <span class="k">goto</span> <span class="n">out</span><span class="p">;</span>
+
+    <span class="n">error</span> <span class="o">=</span> <span class="n">sys_mmap_pgoff</span><span class="p">(</span><span class="n">addr</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="n">prot</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="n">fd</span><span class="p">,</span> <span class="n">off</span> <span class="o">&gt;&gt;</span> <span class="n">PAGE_SHIFT</span><span class="p">);</span>
+<span class="nl">out</span><span class="p">:</span>
+    <span class="k">return</span> <span class="n">error</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Look at the system call <code>sys_mmap_pgoff</code>, if it is not an anonymous map, it will get the file structure via fd.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="c1">// mm/mmap.c
+</span><span class="c1"></span><span class="n">SYSCALL_DEFINE6</span><span class="p">(</span><span class="n">mmap_pgoff</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span> <span class="n">addr</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span>
+        <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span> <span class="n">prot</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span>
+        <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span> <span class="n">fd</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span><span class="p">,</span> <span class="n">pgoff</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">file</span> <span class="o">*</span><span class="n">file</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">retval</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="p">(</span><span class="n">flags</span> <span class="o">&amp;</span> <span class="n">MAP_ANONYMOUS</span><span class="p">))</span> <span class="p">{</span>
+        <span class="c1">// ...
+</span><span class="c1"></span>        <span class="n">file</span> <span class="o">=</span> <span class="n">fget</span><span class="p">(</span><span class="n">fd</span><span class="p">);</span>
+        <span class="c1">// ...
+</span><span class="c1"></span>    <span class="p">}</span>
+    <span class="c1">// ...
+</span><span class="c1"></span>    <span class="n">retval</span> <span class="o">=</span> <span class="n">vm_mmap_pgoff</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">addr</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="n">prot</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="n">pgoff</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">retval</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Then look at the <code>vm_mmap_pgoff</code> function, which mainly uses a semaphore to do a protection of the process address space, then according to the value of populate will prefault the page table, and if it is a file map then it will preread the file.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="c1">// mm/util.c
+</span><span class="c1"></span><span class="kt">unsigned</span> <span class="kt">long</span> <span class="nf">vm_mmap_pgoff</span><span class="p">(</span><span class="k">struct</span> <span class="n">file</span> <span class="o">*</span><span class="n">file</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">addr</span><span class="p">,</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">len</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">prot</span><span class="p">,</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">flag</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">pgoff</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">ret</span><span class="p">;</span>
+    <span class="k">struct</span> <span class="n">mm_struct</span> <span class="o">*</span><span class="n">mm</span> <span class="o">=</span> <span class="n">current</span><span class="o">-&gt;</span><span class="n">mm</span><span class="p">;</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">populate</span><span class="p">;</span>
+    <span class="n">LIST_HEAD</span><span class="p">(</span><span class="n">uf</span><span class="p">);</span>
+
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">security_mmap_file</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">prot</span><span class="p">,</span> <span class="n">flag</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">ret</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">down_write_killable</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mm</span><span class="o">-&gt;</span><span class="n">mmap_sem</span><span class="p">))</span>
+            <span class="k">return</span> <span class="o">-</span><span class="n">EINTR</span><span class="p">;</span>
+        <span class="n">ret</span> <span class="o">=</span> <span class="n">do_mmap_pgoff</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">addr</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="n">prot</span><span class="p">,</span> <span class="n">flag</span><span class="p">,</span> <span class="n">pgoff</span><span class="p">,</span>
+                    <span class="o">&amp;</span><span class="n">populate</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">uf</span><span class="p">);</span>
+        <span class="n">up_write</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mm</span><span class="o">-&gt;</span><span class="n">mmap_sem</span><span class="p">);</span>
+        <span class="n">userfaultfd_unmap_complete</span><span class="p">(</span><span class="n">mm</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">uf</span><span class="p">);</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">populate</span><span class="p">)</span>
+            <span class="n">mm_populate</span><span class="p">(</span><span class="n">ret</span><span class="p">,</span> <span class="n">populate</span><span class="p">);</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="n">ret</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>do_mmap_pgoff</code> is simply a call to <code>do_mmap</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="c1">// include/linux/mm.h
+</span><span class="c1"></span><span class="k">static</span> <span class="kr">inline</span> <span class="kt">unsigned</span> <span class="kt">long</span>
+<span class="nf">do_mmap_pgoff</span><span class="p">(</span><span class="k">struct</span> <span class="n">file</span> <span class="o">*</span><span class="n">file</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">addr</span><span class="p">,</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">len</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">prot</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">flags</span><span class="p">,</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">pgoff</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="o">*</span><span class="n">populate</span><span class="p">,</span>
+    <span class="k">struct</span> <span class="n">list_head</span> <span class="o">*</span><span class="n">uf</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">return</span> <span class="n">do_mmap</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">addr</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="n">prot</span><span class="p">,</span> <span class="n">flags</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="n">pgoff</span><span class="p">,</span> <span class="n">populate</span><span class="p">,</span> <span class="n">uf</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s look at the <code>do_mmap</code> implementation.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="c1">// mm/mmap.c
+</span><span class="c1"></span><span class="kt">unsigned</span> <span class="kt">long</span> <span class="nf">do_mmap</span><span class="p">(</span><span class="k">struct</span> <span class="n">file</span> <span class="o">*</span><span class="n">file</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">addr</span><span class="p">,</span>
+            <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">len</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">prot</span><span class="p">,</span>
+            <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">flags</span><span class="p">,</span> <span class="n">vm_flags_t</span> <span class="n">vm_flags</span><span class="p">,</span>
+            <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">pgoff</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="o">*</span><span class="n">populate</span><span class="p">,</span>
+            <span class="k">struct</span> <span class="n">list_head</span> <span class="o">*</span><span class="n">uf</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">mm_struct</span> <span class="o">*</span><span class="n">mm</span> <span class="o">=</span> <span class="n">current</span><span class="o">-&gt;</span><span class="n">mm</span><span class="p">;</span>
+    <span class="c1">// ...
+</span><span class="c1"></span>    <span class="n">len</span> <span class="o">=</span> <span class="n">PAGE_ALIGN</span><span class="p">(</span><span class="n">len</span><span class="p">);</span>
+    <span class="c1">// ...
+</span><span class="c1"></span>    <span class="n">addr</span> <span class="o">=</span> <span class="n">get_unmapped_area</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">addr</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="n">pgoff</span><span class="p">,</span> <span class="n">flags</span><span class="p">);</span>
+    <span class="c1">// ...
+</span><span class="c1"></span>    <span class="n">addr</span> <span class="o">=</span> <span class="n">mmap_region</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">addr</span><span class="p">,</span> <span class="n">len</span><span class="p">,</span> <span class="n">vm_flags</span><span class="p">,</span> <span class="n">pgoff</span><span class="p">,</span> <span class="n">uf</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">IS_ERR_VALUE</span><span class="p">(</span><span class="n">addr</span><span class="p">)</span> <span class="o">&amp;&amp;</span>
+        <span class="p">((</span><span class="n">vm_flags</span> <span class="o">&amp;</span> <span class="n">VM_LOCKED</span><span class="p">)</span> <span class="o">||</span>
+         <span class="p">(</span><span class="n">flags</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">MAP_POPULATE</span> <span class="o">|</span> <span class="n">MAP_NONBLOCK</span><span class="p">))</span> <span class="o">==</span> <span class="n">MAP_POPULATE</span><span class="p">))</span>
+        <span class="o">*</span><span class="n">populate</span> <span class="o">=</span> <span class="n">len</span><span class="p">;</span>
+    <span class="k">return</span> <span class="n">addr</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This function mainly aligns the mapped length pages, checks and processes the prot attribute and flags flags, and sets the vm_flags. The <code>get_unmapped_area</code> function checks the specified address or automatically selects an available virtual address. Then <code>mmap_region</code> is called, and you can see that after returning, populate is set according to the flags set when the interface was called. If <code>MAP_LOCKED</code> is set, or if <code>MAP_POPULATE</code> is set but <code>MAP_NONBLOCK</code> is not, then the prefault operation mentioned earlier is performed.</p>
+<p>Then continue to <code>mmap_region</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="c1">// mm/mmap.c
+</span><span class="c1"></span><span class="kt">unsigned</span> <span class="kt">long</span> <span class="nf">mmap_region</span><span class="p">(</span><span class="k">struct</span> <span class="n">file</span> <span class="o">*</span><span class="n">file</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">addr</span><span class="p">,</span>
+        <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">len</span><span class="p">,</span> <span class="n">vm_flags_t</span> <span class="n">vm_flags</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">pgoff</span><span class="p">,</span>
+        <span class="k">struct</span> <span class="n">list_head</span> <span class="o">*</span><span class="n">uf</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="c1">// ...
+</span><span class="c1"></span>    <span class="n">vma</span> <span class="o">=</span> <span class="n">vma_merge</span><span class="p">(</span><span class="n">mm</span><span class="p">,</span> <span class="n">prev</span><span class="p">,</span> <span class="n">addr</span><span class="p">,</span> <span class="n">addr</span> <span class="o">+</span> <span class="n">len</span><span class="p">,</span> <span class="n">vm_flags</span><span class="p">,</span>
+            <span class="nb">NULL</span><span class="p">,</span> <span class="n">file</span><span class="p">,</span> <span class="n">pgoff</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="n">NULL_VM_UFFD_CTX</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">vma</span><span class="p">)</span>    <span class="c1">// 可以跟之前的映射合并
+</span><span class="c1"></span>        <span class="k">goto</span> <span class="n">out</span><span class="p">;</span>
+    
+    <span class="n">vma</span> <span class="o">=</span> <span class="n">kmem_cache_zalloc</span><span class="p">(</span><span class="n">vm_area_cachep</span><span class="p">,</span> <span class="n">GFP_KERNEL</span><span class="p">);</span>
+    <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_mm</span> <span class="o">=</span> <span class="n">mm</span><span class="p">;</span>
+    <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_start</span> <span class="o">=</span> <span class="n">addr</span><span class="p">;</span>
+    <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_end</span> <span class="o">=</span> <span class="n">addr</span> <span class="o">+</span> <span class="n">len</span><span class="p">;</span>
+    <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_flags</span> <span class="o">=</span> <span class="n">vm_flags</span><span class="p">;</span>
+    <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_page_prot</span> <span class="o">=</span> <span class="n">vm_get_page_prot</span><span class="p">(</span><span class="n">vm_flags</span><span class="p">);</span>
+    <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_pgoff</span> <span class="o">=</span> <span class="n">pgoff</span><span class="p">;</span>
+    <span class="n">INIT_LIST_HEAD</span><span class="p">(</span><span class="o">&amp;</span><span class="n">vma</span><span class="o">-&gt;</span><span class="n">anon_vma_chain</span><span class="p">);</span>
+    
+    <span class="k">if</span> <span class="p">(</span><span class="n">file</span><span class="p">)</span> <span class="p">{</span>
+        <span class="c1">// ...
+</span><span class="c1"></span>        <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_file</span> <span class="o">=</span> <span class="n">get_file</span><span class="p">(</span><span class="n">file</span><span class="p">);</span>
+        <span class="n">error</span> <span class="o">=</span> <span class="n">call_mmap</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">vma</span><span class="p">);</span>   <span class="c1">// 调用文件的mmap
+</span><span class="c1"></span>        <span class="c1">//...
+</span><span class="c1"></span>    <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">vm_flags</span> <span class="o">&amp;</span> <span class="n">VM_SHARED</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">error</span> <span class="o">=</span> <span class="n">shmem_zero_setup</span><span class="p">(</span><span class="n">vma</span><span class="p">);</span>
+    <span class="p">}</span>
+    
+    <span class="c1">// ...
+</span><span class="c1"></span>    <span class="k">return</span> <span class="n">addr</span><span class="p">;</span>
+    <span class="c1">// ...
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This function first does some address space checks, then <code>vma_merge</code> checks if it can be merged with the old mapping, then it allocates the vma and initializes it. If it&rsquo;s a file map, call <code>call_mmap</code>; if it&rsquo;s an anonymous shared map, call <code>shmem_zero_setup</code>, which does <code>/dev/zero</code> file-related setup.</p>
+<p><code>call_mmap</code> simply calls the mmap operation function in the file handle.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="c1">// include/linux/fs.h
+</span><span class="c1"></span><span class="k">static</span> <span class="kr">inline</span> <span class="kt">int</span> <span class="nf">call_mmap</span><span class="p">(</span><span class="k">struct</span> <span class="n">file</span> <span class="o">*</span><span class="n">file</span><span class="p">,</span> <span class="k">struct</span> <span class="n">vm_area_struct</span> <span class="o">*</span><span class="n">vma</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">return</span> <span class="n">file</span><span class="o">-&gt;</span><span class="n">f_op</span><span class="o">-&gt;</span><span class="n">mmap</span><span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">vma</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>If it is a file in a normal file system, we take ext4 as an example, which mainly sets <code>vma-&gt;vm_ops</code> to <code>ext4_file_vm_ops</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="c1">// fs/ext4/file.c
+</span><span class="c1"></span><span class="k">static</span> <span class="kt">int</span> <span class="nf">ext4_file_mmap</span><span class="p">(</span><span class="k">struct</span> <span class="n">file</span> <span class="o">*</span><span class="n">file</span><span class="p">,</span> <span class="k">struct</span> <span class="n">vm_area_struct</span> <span class="o">*</span><span class="n">vma</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="c1">//...
+</span><span class="c1"></span>    <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_ops</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">ext4_file_vm_ops</span><span class="p">;</span>
+    <span class="c1">//...
+</span><span class="c1"></span>    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="k">static</span> <span class="k">const</span> <span class="k">struct</span> <span class="n">vm_operations_struct</span> <span class="n">ext4_file_vm_ops</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="p">.</span><span class="n">fault</span>      <span class="o">=</span> <span class="n">ext4_filemap_fault</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">map_pages</span>  <span class="o">=</span> <span class="n">filemap_map_pages</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">page_mkwrite</span>   <span class="o">=</span> <span class="n">ext4_page_mkwrite</span><span class="p">,</span>
+<span class="p">};</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Later when this vma address space is accessed, the corresponding operation function is called to handle it, for example, the page error handling function will call <code>ext4_filemap_fault</code>, which in turn will call <code>filemap_fault</code>.</p>
+<p>If it is a device file, the corresponding device driver implements the mmap method to establish the mapping from the device physical memory to the vma address space inside. The next step is to demonstrate this with a simple driver demo.</p>
+<p>To briefly summarize</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">mmap                        // offset转成页为单位
++-- sys_mmap_pgoff          // 通过fd获取file
+    +-- vm_mmap_pgoff       // 信号量保护，映射完成后populate
+        +-- do_mmap_pgoff   // 简单封装
+            +-- do_mmap     // 映射长度页对齐，prot和flags检查，设置vm_flags，获取映射虚拟地址
+                +-- mmap_region      // 地址空间检查，vma_merge，vma分配及初始化
+                    |-- call_mmap    // 文件映射，简单封装
+                    |   +-- file-&gt;f_op-&gt;mmap    // 调用实际文件的mmap方法
+                    |-- shmem_zero_setup       // 匿名共享映射，/dev/zero
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="driver-demo">driver demo</h2>
+<p>We wrote a simple misc device, using <code>alloc_pages</code> to allocate the physical memory of the device (4 pages) when the driver is loaded, but of course you can also use kmalloc or vmalloc. Then we implemented several operation methods, the main one is the mmap method, and for testing purposes we also implemented read, write, and The main method is the mmap method, in order to facilitate testing we also implemented read, write, llseek and other methods.</p>
+<blockquote>
+<p>ps: driver and test program code has been uploaded to github, <a href="https://github.com/catbro666/mmap-driver-demo">catbro666/mmap-driver-demo</a></p>
+</blockquote>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="cp">#include</span> <span class="cpf">&lt;linux/init.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;linux/module.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;linux/fs.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;linux/mm.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;linux/gfp.h&gt;          // alloc_page</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;linux/miscdevice.h&gt;   // miscdevice misc_xxx</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;linux/uaccess.h&gt;      // copy_from/to_user</span><span class="cp">
+</span><span class="cp"></span>
+<span class="cp">#define DEMO_NAME &#34;demo_dev&#34;
+</span><span class="cp">#define PAGE_ORDER 2
+</span><span class="cp">#define MAX_SIZE (PAGE_SIZE &lt;&lt; PAGE_ORDER)
+</span><span class="cp"></span>
+<span class="k">static</span> <span class="k">struct</span> <span class="n">device</span> <span class="o">*</span><span class="n">mydemodrv_device</span><span class="p">;</span>
+<span class="k">static</span> <span class="k">struct</span> <span class="n">page</span> <span class="o">*</span><span class="n">page</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+<span class="k">static</span> <span class="kt">char</span> <span class="o">*</span><span class="n">device_buffer</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+
+<span class="k">static</span> <span class="k">const</span> <span class="k">struct</span> <span class="n">file_operations</span> <span class="n">demodrv_fops</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="p">.</span><span class="n">owner</span>      <span class="o">=</span> <span class="n">THIS_MODULE</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">open</span>       <span class="o">=</span> <span class="n">demodrv_open</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">release</span>    <span class="o">=</span> <span class="n">demodrv_release</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">read</span>       <span class="o">=</span> <span class="n">demodrv_read</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">write</span>      <span class="o">=</span> <span class="n">demodrv_write</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">mmap</span>       <span class="o">=</span> <span class="n">demodev_mmap</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">llseek</span>     <span class="o">=</span> <span class="n">demodev_llseek</span>
+<span class="p">};</span>
+
+<span class="k">static</span> <span class="k">struct</span> <span class="n">miscdevice</span> <span class="n">mydemodrv_misc_device</span> <span class="o">=</span> <span class="p">{</span>
+    <span class="p">.</span><span class="n">minor</span> <span class="o">=</span> <span class="n">MISC_DYNAMIC_MINOR</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">name</span> <span class="o">=</span> <span class="n">DEMO_NAME</span><span class="p">,</span>
+    <span class="p">.</span><span class="n">fops</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">demodrv_fops</span><span class="p">,</span>
+<span class="p">};</span>
+
+<span class="k">static</span> <span class="kt">int</span> <span class="n">__init</span> <span class="nf">demo_dev_init</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="kt">int</span> <span class="n">ret</span><span class="p">;</span>
+
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">misc_register</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mydemodrv_misc_device</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">ret</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">printk</span><span class="p">(</span><span class="s">&#34;failed to register misc device&#34;</span><span class="p">);</span>
+        <span class="k">return</span> <span class="n">ret</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">mydemodrv_device</span> <span class="o">=</span> <span class="n">mydemodrv_misc_device</span><span class="p">.</span><span class="n">this_device</span><span class="p">;</span>
+
+    <span class="n">printk</span><span class="p">(</span><span class="s">&#34;succeeded register misc device: %s</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">DEMO_NAME</span><span class="p">);</span>
+
+    <span class="n">page</span> <span class="o">=</span> <span class="n">alloc_pages</span><span class="p">(</span><span class="n">GFP_KERNEL</span><span class="p">,</span> <span class="n">PAGE_ORDER</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">page</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">printk</span><span class="p">(</span><span class="s">&#34;alloc_page failed</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+        <span class="k">return</span> <span class="o">-</span><span class="n">ENOMEM</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="n">device_buffer</span> <span class="o">=</span> <span class="n">page_address</span><span class="p">(</span><span class="n">page</span><span class="p">);</span>
+    <span class="n">printk</span><span class="p">(</span><span class="s">&#34;device_buffer physical address: %lx, virtual address: %px</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span>
+           <span class="n">page_to_pfn</span><span class="p">(</span><span class="n">page</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="n">PAGE_SHIFT</span><span class="p">,</span> <span class="n">device_buffer</span><span class="p">);</span>
+
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+
+
+<span class="k">static</span> <span class="kt">void</span> <span class="n">__exit</span> <span class="nf">demo_dev_exit</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">printk</span><span class="p">(</span><span class="s">&#34;removing device</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+
+    <span class="n">__free_pages</span><span class="p">(</span><span class="n">page</span><span class="p">,</span> <span class="n">PAGE_ORDER</span><span class="p">);</span>
+
+    <span class="n">misc_deregister</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mydemodrv_misc_device</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="n">module_init</span><span class="p">(</span><span class="n">demo_dev_init</span><span class="p">);</span>
+<span class="n">module_exit</span><span class="p">(</span><span class="n">demo_dev_exit</span><span class="p">);</span>
+<span class="n">MODULE_AUTHOR</span><span class="p">(</span><span class="s">&#34;catbro666&#34;</span><span class="p">);</span>
+<span class="n">MODULE_LICENSE</span><span class="p">(</span><span class="s">&#34;GPL v2&#34;</span><span class="p">);</span>
+<span class="n">MODULE_DESCRIPTION</span><span class="p">(</span><span class="s">&#34;mmap test module&#34;</span><span class="p">);</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s look at the implementation of the mmap method. The core function is <code>remap_pfn_range</code>, which is used to create a mapping of actual physical addresses to vma virtual addresses. The first one is the user space vma to be mapped, the second one is the starting address of the mapping, the third one is the physical page frame number of the kernel memory, the fourth one is the size of the mapped area, and the fifth one is the page protection flag for this mapping.</p>
+<p>Most of the parameters we use are obtained through vma, and as seen in the previous section, the outer function has already done the vma initialization. Since we are allocating memory with <code>alloc_pages</code>, whose physical addresses are contiguous, the mapping is also relatively simple.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="k">static</span> <span class="kt">int</span> <span class="nf">demodev_mmap</span><span class="p">(</span><span class="k">struct</span> <span class="n">file</span> <span class="o">*</span><span class="n">file</span><span class="p">,</span> <span class="k">struct</span> <span class="n">vm_area_struct</span> <span class="o">*</span><span class="n">vma</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="k">struct</span> <span class="n">mm_struct</span> <span class="o">*</span><span class="n">mm</span><span class="p">;</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">size</span><span class="p">;</span>
+    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">pfn_start</span><span class="p">;</span>
+    <span class="kt">void</span> <span class="o">*</span><span class="n">virt_start</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">ret</span><span class="p">;</span>
+
+    <span class="n">mm</span> <span class="o">=</span> <span class="n">current</span><span class="o">-&gt;</span><span class="n">mm</span><span class="p">;</span>
+    <span class="n">pfn_start</span> <span class="o">=</span> <span class="n">page_to_pfn</span><span class="p">(</span><span class="n">page</span><span class="p">)</span> <span class="o">+</span> <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_pgoff</span><span class="p">;</span>
+    <span class="n">virt_start</span> <span class="o">=</span> <span class="n">page_address</span><span class="p">(</span><span class="n">page</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span><span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_pgoff</span> <span class="o">&lt;&lt;</span> <span class="n">PAGE_SHIFT</span><span class="p">);</span>
+
+    <span class="cm">/* 映射大小不超过实际分配的物理内存大小 */</span>
+    <span class="n">size</span> <span class="o">=</span> <span class="n">min</span><span class="p">(((</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="n">PAGE_ORDER</span><span class="p">)</span> <span class="o">-</span> <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_pgoff</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="n">PAGE_SHIFT</span><span class="p">,</span>
+               <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_end</span> <span class="o">-</span> <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_start</span><span class="p">);</span>
+
+    <span class="n">printk</span><span class="p">(</span><span class="s">&#34;phys_start: 0x%lx, offset: 0x%lx, vma_size: 0x%lx, map size:0x%lx</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span>
+           <span class="n">pfn_start</span> <span class="o">&lt;&lt;</span> <span class="n">PAGE_SHIFT</span><span class="p">,</span> <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_pgoff</span> <span class="o">&lt;&lt;</span> <span class="n">PAGE_SHIFT</span><span class="p">,</span>
+           <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_end</span> <span class="o">-</span> <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_start</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">size</span> <span class="o">&lt;=</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">printk</span><span class="p">(</span><span class="s">&#34;%s: offset 0x%lx too large, max size is 0x%lx</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">__func__</span><span class="p">,</span>
+               <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_pgoff</span> <span class="o">&lt;&lt;</span> <span class="n">PAGE_SHIFT</span><span class="p">,</span> <span class="n">MAX_SIZE</span><span class="p">);</span>
+        <span class="k">return</span> <span class="o">-</span><span class="n">EINVAL</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 外层vm_mmap_pgoff已经用信号量保护了
+</span><span class="c1"></span>    <span class="n">ret</span> <span class="o">=</span> <span class="n">remap_pfn_range</span><span class="p">(</span><span class="n">vma</span><span class="p">,</span> <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_start</span><span class="p">,</span> <span class="n">pfn_start</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_page_prot</span><span class="p">);</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">ret</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">printk</span><span class="p">(</span><span class="s">&#34;remap_pfn_range failed, vm_start: 0x%lx</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_start</span><span class="p">);</span>
+    <span class="p">}</span>
+    <span class="k">else</span> <span class="p">{</span>
+        <span class="n">printk</span><span class="p">(</span><span class="s">&#34;map kernel 0x%px to user 0x%lx, size: 0x%lx</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span>
+               <span class="n">virt_start</span><span class="p">,</span> <span class="n">vma</span><span class="o">-&gt;</span><span class="n">vm_start</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
+    <span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s look at the implementation of the read method, which mainly copies data from the device memory to the buf in user space and then updates the file offset. The write method is similar, so we won&rsquo;t show it here.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="k">static</span> <span class="n">ssize_t</span>
+<span class="nf">demodrv_read</span><span class="p">(</span><span class="k">struct</span> <span class="n">file</span> <span class="o">*</span><span class="n">file</span><span class="p">,</span> <span class="kt">char</span> <span class="n">__user</span> <span class="o">*</span><span class="n">buf</span><span class="p">,</span> <span class="n">size_t</span> <span class="n">count</span><span class="p">,</span> <span class="n">loff_t</span> <span class="o">*</span><span class="n">ppos</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="kt">int</span> <span class="n">actual_readed</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">max_read</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">need_read</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">ret</span><span class="p">;</span>
+    <span class="n">max_read</span> <span class="o">=</span> <span class="n">PAGE_SIZE</span> <span class="o">-</span> <span class="o">*</span><span class="n">ppos</span><span class="p">;</span>
+    <span class="n">need_read</span> <span class="o">=</span> <span class="n">max_read</span> <span class="o">&gt;</span> <span class="n">count</span> <span class="o">?</span> <span class="nl">count</span> <span class="p">:</span> <span class="n">max_read</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">need_read</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span>
+        <span class="n">dev_warn</span><span class="p">(</span><span class="n">mydemodrv_device</span><span class="p">,</span> <span class="s">&#34;no space for read&#34;</span><span class="p">);</span>
+
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">copy_to_user</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">device_buffer</span> <span class="o">+</span> <span class="o">*</span><span class="n">ppos</span><span class="p">,</span> <span class="n">need_read</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="n">need_read</span><span class="p">)</span>
+        <span class="k">return</span> <span class="o">-</span><span class="n">EFAULT</span><span class="p">;</span>
+    <span class="n">actual_readed</span> <span class="o">=</span> <span class="n">need_read</span> <span class="o">-</span> <span class="n">ret</span><span class="p">;</span>
+    <span class="o">*</span><span class="n">ppos</span> <span class="o">+=</span> <span class="n">actual_readed</span><span class="p">;</span>
+
+    <span class="n">printk</span><span class="p">(</span><span class="s">&#34;%s actual_readed=%d, pos=%lld</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">__func__</span><span class="p">,</span> <span class="n">actual_readed</span><span class="p">,</span> <span class="o">*</span><span class="n">ppos</span><span class="p">);</span>
+    <span class="k">return</span> <span class="n">actual_readed</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="test-program">Test program</h2>
+<h3 id="installing-the-driver">Installing the driver</h3>
+<p>We first compile and install the driver and the device node file has been created automatically. Checking the kernel logs you can see that the device has been successfully created and memory has been allocated. The starting physical address is 0x5b1558000 and the kernel virtual address is 0xffff8d1ab1558000.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ sudo insmod mydemodev.ko
+$ ll /dev<span class="p">|</span>grep demo
+crw-------   <span class="m">1</span> root root     10,  <span class="m">58</span> 12月 <span class="m">12</span> 23:33 demo_dev
+$ dmesg <span class="p">|</span> tail -n <span class="m">2</span>
+<span class="o">[</span>110047.799513<span class="o">]</span> succeeded register misc device: demo_dev
+<span class="o">[</span>110047.799517<span class="o">]</span> device_buffer physical address: 5b1558000, virtual address: ffff8d1ab1558000
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="test-program-1">Test program 1</h3>
+<p>Next, we wrote several test programs to test this driver. First of all, we open the driver device file <code>/dev/demo_dev</code>, and then mmap the size of 1 page, here we sleep 5 seconds before and after respectively, in order to provide observation time. Then we performed a read and write test with the mapped user space virtual address to verify that mmap was mapped correctly. First write by virtual address, followed by read with read for comparison check. Then write by write, followed by read with virtual address for comparison check.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="c1">// test1.c
+</span><span class="c1"></span><span class="cp">#include</span> <span class="cpf">&lt;stdio.h&gt;      // printf</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;fcntl.h&gt;      // open</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;unistd.h&gt;     // read, close, getpagesize</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;sys/mman.h&gt;   // mmap</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;string.h&gt;     // memcmp, strlen</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;assert.h&gt;     // assert</span><span class="cp">
+</span><span class="cp"></span>
+<span class="cp">#define DEMO_DEV_NAME   &#34;/dev/demo_dev&#34;
+</span><span class="cp"></span>
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span>
+<span class="p">{</span>
+    <span class="kt">char</span> <span class="n">buf</span><span class="p">[</span><span class="mi">64</span><span class="p">];</span>
+    <span class="kt">int</span> <span class="n">fd</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">addr</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">ret</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">message</span> <span class="o">=</span> <span class="s">&#34;Hello World</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">message2</span> <span class="o">=</span> <span class="s">&#34;I&#39;m superman</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">;</span>
+
+    <span class="n">fd</span> <span class="o">=</span> <span class="n">open</span><span class="p">(</span><span class="n">DEMO_DEV_NAME</span><span class="p">,</span> <span class="n">O_RDWR</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">fd</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">printf</span><span class="p">(</span><span class="s">&#34;open device %s failed</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">DEMO_DEV_NAME</span><span class="p">);</span>
+        <span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+    <span class="p">}</span>
+    
+    <span class="n">sleep</span><span class="p">(</span><span class="mi">5</span><span class="p">);</span>
+    <span class="n">addr</span> <span class="o">=</span> <span class="n">mmap</span><span class="p">(</span><span class="nb">NULL</span><span class="p">,</span> <span class="p">(</span><span class="n">size_t</span><span class="p">)</span><span class="n">getpagesize</span><span class="p">(),</span> <span class="n">PROT_READ</span> <span class="o">|</span> <span class="n">PROT_WRITE</span><span class="p">,</span>
+                <span class="n">MAP_SHARED</span> <span class="o">|</span> <span class="n">MAP_LOCKED</span><span class="p">,</span> <span class="n">fd</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+    <span class="n">sleep</span><span class="p">(</span><span class="mi">5</span><span class="p">);</span>
+    
+    <span class="cm">/* 测试映射正确 */</span>
+    <span class="cm">/* 写到mmap映射的虚拟地址中，通过read读取设备文件 */</span>
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">sprintf</span><span class="p">(</span><span class="n">addr</span><span class="p">,</span> <span class="s">&#34;%s&#34;</span><span class="p">,</span> <span class="n">message</span><span class="p">);</span>
+    <span class="n">assert</span><span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message</span><span class="p">));</span>
+
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="mi">64</span><span class="p">);</span>
+    <span class="n">assert</span><span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="mi">64</span><span class="p">);</span>
+    <span class="n">assert</span><span class="p">(</span><span class="o">!</span><span class="n">memcmp</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">message</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message</span><span class="p">)));</span>
+
+    <span class="cm">/* 通过write写入设备文件，修改体现在mmap映射的虚拟地址 */</span>
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">write</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">message2</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message2</span><span class="p">));</span>
+
+    <span class="n">assert</span><span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message2</span><span class="p">));</span>
+    <span class="n">assert</span><span class="p">(</span><span class="o">!</span><span class="n">memcmp</span><span class="p">(</span><span class="n">addr</span> <span class="o">+</span> <span class="mi">64</span><span class="p">,</span> <span class="n">message2</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message2</span><span class="p">)));</span>
+
+    <span class="n">munmap</span><span class="p">(</span><span class="n">addr</span><span class="p">,</span> <span class="p">(</span><span class="n">size_t</span><span class="p">)</span><span class="n">getpagesize</span><span class="p">());</span>
+    <span class="n">close</span><span class="p">(</span><span class="n">fd</span><span class="p">);</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We compile and run the test program and the result is as we expected. From the kernel log, we can see that the mapping starts at physical address 0x5b1558000 with an offset of 0. The vma size is 1 page, and the mapping size is also 1 page. The kernel space virtual address 0xffff8d1ab1558000 is mapped to user space 0x7f21c0f58000.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ sudo ./test1
+$ dmesg<span class="p">|</span>tail -n <span class="m">4</span>
+<span class="o">[</span>110691.745381<span class="o">]</span> phys_start: 0x5b1558000, offset: 0x0, vma_size: 0x1000, map size:0x1000
+<span class="o">[</span>110691.745388<span class="o">]</span> map kernel 0xffff8d1ab1558000 to user 0x7f21c0f58000, size: 0x1000
+<span class="o">[</span>110696.745816<span class="o">]</span> demodrv_read <span class="nv">actual_readed</span><span class="o">=</span>64, <span class="nv">pos</span><span class="o">=</span><span class="m">64</span>
+<span class="o">[</span>110696.745822<span class="o">]</span> demodrv_write <span class="nv">actual_written</span><span class="o">=</span>13, <span class="nv">pos</span><span class="o">=</span><span class="m">77</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Meanwhile, we use pmap to observe the address space of the process before and after mmap.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">$ sudo pmap -x $(pgrep test1)
+[sudo] password for ssl:
+30830:   ./test1
+Address           Kbytes     RSS   Dirty Mode  Mapping
+0000557b19475000       4       4       0 r-x-- test1
+0000557b19475000       0       0       0 r-x-- test1
+0000557b19676000       4       4       4 r---- test1
+0000557b19676000       0       0       0 r---- test1
+0000557b19677000       4       4       4 rw--- test1
+0000557b19677000       0       0       0 rw--- test1
+00007f21c0941000    1948     888       0 r-x-- libc-2.27.so
+00007f21c0941000       0       0       0 r-x-- libc-2.27.so
+00007f21c0b28000    2048       0       0 ----- libc-2.27.so
+00007f21c0b28000       0       0       0 ----- libc-2.27.so
+00007f21c0d28000      16      16      16 r---- libc-2.27.so
+00007f21c0d28000       0       0       0 r---- libc-2.27.so
+00007f21c0d2c000       8       8       8 rw--- libc-2.27.so
+00007f21c0d2c000       0       0       0 rw--- libc-2.27.so
+00007f21c0d2e000      16       8       8 rw---   [ anon ]
+00007f21c0d2e000       0       0       0 rw---   [ anon ]
+00007f21c0d32000     156     156       0 r-x-- ld-2.27.so
+00007f21c0d32000       0       0       0 r-x-- ld-2.27.so
+00007f21c0f41000       8       8       8 rw---   [ anon ]
+00007f21c0f41000       0       0       0 rw---   [ anon ]
+00007f21c0f59000       4       4       4 r---- ld-2.27.so
+00007f21c0f59000       0       0       0 r---- ld-2.27.so
+00007f21c0f5a000       4       4       4 rw--- ld-2.27.so
+00007f21c0f5a000       0       0       0 rw--- ld-2.27.so
+00007f21c0f5b000       4       4       4 rw---   [ anon ]
+00007f21c0f5b000       0       0       0 rw---   [ anon ]
+00007ffdacdf1000     132       8       8 rw---   [ stack ]
+00007ffdacdf1000       0       0       0 rw---   [ stack ]
+00007ffdacf3c000      12       0       0 r----   [ anon ]
+00007ffdacf3c000       0       0       0 r----   [ anon ]
+00007ffdacf3f000       4       4       0 r-x--   [ anon ]
+00007ffdacf3f000       0       0       0 r-x--   [ anon ]
+ffffffffff600000       4       0       0 --x--   [ anon ]
+ffffffffff600000       0       0       0 --x--   [ anon ]
+---------------- ------- ------- -------
+total kB            4376    1120      68
+
+$ sudo pmap -x $(pgrep test1)
+30830:   ./test1
+Address           Kbytes     RSS   Dirty Mode  Mapping
+0000557b19475000       4       4       0 r-x-- test1
+0000557b19475000       0       0       0 r-x-- test1
+0000557b19676000       4       4       4 r---- test1
+0000557b19676000       0       0       0 r---- test1
+0000557b19677000       4       4       4 rw--- test1
+0000557b19677000       0       0       0 rw--- test1
+00007f21c0941000    1948     888       0 r-x-- libc-2.27.so
+00007f21c0941000       0       0       0 r-x-- libc-2.27.so
+00007f21c0b28000    2048       0       0 ----- libc-2.27.so
+00007f21c0b28000       0       0       0 ----- libc-2.27.so
+00007f21c0d28000      16      16      16 r---- libc-2.27.so
+00007f21c0d28000       0       0       0 r---- libc-2.27.so
+00007f21c0d2c000       8       8       8 rw--- libc-2.27.so
+00007f21c0d2c000       0       0       0 rw--- libc-2.27.so
+00007f21c0d2e000      16       8       8 rw---   [ anon ]
+00007f21c0d2e000       0       0       0 rw---   [ anon ]
+00007f21c0d32000     156     156       0 r-x-- ld-2.27.so
+00007f21c0d32000       0       0       0 r-x-- ld-2.27.so
+00007f21c0f41000       8       8       8 rw---   [ anon ]
+00007f21c0f41000       0       0       0 rw---   [ anon ]
+00007f21c0f58000       4       0       0 rw-s- demo_dev
+00007f21c0f58000       0       0       0 rw-s- demo_dev
+00007f21c0f59000       4       4       4 r---- ld-2.27.so
+00007f21c0f59000       0       0       0 r---- ld-2.27.so
+00007f21c0f5a000       4       4       4 rw--- ld-2.27.so
+00007f21c0f5a000       0       0       0 rw--- ld-2.27.so
+00007f21c0f5b000       4       4       4 rw---   [ anon ]
+00007f21c0f5b000       0       0       0 rw---   [ anon ]
+00007ffdacdf1000     132       8       8 rw---   [ stack ]
+00007ffdacdf1000       0       0       0 rw---   [ stack ]
+00007ffdacf3c000      12       0       0 r----   [ anon ]
+00007ffdacf3c000       0       0       0 r----   [ anon ]
+00007ffdacf3f000       4       4       0 r-x--   [ anon ]
+00007ffdacf3f000       0       0       0 r-x--   [ anon ]
+ffffffffff600000       4       0       0 --x--   [ anon ]
+ffffffffff600000       0       0       0 --x--   [ anon ]
+---------------- ------- ------- -------
+total kB            4380    1120      68
+</code></pre></td></tr></table>
+</div>
+</div><p>You can see that after mmap there is an additional segment called demo_dev, whose starting address is the user space address 0x7f21c0f58000 that we mapped.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">00007f21c0f58000       4       0       0 rw-s- demo_dev
+00007f21c0f58000       0       0       0 rw-s- demo_dev
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="test-program-2">Test program 2</h3>
+<p>Test program 2 is not very different, it opens the same device file, mmap creates the same mapping, and then reads the contents written by the previous program via read and virtual address respectively.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="c1">// test.2
+</span><span class="c1"></span><span class="kt">int</span> <span class="nf">main</span><span class="p">()</span>
+<span class="p">{</span>
+    <span class="kt">char</span> <span class="n">buf</span><span class="p">[</span><span class="mi">64</span><span class="p">];</span>
+    <span class="kt">int</span> <span class="n">fd</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">addr</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">ret</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">message</span> <span class="o">=</span> <span class="s">&#34;Hello World</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">message2</span> <span class="o">=</span> <span class="s">&#34;I&#39;m superman</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">;</span>
+
+    <span class="cm">/* 另一进程打开同一设备文件，然后用mmap映射 */</span>
+    <span class="n">fd</span> <span class="o">=</span> <span class="n">open</span><span class="p">(</span><span class="n">DEMO_DEV_NAME</span><span class="p">,</span> <span class="n">O_RDWR</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">fd</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">printf</span><span class="p">(</span><span class="s">&#34;open device %s failed</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">DEMO_DEV_NAME</span><span class="p">);</span>
+        <span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="n">addr</span> <span class="o">=</span> <span class="n">mmap</span><span class="p">(</span><span class="nb">NULL</span><span class="p">,</span> <span class="p">(</span><span class="n">size_t</span><span class="p">)</span><span class="n">getpagesize</span><span class="p">(),</span> <span class="n">PROT_READ</span> <span class="o">|</span> <span class="n">PROT_WRITE</span><span class="p">,</span>
+                <span class="n">MAP_SHARED</span> <span class="o">|</span> <span class="n">MAP_LOCKED</span><span class="p">,</span> <span class="n">fd</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+
+    <span class="cm">/* 通过read读取设备文件 */</span>
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">));</span>
+
+    <span class="n">assert</span><span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">));</span>
+    <span class="n">assert</span><span class="p">(</span><span class="o">!</span><span class="n">memcmp</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">message</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message</span><span class="p">)));</span>
+
+    <span class="cm">/* 通过mmap映射的虚拟地址读取 */</span>
+    <span class="n">assert</span><span class="p">(</span><span class="o">!</span><span class="n">memcmp</span><span class="p">(</span><span class="n">addr</span> <span class="o">+</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">),</span> <span class="n">message2</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message2</span><span class="p">)));</span>
+
+    <span class="n">munmap</span><span class="p">(</span><span class="n">addr</span><span class="p">,</span> <span class="p">(</span><span class="n">size_t</span><span class="p">)</span><span class="n">getpagesize</span><span class="p">());</span>
+    <span class="n">close</span><span class="p">(</span><span class="n">fd</span><span class="p">);</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Compiled and run, the test results are as we expected. The same kernel virtual address is now mapped to a different user space virtual address. With mmap we have implemented inter-process communication.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ sudo ./test2
+$ dmesg<span class="p">|</span>tail -n <span class="m">3</span>
+<span class="o">[</span>111333.818374<span class="o">]</span> phys_start: 0x5b1558000, offset: 0x0, vma_size: 0x1000, map size:0x1000
+<span class="o">[</span>111333.818378<span class="o">]</span> map kernel 0xffff8d1ab1558000 to user 0x7f015ee94000, size: 0x1000
+<span class="o">[</span>111333.818381<span class="o">]</span> demodrv_read <span class="nv">actual_readed</span><span class="o">=</span>64, <span class="nv">pos</span><span class="o">=</span><span class="m">64</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="test-program-3">Test program 3</h3>
+<p>This time let&rsquo;s test some special cases, the size of the mapping is changed to 1 byte, according to the previous code analysis, the mapping needs page alignment, so it is expected to actually map a page. It is possible to read and write normally in the range of one page. Then try to write outside the vma mapping range, and expect a segment error.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">main</span><span class="p">()</span>
+<span class="p">{</span>
+    <span class="kt">char</span> <span class="n">buf</span><span class="p">[</span><span class="mi">64</span><span class="p">];</span>
+    <span class="kt">int</span> <span class="n">fd</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">addr</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+    <span class="n">off_t</span> <span class="n">offset</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">ret</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">message</span> <span class="o">=</span> <span class="s">&#34;Hello World</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">message2</span> <span class="o">=</span> <span class="s">&#34;I&#39;m superman</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">;</span>
+
+    <span class="n">fd</span> <span class="o">=</span> <span class="n">open</span><span class="p">(</span><span class="n">DEMO_DEV_NAME</span><span class="p">,</span> <span class="n">O_RDWR</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">fd</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">printf</span><span class="p">(</span><span class="s">&#34;open device %s failed</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">DEMO_DEV_NAME</span><span class="p">);</span>
+        <span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="cm">/* 映射1个字节 */</span>
+    <span class="n">addr</span> <span class="o">=</span> <span class="n">mmap</span><span class="p">(</span><span class="nb">NULL</span><span class="p">,</span> <span class="mi">1</span><span class="p">,</span> <span class="n">PROT_READ</span> <span class="o">|</span> <span class="n">PROT_WRITE</span><span class="p">,</span>
+                <span class="n">MAP_SHARED</span> <span class="o">|</span> <span class="n">MAP_LOCKED</span><span class="p">,</span> <span class="n">fd</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+
+    <span class="cm">/* 写到mmap映射的虚拟地址中，通过read读取设备文件 */</span>
+    <span class="n">ret</span> <span class="o">=</span><span class="n">sprintf</span><span class="p">(</span><span class="n">addr</span><span class="p">,</span> <span class="s">&#34;%s&#34;</span><span class="p">,</span> <span class="n">message</span><span class="p">);</span>
+    <span class="n">assert</span><span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message</span><span class="p">));</span>
+
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">));</span>
+    <span class="n">assert</span><span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">));</span>
+    <span class="n">assert</span><span class="p">(</span><span class="o">!</span><span class="n">memcmp</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">message</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message</span><span class="p">)));</span>
+
+    <span class="cm">/* 写到一页的尾部 */</span>
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">sprintf</span><span class="p">(</span><span class="n">addr</span> <span class="o">+</span> <span class="n">getpagesize</span><span class="p">()</span> <span class="o">-</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">),</span> <span class="s">&#34;%s&#34;</span><span class="p">,</span> <span class="n">message2</span><span class="p">);</span>
+    <span class="n">assert</span><span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message2</span><span class="p">));</span>
+
+    <span class="n">offset</span> <span class="o">=</span> <span class="n">lseek</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">getpagesize</span><span class="p">()</span> <span class="o">-</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">),</span> <span class="n">SEEK_SET</span><span class="p">);</span>
+    <span class="n">assert</span><span class="p">(</span><span class="n">offset</span> <span class="o">==</span> <span class="n">getpagesize</span><span class="p">()</span> <span class="o">-</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">));</span>
+
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">));</span>
+    <span class="n">assert</span><span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">));</span>
+    <span class="n">assert</span><span class="p">(</span><span class="o">!</span><span class="n">memcmp</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">message2</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message2</span><span class="p">)));</span>
+    
+    <span class="cm">/* 写到一页之后，超出映射范围 */</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;expect segment error</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">sprintf</span><span class="p">(</span><span class="n">addr</span> <span class="o">+</span> <span class="n">getpagesize</span><span class="p">(),</span> <span class="s">&#34;something&#34;</span><span class="p">);</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;never reach here</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+
+    <span class="n">munmap</span><span class="p">(</span><span class="n">addr</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>
+    <span class="n">close</span><span class="p">(</span><span class="n">fd</span><span class="p">);</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We compiled and ran the tests and the results were as we expected, actually mapping 1 page in size, with a segment error (SIGSEGV) when trying to write beyond the mapped range.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">$ sudo ./test3
+expect segment error
+Segmentation fault
+$ dmesg<span class="p">|</span>tail -n <span class="m">6</span>
+<span class="o">[</span>111762.605089<span class="o">]</span> phys_start: 0x5b1558000, offset: 0x0, vma_size: 0x1000, map size:0x1000
+<span class="o">[</span>111762.605093<span class="o">]</span> map kernel 0xffff8d1ab1558000 to user 0x7f96b5d08000, size: 0x1000
+<span class="o">[</span>111762.605105<span class="o">]</span> demodrv_read <span class="nv">actual_readed</span><span class="o">=</span>64, <span class="nv">pos</span><span class="o">=</span><span class="m">64</span>
+<span class="o">[</span>111762.605110<span class="o">]</span> demodrv_read <span class="nv">actual_readed</span><span class="o">=</span>64, <span class="nv">pos</span><span class="o">=</span><span class="m">4096</span>
+<span class="o">[</span>111762.605165<span class="o">]</span> test3<span class="o">[</span>31001<span class="o">]</span>: segfault at 7f96b5d09000 ip 0000560c0fd3ad25 sp 00007ffc5a515330 error <span class="m">7</span> in test3<span class="o">[</span>560c0fd3a000+2000<span class="o">]</span>
+<span class="o">[</span>111762.605170<span class="o">]</span> Code: e8 <span class="m">80</span> fb ff ff <span class="m">48</span> 8d 3d 1a <span class="m">02</span> <span class="m">00</span> <span class="m">00</span> e8 <span class="m">14</span> fb ff ff e8 cf fb ff ff <span class="m">48</span> <span class="m">63</span> d0 <span class="m">48</span> 8b <span class="m">45</span> <span class="m">80</span> <span class="m">48</span> <span class="m">01</span> d0 <span class="m">48</span> bb <span class="m">73</span> 6f 6d <span class="m">65</span> <span class="m">74</span> <span class="m">68</span> <span class="m">69</span> 6e &lt;48&gt; <span class="m">89</span> <span class="m">18</span> <span class="m">66</span> c7 <span class="m">40</span> <span class="m">08</span> <span class="m">67</span> <span class="m">00</span> c7 <span class="m">85</span> 7c ff ff ff <span class="m">09</span> <span class="m">00</span> <span class="m">00</span> <span class="m">00</span> <span class="m">48</span> 8d 3d
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="test-program-4">Test program 4</h3>
+<p>This time we modified the mmap parameters again, this time mapping 2 pages in size, with the offset set to 3 pages. Since the physical memory size allocated for our device is 4 pages, the mapped page 2 has exceeded the actual physical memory of the device. It is expected that the first page of the mapping can be read and written normally, and the second page will have a bus error.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="kt">int</span> <span class="nf">main</span><span class="p">()</span>
+<span class="p">{</span>
+    <span class="kt">char</span> <span class="n">buf</span><span class="p">[</span><span class="mi">64</span><span class="p">];</span>
+    <span class="kt">int</span> <span class="n">fd</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">addr</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+    <span class="n">off_t</span> <span class="n">offset</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">ret</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">message</span> <span class="o">=</span> <span class="s">&#34;Hello World</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">message2</span> <span class="o">=</span> <span class="s">&#34;I&#39;m superman</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">;</span>
+
+    <span class="n">fd</span> <span class="o">=</span> <span class="n">open</span><span class="p">(</span><span class="n">DEMO_DEV_NAME</span><span class="p">,</span> <span class="n">O_RDWR</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">fd</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">printf</span><span class="p">(</span><span class="s">&#34;open device %s failed</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">DEMO_DEV_NAME</span><span class="p">);</span>
+        <span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="cm">/* 映射2页，offset 3页 */</span>
+    <span class="n">addr</span> <span class="o">=</span> <span class="n">mmap</span><span class="p">(</span><span class="nb">NULL</span><span class="p">,</span> <span class="n">getpagesize</span><span class="p">()</span> <span class="o">*</span> <span class="mi">2</span><span class="p">,</span> <span class="n">PROT_READ</span> <span class="o">|</span> <span class="n">PROT_WRITE</span><span class="p">,</span>
+                <span class="n">MAP_SHARED</span> <span class="o">|</span> <span class="n">MAP_LOCKED</span><span class="p">,</span> <span class="n">fd</span><span class="p">,</span> <span class="n">getpagesize</span><span class="p">()</span> <span class="o">*</span> <span class="mi">3</span><span class="p">);</span>
+
+    <span class="cm">/* 写到mmap映射的虚拟地址中，通过read读取设备文件 */</span>
+    <span class="n">ret</span> <span class="o">=</span><span class="n">sprintf</span><span class="p">(</span><span class="n">addr</span><span class="p">,</span> <span class="s">&#34;%s&#34;</span><span class="p">,</span> <span class="n">message</span><span class="p">);</span>
+    <span class="n">assert</span><span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message</span><span class="p">));</span>
+
+    <span class="n">offset</span> <span class="o">=</span> <span class="n">lseek</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">getpagesize</span><span class="p">()</span> <span class="o">*</span> <span class="mi">3</span><span class="p">,</span> <span class="n">SEEK_SET</span><span class="p">);</span>
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">,</span> <span class="n">buf</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">));</span>
+    <span class="n">assert</span><span class="p">(</span><span class="n">ret</span> <span class="o">==</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">buf</span><span class="p">));</span>
+    <span class="n">assert</span><span class="p">(</span><span class="o">!</span><span class="n">memcmp</span><span class="p">(</span><span class="n">buf</span><span class="p">,</span> <span class="n">message</span><span class="p">,</span> <span class="n">strlen</span><span class="p">(</span><span class="n">message</span><span class="p">)));</span>
+
+    <span class="cm">/* 写到一页之后，超出实际物理内存范围 */</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;expect bus error</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+    <span class="n">ret</span> <span class="o">=</span> <span class="n">sprintf</span><span class="p">(</span><span class="n">addr</span> <span class="o">+</span> <span class="n">getpagesize</span><span class="p">(),</span> <span class="s">&#34;something&#34;</span><span class="p">);</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;never reach here</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+
+    <span class="n">munmap</span><span class="p">(</span><span class="n">addr</span><span class="p">,</span> <span class="n">getpagesize</span><span class="p">()</span> <span class="o">*</span> <span class="mi">2</span><span class="p">);</span>
+    <span class="n">close</span><span class="p">(</span><span class="n">fd</span><span class="p">);</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Compile and run the test program and the result is as expected. Although the size of vma is 2 pages, only 1 page of physical memory is actually mapped, and a bus error (SIGBUS) occurs when trying to write to the second page.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">$ sudo ./test4
+expect bus error
+Bus error
+$ dmesg|tail -n 3
+[112105.841706] phys_start: 0x5b155b000, offset: 0x3000, vma_size: 0x2000, map size:0x1000
+[112105.841710] map kernel 0xffff8d1ab155b000 to user 0x7fe662ec4000, size: 0x1000
+[112105.841723] demodrv_read actual_readed=64, pos=12352
+</code></pre></td></tr></table>
+</div>
+</div>
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/linux/">linux</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/nginx-slab/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Nginx&#39;s shared memory management - the slab algorithm</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/0777-or-777/">
+            <span class="next-text nav-default">Should I use 777 or 0777 for os.Chmod?</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

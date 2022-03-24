@@ -1,0 +1,2102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Nginx&#39;s shared memory management - the slab algorithm - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article describes the principle of the slab algorithm and its implementation in the Linux kernel and in Nginx." /><meta name="keywords" content="nginx, linux, Slab" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/nginx-slab/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Nginx&#39;s shared memory management - the slab algorithm" />
+<meta property="og:description" content="This article describes the principle of the slab algorithm and its implementation in the Linux kernel and in Nginx." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/nginx-slab/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-24T09:23:03+08:00" />
+<meta property="article:modified_time" content="2022-03-24T09:23:03+08:00" />
+
+<meta itemprop="name" content="Nginx&#39;s shared memory management - the slab algorithm">
+<meta itemprop="description" content="This article describes the principle of the slab algorithm and its implementation in the Linux kernel and in Nginx."><meta itemprop="datePublished" content="2022-03-24T09:23:03+08:00" />
+<meta itemprop="dateModified" content="2022-03-24T09:23:03+08:00" />
+<meta itemprop="wordCount" content="6948">
+<meta itemprop="keywords" content="nginx,linux," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Nginx&#39;s shared memory management - the slab algorithm"/>
+<meta name="twitter:description" content="This article describes the principle of the slab algorithm and its implementation in the Linux kernel and in Nginx."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Nginx&#39;s shared memory management - the slab algorithm</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-24 09:23:03 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 6948 words </span>
+          <span class="more-meta"> 14 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#slab-principle">slab principle</a></li>
+        <li><a href="#main-data-structures">Main data structures</a></li>
+        <li><a href="#initialization-process">Initialization process</a>
+          <ul>
+            <li><a href="#first-start-up">First start-up</a></li>
+            <li><a href="#reload">reload</a></li>
+          </ul>
+        </li>
+        <li><a href="#allocation-logic">Allocation Logic</a>
+          <ul>
+            <li><a href="#allocating-pages">Allocating pages</a></li>
+            <li><a href="#assigning-objects">Assigning objects</a></li>
+          </ul>
+        </li>
+        <li><a href="#logic-for-releasing">Logic for releasing</a>
+          <ul>
+            <li><a href="#release-pages">Release pages</a></li>
+            <li><a href="#release-the-object">Release the object</a></li>
+          </ul>
+        </li>
+        <li><a href="#shared-memory-destruction">Shared Memory Destruction</a></li>
+        <li><a href="#statistics-and-monitoring">Statistics and monitoring</a></li>
+        <li><a href="#ssl-session-cache">ssl session cache</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>I first learned about the slab algorithm when I was learning the Linux kernel. The kernel uses the Buddy System algorithm to manage memory pages. But for small objects, it would be wasteful to use a page allocator, so slab was born. The kernel&rsquo;s kmalloc() is managed using slab. nginx&rsquo;s shared memory management uses the same idea, but it is not as complex as slab in the Linux kernel.</p>
+<h2 id="slab-principle">slab principle</h2>
+<p>It basically works as follows.</p>
+<ul>
+<li>The shared memory is first initialized with the top part being the metadata used for management and the remaining part divided by page. Each page has a corresponding page header in the preceding metadata, which is used to manage the page</li>
+<li>There is a free page block linkedlist in the metadata that manages all free page blocks (initially a complete contiguous page block)</li>
+<li>Objects are allocated with their length aligned to the power of 2, which is called a different slot in nginx</li>
+<li>A page that is assigned to a certain slot is used only for the allocation of objects of that length, e.g. a 4KB page can be sliced into 64 objects of 64B, or 32 objects of 128B.</li>
+<li>Each object of a slot has an unfilled page linkedlist that manages all the unfilled and not empty pages of that slot.</li>
+<li>slot objects are managed by bitmap, an object is allocated to the corresponding location 1, released set to 0, thus determining which memory blocks in the page is free</li>
+<li>If a page is full, it is removed from the unfull page chain; if a page becomes unfull (i.e., a full page releases an object), it is relisted to the unfull page chain</li>
+<li>If a slot object is allocated and the unfulfilled page table is found empty, then a free page is allocated from the free page block table and inserted into the unfulfilled page table of the slot after the object is allocated; if the page is empty after the object is released, it is returned to the free page block table</li>
+<li>When allocating and releasing pages, the free page block linkedlist has cut and merge operations</li>
+<li>large objects (more than half a page) are allocated directly from the free page block linkedlist, without going to slot</li>
+</ul>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/24/72ca199e4cbf4696be13031b975caf2b.png" alt="nginx slab"></p>
+<p>It is worth mentioning that slot is divided into 3 categories according to the size of the object. For large size objects, because the number of memory blocks that a page can be divided into is small, it is enough to use the slab field in the page header directly as a bitmap. For small size objects, because of the large number of slice blocks, it is necessary to use the first few blocks in the actual memory page as bitmap.</p>
+<h2 id="main-data-structures">Main data structures</h2>
+<blockquote>
+<p>Note: The code that follows is based on Nginx-1.19.3</p>
+</blockquote>
+<p>The following diagram gives the relationships between several major structures and the locations of the shared memory pointed to by several major pointers. From addr to last is the metadata used for management, and from start to end is the actual memory allocated. slots and stats are the half-full linkedlist headers and statistics for each slot, respectively. pages is an array of page headers that corresponds to the actual memory pages allocated later. The page header can be found by the page header, and its page header can also be found by the page address, and the page header is also continuous for consecutive page blocks.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/24/ab50964e69c34f30bf821d2f76ec1a46.png" alt="nginx slab struct"></p>
+<p><code>ngx_shm_zone_t</code> is the structure used to describe the shared memory, data is the private data pointer, init is the private initialization function, and tag is used to distinguish between different shared memories.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="c1">// ngx_shm_zone_t是共享内存的结构体，里面包含了shm，data是私有数据
+</span><span class="c1"></span><span class="k">struct</span> <span class="n">ngx_shm_zone_s</span> <span class="p">{</span>
+    <span class="kt">void</span>                     <span class="o">*</span><span class="n">data</span><span class="p">;</span>
+    <span class="n">ngx_shm_t</span>                 <span class="n">shm</span><span class="p">;</span>
+    <span class="n">ngx_shm_zone_init_pt</span>      <span class="n">init</span><span class="p">;</span>
+    <span class="kt">void</span>                     <span class="o">*</span><span class="n">tag</span><span class="p">;</span>
+    <span class="kt">void</span>                     <span class="o">*</span><span class="n">sync</span><span class="p">;</span>
+    <span class="n">ngx_uint_t</span>                <span class="n">noreuse</span><span class="p">;</span>  <span class="cm">/* unsigned  noreuse:1; */</span>
+<span class="p">};</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Where shm records specific information about the shared memory, addr is the shared memory start address, size is the size, and name name.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="c1">// shm里的addr指向实际mmap的共享内存
+</span><span class="c1"></span><span class="k">typedef</span> <span class="k">struct</span> <span class="p">{</span>
+    <span class="n">u_char</span>      <span class="o">*</span><span class="n">addr</span><span class="p">;</span>
+    <span class="n">size_t</span>       <span class="n">size</span><span class="p">;</span>
+    <span class="n">ngx_str_t</span>    <span class="n">name</span><span class="p">;</span>
+    <span class="n">ngx_log_t</span>   <span class="o">*</span><span class="n">log</span><span class="p">;</span>
+    <span class="n">ngx_uint_t</span>   <span class="n">exists</span><span class="p">;</span>   <span class="cm">/* unsigned  exists:1;  */</span>
+<span class="p">}</span> <span class="n">ngx_shm_t</span><span class="p">;</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>ngx_slab_pool_t</code> is used to manage the slab, which is located at the very beginning of the shared memory. min_size/min_shift records the size of the smallest slot and the corresponding bit offset, and free is the head of the free page block linkedlist already mentioned. pages/last/stats/start/end/data/ addr are pointers to different locations in the shared memory. addr are pointers to different locations in shared memory, see the following figure. lock and mutex are used to protect shared memory.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="c1">// 共享内存最开头是ngx_slab_pool_t，它用于管理slab，后面会详细介绍它的字段
+</span><span class="c1"></span><span class="k">typedef</span> <span class="k">struct</span> <span class="p">{</span>
+    <span class="n">ngx_shmtx_sh_t</span>    <span class="n">lock</span><span class="p">;</span>
+
+    <span class="n">size_t</span>            <span class="n">min_size</span><span class="p">;</span>     <span class="c1">// 分配内存最小尺寸，8
+</span><span class="c1"></span>    <span class="n">size_t</span>            <span class="n">min_shift</span><span class="p">;</span>
+
+    <span class="n">ngx_slab_page_t</span>  <span class="o">*</span><span class="n">pages</span><span class="p">;</span>        <span class="c1">// 指向页面头数组
+</span><span class="c1"></span>    <span class="n">ngx_slab_page_t</span>  <span class="o">*</span><span class="n">last</span><span class="p">;</span>         <span class="c1">// 指向页面头数组末尾
+</span><span class="c1"></span>    <span class="n">ngx_slab_page_t</span>   <span class="n">free</span><span class="p">;</span>         <span class="c1">// 空闲页面链表头
+</span><span class="c1"></span>
+    <span class="n">ngx_slab_stat_t</span>  <span class="o">*</span><span class="n">stats</span><span class="p">;</span>        <span class="c1">// 指向统计数组
+</span><span class="c1"></span>    <span class="n">ngx_uint_t</span>        <span class="n">pfree</span><span class="p">;</span>        <span class="c1">// 总空闲页面数
+</span><span class="c1"></span>
+    <span class="n">u_char</span>           <span class="o">*</span><span class="n">start</span><span class="p">;</span>        <span class="c1">// 实际数据页面起始位置
+</span><span class="c1"></span>    <span class="n">u_char</span>           <span class="o">*</span><span class="n">end</span><span class="p">;</span>          <span class="c1">// 共享内存结束位置
+</span><span class="c1"></span>
+    <span class="n">ngx_shmtx_t</span>       <span class="n">mutex</span><span class="p">;</span>
+
+    <span class="n">u_char</span>           <span class="o">*</span><span class="n">log_ctx</span><span class="p">;</span>
+    <span class="n">u_char</span>            <span class="n">zero</span><span class="p">;</span>
+
+    <span class="kt">unsigned</span>          <span class="nl">log_nomem</span><span class="p">:</span><span class="mi">1</span><span class="p">;</span>
+
+    <span class="kt">void</span>             <span class="o">*</span><span class="n">data</span><span class="p">;</span>         <span class="c1">// 私有数据
+</span><span class="c1"></span>    <span class="kt">void</span>             <span class="o">*</span><span class="n">addr</span><span class="p">;</span>
+<span class="p">}</span> <span class="n">ngx_slab_pool_t</span><span class="p">;</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>ngx_slab_page_s</code> is used to manage pages, which is what we called page header earlier, it acts as both a linkedlist node and records some information about the page. slab field has different uses in different cases, prev is used to indicate the page type in addition to being a pointer to the linkedlist, and the low bit is also used to indicate the page type.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="c1">// 页面头，用于管理页面
+</span><span class="c1"></span><span class="k">struct</span> <span class="n">ngx_slab_page_s</span> <span class="p">{</span>
+    <span class="n">uintptr_t</span>         <span class="n">slab</span><span class="p">;</span>         <span class="c1">// 对于空闲页面头节点，表示当前节点页块大小；空闲页面非头节点，为FREE；对于已分配页块，第一个页是pages | NGX_SLAB_PAGE_START，其余是NGX_SLAB_PAGE_BUSY；对于slab页面，小对象slab记录shift值，中对象slab用作bitmap，大对象slab高位用作bitmap，低位记录shift值
+</span><span class="c1"></span>    <span class="n">ngx_slab_page_t</span>  <span class="o">*</span><span class="n">next</span><span class="p">;</span>         <span class="c1">// 不在链表中时，为NULL
+</span><span class="c1"></span>    <span class="n">uintptr_t</span>         <span class="n">prev</span><span class="p">;</span>         <span class="c1">// 对于已经分配的页，低位还兼职表示页类型
+</span><span class="c1"></span><span class="p">};</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>ngx_slab_stat_t</code> is used to count the information of slots.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="c1">// 用于统计slot信息
+</span><span class="c1"></span><span class="k">typedef</span> <span class="k">struct</span> <span class="p">{</span>
+    <span class="n">ngx_uint_t</span>        <span class="n">total</span><span class="p">;</span>  <span class="c1">// 总共有多少个对象
+</span><span class="c1"></span>    <span class="n">ngx_uint_t</span>        <span class="n">used</span><span class="p">;</span>   <span class="c1">// 目前使用了多少个
+</span><span class="c1"></span>
+    <span class="n">ngx_uint_t</span>        <span class="n">reqs</span><span class="p">;</span>   <span class="c1">// 请求该slot次数，累加计数器
+</span><span class="c1"></span>    <span class="n">ngx_uint_t</span>        <span class="n">fails</span><span class="p">;</span>  <span class="c1">// 请求失败的次数，累加计数器
+</span><span class="c1"></span><span class="p">}</span> <span class="n">ngx_slab_stat_t</span><span class="p">;</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="initialization-process">Initialization process</h2>
+<h3 id="first-start-up">First start-up</h3>
+<p>The main function call relationships for shared initialization are as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="n">ngx_shared_memory_add</span><span class="p">()</span> <span class="c1">// 初始化ngx_shm_zone_t，并放到全局链表cf-&gt;cycle-&gt;shared_memory中
+</span><span class="c1"></span><span class="n">ngx_init_cycle</span><span class="p">()</span>
+  <span class="n">ngx_shm_alloc</span><span class="p">(</span><span class="o">&amp;</span><span class="n">shm_zone</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">shm</span><span class="p">)</span>      <span class="c1">// 分配内存
+</span><span class="c1"></span>  <span class="n">ngx_init_zone_pool</span><span class="p">(</span><span class="n">cycle</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">shm_zone</span><span class="p">[</span><span class="n">i</span><span class="p">])</span>     <span class="c1">// slab初始化
+</span><span class="c1"></span>    <span class="n">ngx_slab_init</span><span class="p">()</span>
+  <span class="n">shm_zone</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">shm_zone</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">oshm_zone</span><span class="p">[</span><span class="n">n</span><span class="p">].</span><span class="n">data</span><span class="p">)</span> <span class="c1">// 各共享内存私有的初始化函数，例如ngx_ssl_session_cache_init，主要负责初始化ngx_ssl_session_cache_t
+</span></code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>Add shm_zone to the linkedlist during the configuration processing phase</li>
+<li>Then allocate shared memory in init_cycle to initialize shm_zone</li>
+<li>ngx_slab_init() mainly initializes the ngx_slab_pool_t structure</li>
+<li>After completing the general-purpose initialization, the initialization of each shared memory private operation is performed</li>
+</ul>
+<p>ngx_slab_init() is a common initialization operation for all shared memory, mainly initializing the fields in the ngx_slab_pool_t structure.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="kt">void</span>
+<span class="nf">ngx_slab_init</span><span class="p">(</span><span class="n">ngx_slab_pool_t</span> <span class="o">*</span><span class="n">pool</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">u_char</span>           <span class="o">*</span><span class="n">p</span><span class="p">;</span>
+    <span class="n">size_t</span>            <span class="n">size</span><span class="p">;</span>
+    <span class="n">ngx_int_t</span>         <span class="n">m</span><span class="p">;</span>
+    <span class="n">ngx_uint_t</span>        <span class="n">i</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">pages</span><span class="p">;</span>
+    <span class="n">ngx_slab_page_t</span>  <span class="o">*</span><span class="n">slots</span><span class="p">,</span> <span class="o">*</span><span class="n">page</span><span class="p">;</span>
+
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">min_size</span> <span class="o">=</span> <span class="p">(</span><span class="n">size_t</span><span class="p">)</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">min_shift</span><span class="p">;</span>
+
+    <span class="n">slots</span> <span class="o">=</span> <span class="n">ngx_slab_slots</span><span class="p">(</span><span class="n">pool</span><span class="p">);</span>
+
+    <span class="n">p</span> <span class="o">=</span> <span class="p">(</span><span class="n">u_char</span> <span class="o">*</span><span class="p">)</span> <span class="n">slots</span><span class="p">;</span>
+    <span class="n">size</span> <span class="o">=</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">end</span> <span class="o">-</span> <span class="n">p</span><span class="p">;</span>
+
+    <span class="n">ngx_slab_junk</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
+
+    <span class="n">n</span> <span class="o">=</span> <span class="n">ngx_pagesize_shift</span> <span class="o">-</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">min_shift</span><span class="p">;</span>  <span class="c1">// slot的种类
+</span><span class="c1"></span>
+    <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">n</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+        <span class="cm">/* only &#34;next&#34; is used in list head */</span>
+        <span class="n">slots</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">slab</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+        <span class="n">slots</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">next</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">slots</span><span class="p">[</span><span class="n">i</span><span class="p">];</span>
+        <span class="n">slots</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">prev</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">p</span> <span class="o">+=</span> <span class="n">n</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">ngx_slab_page_t</span><span class="p">);</span>
+
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span> <span class="o">=</span> <span class="p">(</span><span class="n">ngx_slab_stat_t</span> <span class="o">*</span><span class="p">)</span> <span class="n">p</span><span class="p">;</span>
+    <span class="n">ngx_memzero</span><span class="p">(</span><span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">,</span> <span class="n">n</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">ngx_slab_stat_t</span><span class="p">));</span>
+
+    <span class="n">p</span> <span class="o">+=</span> <span class="n">n</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">ngx_slab_stat_t</span><span class="p">);</span>
+
+    <span class="n">size</span> <span class="o">-=</span> <span class="n">n</span> <span class="o">*</span> <span class="p">(</span><span class="k">sizeof</span><span class="p">(</span><span class="n">ngx_slab_page_t</span><span class="p">)</span> <span class="o">+</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">ngx_slab_stat_t</span><span class="p">));</span>
+
+    <span class="n">pages</span> <span class="o">=</span> <span class="p">(</span><span class="n">ngx_uint_t</span><span class="p">)</span> <span class="p">(</span><span class="n">size</span> <span class="o">/</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">+</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">ngx_slab_page_t</span><span class="p">)));</span>               <span class="c1">// 计算页数
+</span><span class="c1"></span>
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">pages</span> <span class="o">=</span> <span class="p">(</span><span class="n">ngx_slab_page_t</span> <span class="o">*</span><span class="p">)</span> <span class="n">p</span><span class="p">;</span> <span class="c1">// 指向页面头数组
+</span><span class="c1"></span>    <span class="n">ngx_memzero</span><span class="p">(</span><span class="n">pool</span><span class="o">-&gt;</span><span class="n">pages</span><span class="p">,</span> <span class="n">pages</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">ngx_slab_page_t</span><span class="p">));</span>
+
+    <span class="n">page</span> <span class="o">=</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">pages</span><span class="p">;</span>
+
+    <span class="cm">/* only &#34;next&#34; is used in list head */</span>
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">free</span><span class="p">.</span><span class="n">slab</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">free</span><span class="p">.</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="p">;</span>
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">free</span><span class="p">.</span><span class="n">prev</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="c1">// 初始只有一个大的块
+</span><span class="c1"></span>    <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">=</span> <span class="n">pages</span><span class="p">;</span>                  <span class="c1">// 页块的页数
+</span><span class="c1"></span>    <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">pool</span><span class="o">-&gt;</span><span class="n">free</span><span class="p">;</span>            <span class="c1">// 指向空闲链表的哨兵
+</span><span class="c1"></span>    <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">pool</span><span class="o">-&gt;</span><span class="n">free</span><span class="p">;</span><span class="c1">// 指向空闲链表的哨兵
+</span><span class="c1"></span>
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">start</span> <span class="o">=</span> <span class="n">ngx_align_ptr</span><span class="p">(</span><span class="n">p</span> <span class="o">+</span> <span class="n">pages</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">ngx_slab_page_t</span><span class="p">),</span>
+                                <span class="n">ngx_pagesize</span><span class="p">);</span>  <span class="c1">// 实际数据页面开始位置
+</span><span class="c1"></span>
+    <span class="n">m</span> <span class="o">=</span> <span class="n">pages</span> <span class="o">-</span> <span class="p">(</span><span class="n">pool</span><span class="o">-&gt;</span><span class="n">end</span> <span class="o">-</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">start</span><span class="p">)</span> <span class="o">/</span> <span class="n">ngx_pagesize</span><span class="p">;</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">m</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">pages</span> <span class="o">-=</span> <span class="n">m</span><span class="p">;</span>
+        <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">=</span> <span class="n">pages</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">last</span> <span class="o">=</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">pages</span> <span class="o">+</span> <span class="n">pages</span><span class="p">;</span>      <span class="c1">// 页面头数组的末尾
+</span><span class="c1"></span>    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">pfree</span> <span class="o">=</span> <span class="n">pages</span><span class="p">;</span>                   <span class="c1">// 总空闲页面数
+</span><span class="c1"></span>
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">log_nomem</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">log_ctx</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">pool</span><span class="o">-&gt;</span><span class="n">zero</span><span class="p">;</span>
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">zero</span> <span class="o">=</span> <span class="sc">&#39;\0&#39;</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Next <code>shm_zone[i].init()</code> is the initialization of each shared memory private, which generally initializes the private data and then assigns the pointer to the private data <code>data</code> field of <code>ngx_shm_zone_t</code> and <code>ngx_slab_pool_t</code>.</p>
+<h3 id="reload">reload</h3>
+<p>By default, reloads reuse the previous shared memory unless <code>noreuse</code> in <code>ngx_shm_zone_s</code> is set to 1, but this field is currently written dead in code and not open as configuration. So reloads generally just execute the following function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="n">ngx_shared_memory_add</span><span class="p">()</span>
+<span class="n">shm_zone</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">shm_zone</span><span class="p">[</span><span class="n">i</span><span class="p">],</span> <span class="n">oshm_zone</span><span class="p">[</span><span class="n">n</span><span class="p">].</span><span class="n">data</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>But there is one case where reload will also regenerate shared memory, and that is when the size has changed.</p>
+<h2 id="allocation-logic">Allocation Logic</h2>
+<p>The allocation logic and the release logic are the core of slab, you need to read the next 4 functions carefully to fully understand them.</p>
+<h3 id="allocating-pages">Allocating pages</h3>
+<p>The page allocation logic is relatively simple, the remaining free pages are a linkedlist, <code>pool-&gt;free</code> is the header node and is used as a sentry. Iterate through the chain to find a large enough free page block, if the page block is exactly equal to the requested size, then remove it from the chain, if the page block is still remaining, insert the first page header of the remaining part into the chain, if the remaining block is larger than 1 page, then point the prev of the page header of the last page to the position of its first page header (needed when merging page blocks).</p>
+<p>For the allocated page block, the first page header records the page block header flag and records the page block size, and the subsequent page headers record the BUSY flag. the last two digits of prev indicate the page type, and <code>NGX_SLAB_PAGE</code> indicates that it is a whole page allocation.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="k">static</span> <span class="n">ngx_slab_page_t</span> <span class="o">*</span>
+<span class="nf">ngx_slab_alloc_pages</span><span class="p">(</span><span class="n">ngx_slab_pool_t</span> <span class="o">*</span><span class="n">pool</span><span class="p">,</span> <span class="n">ngx_uint_t</span> <span class="n">pages</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">ngx_slab_page_t</span>  <span class="o">*</span><span class="n">page</span><span class="p">,</span> <span class="o">*</span><span class="n">p</span><span class="p">;</span>
+
+    <span class="k">for</span> <span class="p">(</span><span class="n">page</span> <span class="o">=</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">free</span><span class="p">.</span><span class="n">next</span><span class="p">;</span> <span class="n">page</span> <span class="o">!=</span> <span class="o">&amp;</span><span class="n">pool</span><span class="o">-&gt;</span><span class="n">free</span><span class="p">;</span> <span class="n">page</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="p">)</span> <span class="p">{</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">&gt;=</span> <span class="n">pages</span><span class="p">)</span> <span class="p">{</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">&gt;</span> <span class="n">pages</span><span class="p">)</span> <span class="p">{</span>   <span class="c1">// 有剩余的情况
+</span><span class="c1"></span>                <span class="n">page</span><span class="p">[</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">-</span> <span class="mi">1</span><span class="p">].</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">page</span><span class="p">[</span><span class="n">pages</span><span class="p">];</span>  <span class="c1">// 这一步是合并时候用的，找到它的块头
+</span><span class="c1"></span>                <span class="c1">// 剩余部分仍然插入链表中
+</span><span class="c1"></span>                <span class="n">page</span><span class="p">[</span><span class="n">pages</span><span class="p">].</span><span class="n">slab</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">-</span> <span class="n">pages</span><span class="p">;</span>
+                <span class="n">page</span><span class="p">[</span><span class="n">pages</span><span class="p">].</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="p">;</span>
+                <span class="n">page</span><span class="p">[</span><span class="n">pages</span><span class="p">].</span><span class="n">prev</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span><span class="p">;</span>
+
+                <span class="n">p</span> <span class="o">=</span> <span class="p">(</span><span class="n">ngx_slab_page_t</span> <span class="o">*</span><span class="p">)</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span><span class="p">;</span>
+                <span class="n">p</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">page</span><span class="p">[</span><span class="n">pages</span><span class="p">];</span>
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">page</span><span class="p">[</span><span class="n">pages</span><span class="p">];</span>
+
+            <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>                     <span class="c1">// 正好的情况
+</span><span class="c1"></span>                <span class="n">p</span> <span class="o">=</span> <span class="p">(</span><span class="n">ngx_slab_page_t</span> <span class="o">*</span><span class="p">)</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span><span class="p">;</span>  <span class="c1">// 将节点从链表移除
+</span><span class="c1"></span>                <span class="n">p</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="p">;</span>
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span><span class="p">;</span>
+            <span class="p">}</span>
+            <span class="c1">// 第一个页记录页数
+</span><span class="c1"></span>            <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">=</span> <span class="n">pages</span> <span class="o">|</span> <span class="n">NGX_SLAB_PAGE_START</span><span class="p">;</span>
+            <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+            <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">NGX_SLAB_PAGE</span><span class="p">;</span>
+
+            <span class="n">pool</span><span class="o">-&gt;</span><span class="n">pfree</span> <span class="o">-=</span> <span class="n">pages</span><span class="p">;</span>  <span class="c1">// 更新剩余空闲页数
+</span><span class="c1"></span>
+            <span class="k">if</span> <span class="p">(</span><span class="o">--</span><span class="n">pages</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+                <span class="k">return</span> <span class="n">page</span><span class="p">;</span>
+            <span class="p">}</span>
+            <span class="c1">// 其余页设为BUSY
+</span><span class="c1"></span>            <span class="k">for</span> <span class="p">(</span><span class="n">p</span> <span class="o">=</span> <span class="n">page</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span> <span class="n">pages</span><span class="p">;</span> <span class="n">pages</span><span class="o">--</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">p</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">=</span> <span class="n">NGX_SLAB_PAGE_BUSY</span><span class="p">;</span>
+                <span class="n">p</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+                <span class="n">p</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">NGX_SLAB_PAGE</span><span class="p">;</span>
+                <span class="n">p</span><span class="o">++</span><span class="p">;</span>
+            <span class="p">}</span>
+
+            <span class="k">return</span> <span class="n">page</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">pool</span><span class="o">-&gt;</span><span class="n">log_nomem</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">ngx_slab_error</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">NGX_LOG_CRIT</span><span class="p">,</span>
+                       <span class="s">&#34;ngx_slab_alloc() failed: no memory&#34;</span><span class="p">);</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="nb">NULL</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="assigning-objects">Assigning objects</h3>
+<p>Small objects are divided into 3 categories based on size, namely <code>NGX_SLAB_BIG</code> , <code>NGX_SLAB_EXACT</code> and <code>NGX_SLAB_SMALL</code> in the code. The reason for splitting into three categories is to save the memory overhead of management. For EXACT, the slab field in the page header can be used as the bitmap of a page. SMALL uses the top memory block of the page as the bitamp, and the slab is used to record the shift value of the page (i.e., which slot it belongs to). For big ones, because the number of memory blocks is small, the high bit of the slab field is used as a bitmap, and the low bit is used to record the shift value.</p>
+<p>For very large objects directly allocate the page, otherwise traverse the corresponding slot half full linkedlist to get a free memory block, find the corresponding bit position bit, if the linkedlist is empty then allocate a new page first, and then insert it into the slot half full linkedlist. If the page is full after allocating an object, it is removed from the half-full linkedlist.</p>
+<p><code>ngx_slab_alloc_locked</code> is one of the most core functions, if you are interested, you can see how it operates the bitmap and the link table. The code is basically commented out, so I won&rsquo;t go over it again here.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span><span class="lnt">109
+</span><span class="lnt">110
+</span><span class="lnt">111
+</span><span class="lnt">112
+</span><span class="lnt">113
+</span><span class="lnt">114
+</span><span class="lnt">115
+</span><span class="lnt">116
+</span><span class="lnt">117
+</span><span class="lnt">118
+</span><span class="lnt">119
+</span><span class="lnt">120
+</span><span class="lnt">121
+</span><span class="lnt">122
+</span><span class="lnt">123
+</span><span class="lnt">124
+</span><span class="lnt">125
+</span><span class="lnt">126
+</span><span class="lnt">127
+</span><span class="lnt">128
+</span><span class="lnt">129
+</span><span class="lnt">130
+</span><span class="lnt">131
+</span><span class="lnt">132
+</span><span class="lnt">133
+</span><span class="lnt">134
+</span><span class="lnt">135
+</span><span class="lnt">136
+</span><span class="lnt">137
+</span><span class="lnt">138
+</span><span class="lnt">139
+</span><span class="lnt">140
+</span><span class="lnt">141
+</span><span class="lnt">142
+</span><span class="lnt">143
+</span><span class="lnt">144
+</span><span class="lnt">145
+</span><span class="lnt">146
+</span><span class="lnt">147
+</span><span class="lnt">148
+</span><span class="lnt">149
+</span><span class="lnt">150
+</span><span class="lnt">151
+</span><span class="lnt">152
+</span><span class="lnt">153
+</span><span class="lnt">154
+</span><span class="lnt">155
+</span><span class="lnt">156
+</span><span class="lnt">157
+</span><span class="lnt">158
+</span><span class="lnt">159
+</span><span class="lnt">160
+</span><span class="lnt">161
+</span><span class="lnt">162
+</span><span class="lnt">163
+</span><span class="lnt">164
+</span><span class="lnt">165
+</span><span class="lnt">166
+</span><span class="lnt">167
+</span><span class="lnt">168
+</span><span class="lnt">169
+</span><span class="lnt">170
+</span><span class="lnt">171
+</span><span class="lnt">172
+</span><span class="lnt">173
+</span><span class="lnt">174
+</span><span class="lnt">175
+</span><span class="lnt">176
+</span><span class="lnt">177
+</span><span class="lnt">178
+</span><span class="lnt">179
+</span><span class="lnt">180
+</span><span class="lnt">181
+</span><span class="lnt">182
+</span><span class="lnt">183
+</span><span class="lnt">184
+</span><span class="lnt">185
+</span><span class="lnt">186
+</span><span class="lnt">187
+</span><span class="lnt">188
+</span><span class="lnt">189
+</span><span class="lnt">190
+</span><span class="lnt">191
+</span><span class="lnt">192
+</span><span class="lnt">193
+</span><span class="lnt">194
+</span><span class="lnt">195
+</span><span class="lnt">196
+</span><span class="lnt">197
+</span><span class="lnt">198
+</span><span class="lnt">199
+</span><span class="lnt">200
+</span><span class="lnt">201
+</span><span class="lnt">202
+</span><span class="lnt">203
+</span><span class="lnt">204
+</span><span class="lnt">205
+</span><span class="lnt">206
+</span><span class="lnt">207
+</span><span class="lnt">208
+</span><span class="lnt">209
+</span><span class="lnt">210
+</span><span class="lnt">211
+</span><span class="lnt">212
+</span><span class="lnt">213
+</span><span class="lnt">214
+</span><span class="lnt">215
+</span><span class="lnt">216
+</span><span class="lnt">217
+</span><span class="lnt">218
+</span><span class="lnt">219
+</span><span class="lnt">220
+</span><span class="lnt">221
+</span><span class="lnt">222
+</span><span class="lnt">223
+</span><span class="lnt">224
+</span><span class="lnt">225
+</span><span class="lnt">226
+</span><span class="lnt">227
+</span><span class="lnt">228
+</span><span class="lnt">229
+</span><span class="lnt">230
+</span><span class="lnt">231
+</span><span class="lnt">232
+</span><span class="lnt">233
+</span><span class="lnt">234
+</span><span class="lnt">235
+</span><span class="lnt">236
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="kt">void</span> <span class="o">*</span>
+<span class="nf">ngx_slab_alloc_locked</span><span class="p">(</span><span class="n">ngx_slab_pool_t</span> <span class="o">*</span><span class="n">pool</span><span class="p">,</span> <span class="n">size_t</span> <span class="n">size</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">size_t</span>            <span class="n">s</span><span class="p">;</span>
+    <span class="n">uintptr_t</span>         <span class="n">p</span><span class="p">,</span> <span class="n">m</span><span class="p">,</span> <span class="n">mask</span><span class="p">,</span> <span class="o">*</span><span class="n">bitmap</span><span class="p">;</span>
+    <span class="n">ngx_uint_t</span>        <span class="n">i</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">slot</span><span class="p">,</span> <span class="n">shift</span><span class="p">,</span> <span class="n">map</span><span class="p">;</span>
+    <span class="n">ngx_slab_page_t</span>  <span class="o">*</span><span class="n">page</span><span class="p">,</span> <span class="o">*</span><span class="n">prev</span><span class="p">,</span> <span class="o">*</span><span class="n">slots</span><span class="p">;</span>
+    <span class="c1">// 超大对象直接分配页
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">size</span> <span class="o">&gt;</span> <span class="n">ngx_slab_max_size</span><span class="p">)</span> <span class="p">{</span>
+
+        <span class="n">ngx_log_debug1</span><span class="p">(</span><span class="n">NGX_LOG_DEBUG_ALLOC</span><span class="p">,</span> <span class="n">ngx_cycle</span><span class="o">-&gt;</span><span class="n">log</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>
+                       <span class="s">&#34;slab alloc: %uz&#34;</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
+
+        <span class="n">page</span> <span class="o">=</span> <span class="n">ngx_slab_alloc_pages</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="p">(</span><span class="n">size</span> <span class="o">&gt;&gt;</span> <span class="n">ngx_pagesize_shift</span><span class="p">)</span>
+                                          <span class="o">+</span> <span class="p">((</span><span class="n">size</span> <span class="o">%</span> <span class="n">ngx_pagesize</span><span class="p">)</span> <span class="o">?</span> <span class="mi">1</span> <span class="o">:</span> <span class="mi">0</span><span class="p">));</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">p</span> <span class="o">=</span> <span class="n">ngx_slab_page_addr</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">page</span><span class="p">);</span>
+
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="n">p</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="c1">// 小对象选择对应slot
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">size</span> <span class="o">&gt;</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">min_size</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">shift</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>
+        <span class="k">for</span> <span class="p">(</span><span class="n">s</span> <span class="o">=</span> <span class="n">size</span> <span class="o">-</span> <span class="mi">1</span><span class="p">;</span> <span class="n">s</span> <span class="o">&gt;&gt;=</span> <span class="mi">1</span><span class="p">;</span> <span class="n">shift</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span> <span class="cm">/* void */</span> <span class="p">}</span>
+        <span class="n">slot</span> <span class="o">=</span> <span class="n">shift</span> <span class="o">-</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">min_shift</span><span class="p">;</span>
+
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+        <span class="n">shift</span> <span class="o">=</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">min_shift</span><span class="p">;</span>
+        <span class="n">slot</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="c1">// 对应slot请求+1
+</span><span class="c1"></span>    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">reqs</span><span class="o">++</span><span class="p">;</span>
+
+    <span class="n">ngx_log_debug2</span><span class="p">(</span><span class="n">NGX_LOG_DEBUG_ALLOC</span><span class="p">,</span> <span class="n">ngx_cycle</span><span class="o">-&gt;</span><span class="n">log</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>
+                   <span class="s">&#34;slab alloc: %uz slot: %ui&#34;</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">slot</span><span class="p">);</span>
+
+    <span class="n">slots</span> <span class="o">=</span> <span class="n">ngx_slab_slots</span><span class="p">(</span><span class="n">pool</span><span class="p">);</span>
+    <span class="n">page</span> <span class="o">=</span> <span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">next</span><span class="p">;</span>   <span class="c1">// slot的链表
+</span><span class="c1"></span>    
+    <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">!=</span> <span class="n">page</span><span class="p">)</span> <span class="p">{</span>  <span class="c1">// 链表为空，跳到后面分配新的1页
+</span><span class="c1"></span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">shift</span> <span class="o">&lt;</span> <span class="n">ngx_slab_exact_shift</span><span class="p">)</span> <span class="p">{</span>  <span class="c1">// 需要使用页面开头部分空间作为bitmap
+</span><span class="c1"></span>
+            <span class="n">bitmap</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span> <span class="o">*</span><span class="p">)</span> <span class="n">ngx_slab_page_addr</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">page</span><span class="p">);</span> <span class="c1">// 页面开头是bitmap
+</span><span class="c1"></span>
+            <span class="n">map</span> <span class="o">=</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">&gt;&gt;</span> <span class="n">shift</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mi">8</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">uintptr_t</span><span class="p">));</span> <span class="c1">// 几个uintptr_t大小的map
+</span><span class="c1"></span>
+            <span class="k">for</span> <span class="p">(</span><span class="n">n</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">n</span> <span class="o">&lt;</span> <span class="n">map</span><span class="p">;</span> <span class="n">n</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>  <span class="c1">// 遍历寻找一个空闲的对象
+</span><span class="c1"></span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">bitmap</span><span class="p">[</span><span class="n">n</span><span class="p">]</span> <span class="o">!=</span> <span class="n">NGX_SLAB_BUSY</span><span class="p">)</span> <span class="p">{</span>  <span class="c1">// 当前bitmap块没有全置位
+</span><span class="c1"></span>
+                    <span class="k">for</span> <span class="p">(</span><span class="n">m</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">m</span><span class="p">;</span> <span class="n">m</span> <span class="o">&lt;&lt;=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+                        <span class="k">if</span> <span class="p">(</span><span class="n">bitmap</span><span class="p">[</span><span class="n">n</span><span class="p">]</span> <span class="o">&amp;</span> <span class="n">m</span><span class="p">)</span> <span class="p">{</span>
+                            <span class="k">continue</span><span class="p">;</span>
+                        <span class="p">}</span>
+                        <span class="c1">// 第n个map的第i位（从右往左数）
+</span><span class="c1"></span>                        <span class="n">bitmap</span><span class="p">[</span><span class="n">n</span><span class="p">]</span> <span class="o">|=</span> <span class="n">m</span><span class="p">;</span>
+                        <span class="c1">// 总共第几位 * 对象大小 = 对象地址关于页地址的偏移
+</span><span class="c1"></span>                        <span class="n">i</span> <span class="o">=</span> <span class="p">(</span><span class="n">n</span> <span class="o">*</span> <span class="mi">8</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="o">+</span> <span class="n">i</span><span class="p">)</span> <span class="o">&lt;&lt;</span> <span class="n">shift</span><span class="p">;</span>
+
+                        <span class="n">p</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">bitmap</span> <span class="o">+</span> <span class="n">i</span><span class="p">;</span> <span class="c1">// p为对象地址
+</span><span class="c1"></span>
+                        <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">used</span><span class="o">++</span><span class="p">;</span>   <span class="c1">// 正在使用的+1
+</span><span class="c1"></span>                        <span class="c1">// 如果当前bitmap满了，检查后面的是否都满了
+</span><span class="c1"></span>                        <span class="k">if</span> <span class="p">(</span><span class="n">bitmap</span><span class="p">[</span><span class="n">n</span><span class="p">]</span> <span class="o">==</span> <span class="n">NGX_SLAB_BUSY</span><span class="p">)</span> <span class="p">{</span>
+                            <span class="k">for</span> <span class="p">(</span><span class="n">n</span> <span class="o">=</span> <span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span> <span class="n">n</span> <span class="o">&lt;</span> <span class="n">map</span><span class="p">;</span> <span class="n">n</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+                                <span class="k">if</span> <span class="p">(</span><span class="n">bitmap</span><span class="p">[</span><span class="n">n</span><span class="p">]</span> <span class="o">!=</span> <span class="n">NGX_SLAB_BUSY</span><span class="p">)</span> <span class="p">{</span>
+                                    <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+                                <span class="p">}</span>
+                            <span class="p">}</span>
+                            <span class="c1">// 如果整个页都用完了，将其从slot链表中移除
+</span><span class="c1"></span>                            <span class="n">prev</span> <span class="o">=</span> <span class="n">ngx_slab_page_prev</span><span class="p">(</span><span class="n">page</span><span class="p">);</span>
+                            <span class="n">prev</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="p">;</span>
+                            <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span><span class="p">;</span>
+
+                            <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+                            <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">NGX_SLAB_SMALL</span><span class="p">;</span>
+                        <span class="p">}</span>
+
+                        <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+                    <span class="p">}</span>
+                <span class="p">}</span>
+            <span class="p">}</span>
+
+        <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">shift</span> <span class="o">==</span> <span class="n">ngx_slab_exact_shift</span><span class="p">)</span> <span class="p">{</span> <span class="c1">// 页面头中的slab正好作为bimap
+</span><span class="c1"></span>
+            <span class="k">for</span> <span class="p">(</span><span class="n">m</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">m</span><span class="p">;</span> <span class="n">m</span> <span class="o">&lt;&lt;=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">&amp;</span> <span class="n">m</span><span class="p">)</span> <span class="p">{</span>
+                    <span class="k">continue</span><span class="p">;</span>
+                <span class="p">}</span>
+
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">|=</span> <span class="n">m</span><span class="p">;</span>  <span class="c1">// 置位
+</span><span class="c1"></span>                <span class="c1">// 该页如果满了，移出slot链表
+</span><span class="c1"></span>                <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">==</span> <span class="n">NGX_SLAB_BUSY</span><span class="p">)</span> <span class="p">{</span>
+                    <span class="n">prev</span> <span class="o">=</span> <span class="n">ngx_slab_page_prev</span><span class="p">(</span><span class="n">page</span><span class="p">);</span>
+                    <span class="n">prev</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="p">;</span>
+                    <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span><span class="p">;</span>
+
+                    <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+                    <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">NGX_SLAB_EXACT</span><span class="p">;</span>
+                <span class="p">}</span>
+                <span class="c1">// 获取对象地址
+</span><span class="c1"></span>                <span class="n">p</span> <span class="o">=</span> <span class="n">ngx_slab_page_addr</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">page</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span><span class="n">i</span> <span class="o">&lt;&lt;</span> <span class="n">shift</span><span class="p">);</span>
+
+                <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">used</span><span class="o">++</span><span class="p">;</span>
+
+                <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+            <span class="p">}</span>
+
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span> <span class="cm">/* shift &gt; ngx_slab_exact_shift */</span>
+            <span class="c1">// 111...11，1页对象个数个1
+</span><span class="c1"></span>            <span class="n">mask</span> <span class="o">=</span> <span class="p">((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">&gt;&gt;</span> <span class="n">shift</span><span class="p">))</span> <span class="o">-</span> <span class="mi">1</span><span class="p">;</span>
+            <span class="n">mask</span> <span class="o">&lt;&lt;=</span> <span class="n">NGX_SLAB_MAP_SHIFT</span><span class="p">;</span>  <span class="c1">// 移到高位上，为啥? 因为低位还要记录shift。为啥需要记录shift，因为在释放对象的时候需要知道大小
+</span><span class="c1"></span>
+            <span class="k">for</span> <span class="p">(</span><span class="n">m</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="n">NGX_SLAB_MAP_SHIFT</span><span class="p">,</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+                 <span class="n">m</span> <span class="o">&amp;</span> <span class="n">mask</span><span class="p">;</span>
+                 <span class="n">m</span> <span class="o">&lt;&lt;=</span> <span class="mi">1</span><span class="p">,</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span>
+            <span class="p">{</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">&amp;</span> <span class="n">m</span><span class="p">)</span> <span class="p">{</span>
+                    <span class="k">continue</span><span class="p">;</span>
+                <span class="p">}</span>
+
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">|=</span> <span class="n">m</span><span class="p">;</span>  <span class="c1">// 置位
+</span><span class="c1"></span>                <span class="c1">// 该页如果满了，移出slot链表
+</span><span class="c1"></span>                <span class="k">if</span> <span class="p">((</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">&amp;</span> <span class="n">NGX_SLAB_MAP_MASK</span><span class="p">)</span> <span class="o">==</span> <span class="n">mask</span><span class="p">)</span> <span class="p">{</span>
+                    <span class="n">prev</span> <span class="o">=</span> <span class="n">ngx_slab_page_prev</span><span class="p">(</span><span class="n">page</span><span class="p">);</span>
+                    <span class="n">prev</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="p">;</span>
+                    <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span><span class="p">;</span>
+
+                    <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+                    <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">NGX_SLAB_BIG</span><span class="p">;</span>
+                <span class="p">}</span>
+
+                <span class="n">p</span> <span class="o">=</span> <span class="n">ngx_slab_page_addr</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">page</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span><span class="n">i</span> <span class="o">&lt;&lt;</span> <span class="n">shift</span><span class="p">);</span>
+
+                <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">used</span><span class="o">++</span><span class="p">;</span>
+
+                <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+
+        <span class="n">ngx_slab_error</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">NGX_LOG_ALERT</span><span class="p">,</span> <span class="s">&#34;ngx_slab_alloc(): page is busy&#34;</span><span class="p">);</span>
+        <span class="n">ngx_debug_point</span><span class="p">();</span>
+    <span class="p">}</span>
+    <span class="c1">// 分配新页
+</span><span class="c1"></span>    <span class="n">page</span> <span class="o">=</span> <span class="n">ngx_slab_alloc_pages</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">shift</span> <span class="o">&lt;</span> <span class="n">ngx_slab_exact_shift</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">bitmap</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span> <span class="o">*</span><span class="p">)</span> <span class="n">ngx_slab_page_addr</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">page</span><span class="p">);</span>
+            <span class="c1">// 计算需要开头几个对象作为bitmap: n = 1页对象个数 / 1个对象位数
+</span><span class="c1"></span>            <span class="n">n</span> <span class="o">=</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">&gt;&gt;</span> <span class="n">shift</span><span class="p">)</span> <span class="o">/</span> <span class="p">((</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="n">shift</span><span class="p">)</span> <span class="o">*</span> <span class="mi">8</span><span class="p">);</span>
+            <span class="c1">// 不满1个对象，使用1对象
+</span><span class="c1"></span>            <span class="k">if</span> <span class="p">(</span><span class="n">n</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">n</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>
+            <span class="p">}</span>
+            <span class="c1">// 接下来初始化bitmap，将bitmap本身占用的对象置1，将申请的目标对象置1
+</span><span class="c1"></span>            <span class="cm">/* &#34;n&#34; elements for bitmap, plus one requested */</span>
+
+            <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="p">(</span><span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mi">8</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">uintptr_t</span><span class="p">));</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">bitmap</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">NGX_SLAB_BUSY</span><span class="p">;</span>
+            <span class="p">}</span>
+            <span class="c1">// 不满一个bitmap的部分置1
+</span><span class="c1"></span>            <span class="n">m</span> <span class="o">=</span> <span class="p">((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="p">((</span><span class="n">n</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">%</span> <span class="p">(</span><span class="mi">8</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">uintptr_t</span><span class="p">))))</span> <span class="o">-</span> <span class="mi">1</span><span class="p">;</span>
+            <span class="n">bitmap</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">m</span><span class="p">;</span>
+            <span class="c1">// 剩余bitmap置0
+</span><span class="c1"></span>            <span class="n">map</span> <span class="o">=</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">&gt;&gt;</span> <span class="n">shift</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mi">8</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">uintptr_t</span><span class="p">));</span>
+
+            <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">map</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">bitmap</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+            <span class="p">}</span>
+
+            <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">=</span> <span class="n">shift</span><span class="p">;</span>  <span class="c1">// slab记录shift
+</span><span class="c1"></span>            <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">];</span> <span class="c1">// 插入slot链表头
+</span><span class="c1"></span>            <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">]</span> <span class="o">|</span> <span class="n">NGX_SLAB_SMALL</span><span class="p">;</span>
+
+            <span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="p">;</span>
+            <span class="c1">// 增加该slot总对象数（不包括bitmap本身占用的对象）
+</span><span class="c1"></span>            <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">total</span> <span class="o">+=</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">&gt;&gt;</span> <span class="n">shift</span><span class="p">)</span> <span class="o">-</span> <span class="n">n</span><span class="p">;</span>
+
+            <span class="n">p</span> <span class="o">=</span> <span class="n">ngx_slab_page_addr</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">page</span><span class="p">)</span> <span class="o">+</span> <span class="p">(</span><span class="n">n</span> <span class="o">&lt;&lt;</span> <span class="n">shift</span><span class="p">);</span>
+
+            <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">used</span><span class="o">++</span><span class="p">;</span>
+
+            <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+
+        <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="n">shift</span> <span class="o">==</span> <span class="n">ngx_slab_exact_shift</span><span class="p">)</span> <span class="p">{</span>
+
+            <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>  <span class="c1">// 申请的对象置位
+</span><span class="c1"></span>            <span class="c1">// 插入slot链表头
+</span><span class="c1"></span>            <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">];</span>
+            <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">]</span> <span class="o">|</span> <span class="n">NGX_SLAB_EXACT</span><span class="p">;</span>
+
+            <span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="p">;</span>
+            <span class="c1">// 增加该slot总对象数
+</span><span class="c1"></span>            <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">total</span> <span class="o">+=</span> <span class="mi">8</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">uintptr_t</span><span class="p">);</span>
+
+            <span class="n">p</span> <span class="o">=</span> <span class="n">ngx_slab_page_addr</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">page</span><span class="p">);</span>
+
+            <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">used</span><span class="o">++</span><span class="p">;</span>
+
+            <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+
+        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span> <span class="cm">/* shift &gt; ngx_slab_exact_shift */</span>
+            <span class="c1">// 高位申请的对象置位 + 低位记录shift
+</span><span class="c1"></span>            <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">=</span> <span class="p">((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="n">NGX_SLAB_MAP_SHIFT</span><span class="p">)</span> <span class="o">|</span> <span class="n">shift</span><span class="p">;</span>
+            <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">];</span>
+            <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">]</span> <span class="o">|</span> <span class="n">NGX_SLAB_BIG</span><span class="p">;</span>
+
+            <span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="p">;</span>
+
+            <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">total</span> <span class="o">+=</span> <span class="n">ngx_pagesize</span> <span class="o">&gt;&gt;</span> <span class="n">shift</span><span class="p">;</span>
+
+            <span class="n">p</span> <span class="o">=</span> <span class="n">ngx_slab_page_addr</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">page</span><span class="p">);</span>
+
+            <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">used</span><span class="o">++</span><span class="p">;</span>
+
+            <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="n">p</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">fails</span><span class="o">++</span><span class="p">;</span>  <span class="c1">// 分配对象失败次数
+</span><span class="c1"></span>
+<span class="nl">done</span><span class="p">:</span>
+
+    <span class="n">ngx_log_debug1</span><span class="p">(</span><span class="n">NGX_LOG_DEBUG_ALLOC</span><span class="p">,</span> <span class="n">ngx_cycle</span><span class="o">-&gt;</span><span class="n">log</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>
+                   <span class="s">&#34;slab alloc: %p&#34;</span><span class="p">,</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span> <span class="n">p</span><span class="p">);</span>
+
+    <span class="k">return</span> <span class="p">(</span><span class="kt">void</span> <span class="o">*</span><span class="p">)</span> <span class="n">p</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="logic-for-releasing">Logic for releasing</h2>
+<h3 id="release-pages">Release pages</h3>
+<p>If it is releasing multiple pages, zero out all subsequent page headers. If it is a slot page, remove it from the slot linkedlist. Then try to merge the pages before and after, thus forming a larger contiguous page. After the merge is complete, insert it into the free page block linkedlist.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="k">static</span> <span class="kt">void</span>
+<span class="nf">ngx_slab_free_pages</span><span class="p">(</span><span class="n">ngx_slab_pool_t</span> <span class="o">*</span><span class="n">pool</span><span class="p">,</span> <span class="n">ngx_slab_page_t</span> <span class="o">*</span><span class="n">page</span><span class="p">,</span>
+    <span class="n">ngx_uint_t</span> <span class="n">pages</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">ngx_slab_page_t</span>  <span class="o">*</span><span class="n">prev</span><span class="p">,</span> <span class="o">*</span><span class="n">join</span><span class="p">;</span>
+
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">pfree</span> <span class="o">+=</span> <span class="n">pages</span><span class="p">;</span>
+
+    <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">=</span> <span class="n">pages</span><span class="o">--</span><span class="p">;</span>
+    <span class="c1">// 第二页开始的页面头都清零
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">pages</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">ngx_memzero</span><span class="p">(</span><span class="o">&amp;</span><span class="n">page</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="n">pages</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">ngx_slab_page_t</span><span class="p">));</span>
+    <span class="p">}</span>
+    <span class="c1">// next不都等于NULL么? 不等于NULL表示是slot页，将其从slot链表中移除 
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">prev</span> <span class="o">=</span> <span class="n">ngx_slab_page_prev</span><span class="p">(</span><span class="n">page</span><span class="p">);</span>
+        <span class="n">prev</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="p">;</span>
+        <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="c1">// 尝试合并后面的页面
+</span><span class="c1"></span>    <span class="n">join</span> <span class="o">=</span> <span class="n">page</span> <span class="o">+</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span><span class="p">;</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">join</span> <span class="o">&lt;</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">last</span><span class="p">)</span> <span class="p">{</span>  <span class="c1">// 检查后面是否还有页
+</span><span class="c1"></span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">ngx_slab_page_type</span><span class="p">(</span><span class="n">join</span><span class="p">)</span> <span class="o">==</span> <span class="n">NGX_SLAB_PAGE</span><span class="p">)</span> <span class="p">{</span>  <span class="c1">// 是整页
+</span><span class="c1"></span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">join</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">!=</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>            <span class="c1">// 在空闲页链表中
+</span><span class="c1"></span>                <span class="n">pages</span> <span class="o">+=</span> <span class="n">join</span><span class="o">-&gt;</span><span class="n">slab</span><span class="p">;</span>             <span class="c1">// 加上合并块的页数
+</span><span class="c1"></span>                <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">+=</span> <span class="n">join</span><span class="o">-&gt;</span><span class="n">slab</span><span class="p">;</span>        <span class="c1">// 增加页块大小
+</span><span class="c1"></span>                <span class="c1">// 将join块从空闲链表中移除
+</span><span class="c1"></span>                <span class="n">prev</span> <span class="o">=</span> <span class="n">ngx_slab_page_prev</span><span class="p">(</span><span class="n">join</span><span class="p">);</span>
+                <span class="n">prev</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">join</span><span class="o">-&gt;</span><span class="n">next</span><span class="p">;</span>
+                <span class="n">join</span><span class="o">-&gt;</span><span class="n">next</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">join</span><span class="o">-&gt;</span><span class="n">prev</span><span class="p">;</span>
+                <span class="c1">// 清理页块头，恢复指针和标志
+</span><span class="c1"></span>                <span class="n">join</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">=</span> <span class="n">NGX_SLAB_PAGE_FREE</span><span class="p">;</span>
+                <span class="n">join</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+                <span class="n">join</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">NGX_SLAB_PAGE</span><span class="p">;</span>
+            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="c1">// 尝试合并前面的页
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">page</span> <span class="o">&gt;</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">pages</span><span class="p">)</span> <span class="p">{</span>  <span class="c1">// 前面还有页
+</span><span class="c1"></span>        <span class="n">join</span> <span class="o">=</span> <span class="n">page</span> <span class="o">-</span> <span class="mi">1</span><span class="p">;</span>       <span class="c1">// join指向被释放页的前一页
+</span><span class="c1"></span>
+        <span class="k">if</span> <span class="p">(</span><span class="n">ngx_slab_page_type</span><span class="p">(</span><span class="n">join</span><span class="p">)</span> <span class="o">==</span> <span class="n">NGX_SLAB_PAGE</span><span class="p">)</span> <span class="p">{</span>  <span class="c1">// 是整页
+</span><span class="c1"></span>
+            <span class="k">if</span> <span class="p">(</span><span class="n">join</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">==</span> <span class="n">NGX_SLAB_PAGE_FREE</span><span class="p">)</span> <span class="p">{</span>  <span class="c1">// 不是页块头
+</span><span class="c1"></span>                <span class="n">join</span> <span class="o">=</span> <span class="n">ngx_slab_page_prev</span><span class="p">(</span><span class="n">join</span><span class="p">);</span>     <span class="c1">// join指向页块头
+</span><span class="c1"></span>            <span class="p">}</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="n">join</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">!=</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>            <span class="c1">// 在空闲链表中
+</span><span class="c1"></span>                <span class="n">pages</span> <span class="o">+=</span> <span class="n">join</span><span class="o">-&gt;</span><span class="n">slab</span><span class="p">;</span>             <span class="c1">// 加上合并块的页数
+</span><span class="c1"></span>                <span class="n">join</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">+=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span><span class="p">;</span>        <span class="c1">// 增加页块大小
+</span><span class="c1"></span>                <span class="c1">// 将join块从空闲链表中移除
+</span><span class="c1"></span>                <span class="n">prev</span> <span class="o">=</span> <span class="n">ngx_slab_page_prev</span><span class="p">(</span><span class="n">join</span><span class="p">);</span>
+                <span class="n">prev</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">join</span><span class="o">-&gt;</span><span class="n">next</span><span class="p">;</span>
+                <span class="n">join</span><span class="o">-&gt;</span><span class="n">next</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">join</span><span class="o">-&gt;</span><span class="n">prev</span><span class="p">;</span>
+                <span class="c1">// 清理页块头，恢复指针和标志
+</span><span class="c1"></span>                <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">=</span> <span class="n">NGX_SLAB_PAGE_FREE</span><span class="p">;</span>
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="n">NGX_SLAB_PAGE</span><span class="p">;</span>
+
+                <span class="n">page</span> <span class="o">=</span> <span class="n">join</span><span class="p">;</span>     <span class="c1">// 更新页块头
+</span><span class="c1"></span>            <span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="c1">// 如果页块大于1页，将最后一页的prev指向页块头，合并时用
+</span><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">pages</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">page</span><span class="p">[</span><span class="n">pages</span><span class="p">].</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">page</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="c1">// 将页块插入空闲页链表头
+</span><span class="c1"></span>    <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">pool</span><span class="o">-&gt;</span><span class="n">free</span><span class="p">;</span>
+    <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">free</span><span class="p">.</span><span class="n">next</span><span class="p">;</span>
+
+    <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">page</span><span class="p">;</span>
+
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">free</span><span class="p">.</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="release-the-object">Release the object</h3>
+<p>First get the corresponding page header and the corresponding page information according to the object pointer, and then do different processing according to the page type. For the slot object, the corresponding bit bit is reset. If the page is full before releasing the object, the page is reinserted into the slot half-full chain. If the page is empty after releasing the object, the page is released.</p>
+<p>If you already understand the allocation logic, then the release logic should be well understood.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span><span class="lnt">109
+</span><span class="lnt">110
+</span><span class="lnt">111
+</span><span class="lnt">112
+</span><span class="lnt">113
+</span><span class="lnt">114
+</span><span class="lnt">115
+</span><span class="lnt">116
+</span><span class="lnt">117
+</span><span class="lnt">118
+</span><span class="lnt">119
+</span><span class="lnt">120
+</span><span class="lnt">121
+</span><span class="lnt">122
+</span><span class="lnt">123
+</span><span class="lnt">124
+</span><span class="lnt">125
+</span><span class="lnt">126
+</span><span class="lnt">127
+</span><span class="lnt">128
+</span><span class="lnt">129
+</span><span class="lnt">130
+</span><span class="lnt">131
+</span><span class="lnt">132
+</span><span class="lnt">133
+</span><span class="lnt">134
+</span><span class="lnt">135
+</span><span class="lnt">136
+</span><span class="lnt">137
+</span><span class="lnt">138
+</span><span class="lnt">139
+</span><span class="lnt">140
+</span><span class="lnt">141
+</span><span class="lnt">142
+</span><span class="lnt">143
+</span><span class="lnt">144
+</span><span class="lnt">145
+</span><span class="lnt">146
+</span><span class="lnt">147
+</span><span class="lnt">148
+</span><span class="lnt">149
+</span><span class="lnt">150
+</span><span class="lnt">151
+</span><span class="lnt">152
+</span><span class="lnt">153
+</span><span class="lnt">154
+</span><span class="lnt">155
+</span><span class="lnt">156
+</span><span class="lnt">157
+</span><span class="lnt">158
+</span><span class="lnt">159
+</span><span class="lnt">160
+</span><span class="lnt">161
+</span><span class="lnt">162
+</span><span class="lnt">163
+</span><span class="lnt">164
+</span><span class="lnt">165
+</span><span class="lnt">166
+</span><span class="lnt">167
+</span><span class="lnt">168
+</span><span class="lnt">169
+</span><span class="lnt">170
+</span><span class="lnt">171
+</span><span class="lnt">172
+</span><span class="lnt">173
+</span><span class="lnt">174
+</span><span class="lnt">175
+</span><span class="lnt">176
+</span><span class="lnt">177
+</span><span class="lnt">178
+</span><span class="lnt">179
+</span><span class="lnt">180
+</span><span class="lnt">181
+</span><span class="lnt">182
+</span><span class="lnt">183
+</span><span class="lnt">184
+</span><span class="lnt">185
+</span><span class="lnt">186
+</span><span class="lnt">187
+</span><span class="lnt">188
+</span><span class="lnt">189
+</span><span class="lnt">190
+</span><span class="lnt">191
+</span><span class="lnt">192
+</span><span class="lnt">193
+</span><span class="lnt">194
+</span><span class="lnt">195
+</span><span class="lnt">196
+</span><span class="lnt">197
+</span><span class="lnt">198
+</span><span class="lnt">199
+</span><span class="lnt">200
+</span><span class="lnt">201
+</span><span class="lnt">202
+</span><span class="lnt">203
+</span><span class="lnt">204
+</span><span class="lnt">205
+</span><span class="lnt">206
+</span><span class="lnt">207
+</span><span class="lnt">208
+</span><span class="lnt">209
+</span><span class="lnt">210
+</span><span class="lnt">211
+</span><span class="lnt">212
+</span><span class="lnt">213
+</span><span class="lnt">214
+</span><span class="lnt">215
+</span><span class="lnt">216
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="kt">void</span>
+<span class="nf">ngx_slab_free_locked</span><span class="p">(</span><span class="n">ngx_slab_pool_t</span> <span class="o">*</span><span class="n">pool</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">p</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">size_t</span>            <span class="n">size</span><span class="p">;</span>
+    <span class="n">uintptr_t</span>         <span class="n">slab</span><span class="p">,</span> <span class="n">m</span><span class="p">,</span> <span class="o">*</span><span class="n">bitmap</span><span class="p">;</span>
+    <span class="n">ngx_uint_t</span>        <span class="n">i</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">type</span><span class="p">,</span> <span class="n">slot</span><span class="p">,</span> <span class="n">shift</span><span class="p">,</span> <span class="n">map</span><span class="p">;</span>
+    <span class="n">ngx_slab_page_t</span>  <span class="o">*</span><span class="n">slots</span><span class="p">,</span> <span class="o">*</span><span class="n">page</span><span class="p">;</span>
+
+    <span class="n">ngx_log_debug1</span><span class="p">(</span><span class="n">NGX_LOG_DEBUG_ALLOC</span><span class="p">,</span> <span class="n">ngx_cycle</span><span class="o">-&gt;</span><span class="n">log</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s">&#34;slab free: %p&#34;</span><span class="p">,</span> <span class="n">p</span><span class="p">);</span>
+
+    <span class="k">if</span> <span class="p">((</span><span class="n">u_char</span> <span class="o">*</span><span class="p">)</span> <span class="n">p</span> <span class="o">&lt;</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">start</span> <span class="o">||</span> <span class="p">(</span><span class="n">u_char</span> <span class="o">*</span><span class="p">)</span> <span class="n">p</span> <span class="o">&gt;</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">end</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">ngx_slab_error</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">NGX_LOG_ALERT</span><span class="p">,</span> <span class="s">&#34;ngx_slab_free(): outside of pool&#34;</span><span class="p">);</span>
+        <span class="k">goto</span> <span class="n">fail</span><span class="p">;</span>
+    <span class="p">}</span>
+    <span class="c1">// 计算释放的指针在第几页
+</span><span class="c1"></span>    <span class="n">n</span> <span class="o">=</span> <span class="p">((</span><span class="n">u_char</span> <span class="o">*</span><span class="p">)</span> <span class="n">p</span> <span class="o">-</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">start</span><span class="p">)</span> <span class="o">&gt;&gt;</span> <span class="n">ngx_pagesize_shift</span><span class="p">;</span>
+    <span class="n">page</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">pool</span><span class="o">-&gt;</span><span class="n">pages</span><span class="p">[</span><span class="n">n</span><span class="p">];</span>  <span class="c1">// 获取对应页面头
+</span><span class="c1"></span>    <span class="n">slab</span> <span class="o">=</span> <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span><span class="p">;</span>
+    <span class="n">type</span> <span class="o">=</span> <span class="n">ngx_slab_page_type</span><span class="p">(</span><span class="n">page</span><span class="p">);</span>
+
+    <span class="k">switch</span> <span class="p">(</span><span class="n">type</span><span class="p">)</span> <span class="p">{</span>
+
+    <span class="k">case</span> <span class="nl">NGX_SLAB_SMALL</span><span class="p">:</span>
+
+        <span class="n">shift</span> <span class="o">=</span> <span class="n">slab</span> <span class="o">&amp;</span> <span class="n">NGX_SLAB_SHIFT_MASK</span><span class="p">;</span>
+        <span class="n">size</span> <span class="o">=</span> <span class="p">(</span><span class="n">size_t</span><span class="p">)</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="n">shift</span><span class="p">;</span>
+        <span class="c1">// 检查指针是否对象对齐
+</span><span class="c1"></span>        <span class="k">if</span> <span class="p">((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">size</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span> <span class="p">{</span>
+            <span class="k">goto</span> <span class="n">wrong_chunk</span><span class="p">;</span>
+        <span class="p">}</span>
+        <span class="c1">// 第几个对象: n = 页中的偏移 / 对象大小
+</span><span class="c1"></span>        <span class="n">n</span> <span class="o">=</span> <span class="p">((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span> <span class="o">&gt;&gt;</span> <span class="n">shift</span><span class="p">;</span>
+        <span class="n">m</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="p">(</span><span class="n">n</span> <span class="o">%</span> <span class="p">(</span><span class="mi">8</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">uintptr_t</span><span class="p">)));</span>
+        <span class="n">n</span> <span class="o">/=</span> <span class="mi">8</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">uintptr_t</span><span class="p">);</span>
+        <span class="n">bitmap</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span> <span class="o">*</span><span class="p">)</span>
+                             <span class="p">((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">p</span> <span class="o">&amp;</span> <span class="o">~</span><span class="p">((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">ngx_pagesize</span> <span class="o">-</span> <span class="mi">1</span><span class="p">));</span>  <span class="c1">// 页起始地址，获取bitmap
+</span><span class="c1"></span>      <span class="c1">// 第n个bitmap的m位
+</span><span class="c1"></span>        <span class="k">if</span> <span class="p">(</span><span class="n">bitmap</span><span class="p">[</span><span class="n">n</span><span class="p">]</span> <span class="o">&amp;</span> <span class="n">m</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">slot</span> <span class="o">=</span> <span class="n">shift</span> <span class="o">-</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">min_shift</span><span class="p">;</span>
+            <span class="c1">// 如果当前页不在slot链表中（即释放前是满的），重新加回链表
+</span><span class="c1"></span>            <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">slots</span> <span class="o">=</span> <span class="n">ngx_slab_slots</span><span class="p">(</span><span class="n">pool</span><span class="p">);</span>
+
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">next</span><span class="p">;</span>
+                <span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="p">;</span>
+
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">]</span> <span class="o">|</span> <span class="n">NGX_SLAB_SMALL</span><span class="p">;</span>
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">page</span> <span class="o">|</span> <span class="n">NGX_SLAB_SMALL</span><span class="p">;</span>
+            <span class="p">}</span>
+            <span class="c1">// 清bit位
+</span><span class="c1"></span>            <span class="n">bitmap</span><span class="p">[</span><span class="n">n</span><span class="p">]</span> <span class="o">&amp;=</span> <span class="o">~</span><span class="n">m</span><span class="p">;</span>
+            <span class="c1">// 计算需要开头几个对象作为bitmap: n = 1页对象个数 / 1个对象位数
+</span><span class="c1"></span>            <span class="n">n</span> <span class="o">=</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">&gt;&gt;</span> <span class="n">shift</span><span class="p">)</span> <span class="o">/</span> <span class="p">((</span><span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="n">shift</span><span class="p">)</span> <span class="o">*</span> <span class="mi">8</span><span class="p">);</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="n">n</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">n</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>
+            <span class="p">}</span>
+            <span class="c1">// 接下来检查除了bitmap本身占用的对象外，是否还有其他对象
+</span><span class="c1"></span>            <span class="c1">// 已经被bitmap占满的uintptr_t不用检查，对于bitmap对象和实际数据对象混用的uintptr_t需要unmask掉bitmap的部分
+</span><span class="c1"></span>            <span class="n">i</span> <span class="o">=</span> <span class="n">n</span> <span class="o">/</span> <span class="p">(</span><span class="mi">8</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">uintptr_t</span><span class="p">));</span>
+            <span class="n">m</span> <span class="o">=</span> <span class="p">((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="p">(</span><span class="n">n</span> <span class="o">%</span> <span class="p">(</span><span class="mi">8</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">uintptr_t</span><span class="p">))))</span> <span class="o">-</span> <span class="mi">1</span><span class="p">;</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="n">bitmap</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">&amp;</span> <span class="o">~</span><span class="n">m</span><span class="p">)</span> <span class="p">{</span>
+                <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+            <span class="p">}</span>
+            <span class="c1">// map = 多少个uintptr_t大小的map
+</span><span class="c1"></span>            <span class="n">map</span> <span class="o">=</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">&gt;&gt;</span> <span class="n">shift</span><span class="p">)</span> <span class="o">/</span> <span class="p">(</span><span class="mi">8</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">uintptr_t</span><span class="p">));</span>
+
+            <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">map</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+                <span class="k">if</span> <span class="p">(</span><span class="n">bitmap</span><span class="p">[</span><span class="n">i</span><span class="p">])</span> <span class="p">{</span>
+                    <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+                <span class="p">}</span>
+            <span class="p">}</span>
+            <span class="c1">// 如果空了，就释放该页
+</span><span class="c1"></span>            <span class="n">ngx_slab_free_pages</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">page</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>
+            <span class="c1">// 减去slot的对象个数
+</span><span class="c1"></span>            <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">total</span> <span class="o">-=</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">&gt;&gt;</span> <span class="n">shift</span><span class="p">)</span> <span class="o">-</span> <span class="n">n</span><span class="p">;</span>
+
+            <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="k">goto</span> <span class="n">chunk_already_free</span><span class="p">;</span>
+
+    <span class="k">case</span> <span class="nl">NGX_SLAB_EXACT</span><span class="p">:</span>
+
+        <span class="n">m</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span>
+                <span class="p">(((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span> <span class="o">&gt;&gt;</span> <span class="n">ngx_slab_exact_shift</span><span class="p">);</span>  <span class="c1">// 目标对象对应的位
+</span><span class="c1"></span>        <span class="n">size</span> <span class="o">=</span> <span class="n">ngx_slab_exact_size</span><span class="p">;</span>
+        <span class="c1">// 检查对齐
+</span><span class="c1"></span>        <span class="k">if</span> <span class="p">((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">size</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span> <span class="p">{</span>
+            <span class="k">goto</span> <span class="n">wrong_chunk</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">slab</span> <span class="o">&amp;</span> <span class="n">m</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">slot</span> <span class="o">=</span> <span class="n">ngx_slab_exact_shift</span> <span class="o">-</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">min_shift</span><span class="p">;</span>
+
+            <span class="k">if</span> <span class="p">(</span><span class="n">slab</span> <span class="o">==</span> <span class="n">NGX_SLAB_BUSY</span><span class="p">)</span> <span class="p">{</span>  <span class="c1">// bitmap是满的，重新加入链表
+</span><span class="c1"></span>                <span class="n">slots</span> <span class="o">=</span> <span class="n">ngx_slab_slots</span><span class="p">(</span><span class="n">pool</span><span class="p">);</span>
+
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">next</span><span class="p">;</span>
+                <span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="p">;</span>
+
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">]</span> <span class="o">|</span> <span class="n">NGX_SLAB_EXACT</span><span class="p">;</span>
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">page</span> <span class="o">|</span> <span class="n">NGX_SLAB_EXACT</span><span class="p">;</span>
+            <span class="p">}</span>
+
+            <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">&amp;=</span> <span class="o">~</span><span class="n">m</span><span class="p">;</span>  <span class="c1">// 清bit位
+</span><span class="c1"></span>            <span class="c1">// 如果空了，就释放该页
+</span><span class="c1"></span>            <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span><span class="p">)</span> <span class="p">{</span>
+                <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+            <span class="p">}</span>
+
+            <span class="n">ngx_slab_free_pages</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">page</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>
+
+            <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">total</span> <span class="o">-=</span> <span class="mi">8</span> <span class="o">*</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">uintptr_t</span><span class="p">);</span>
+
+            <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="k">goto</span> <span class="n">chunk_already_free</span><span class="p">;</span>
+
+    <span class="k">case</span> <span class="nl">NGX_SLAB_BIG</span><span class="p">:</span>
+
+        <span class="n">shift</span> <span class="o">=</span> <span class="n">slab</span> <span class="o">&amp;</span> <span class="n">NGX_SLAB_SHIFT_MASK</span><span class="p">;</span>
+        <span class="n">size</span> <span class="o">=</span> <span class="p">(</span><span class="n">size_t</span><span class="p">)</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="n">shift</span><span class="p">;</span>
+
+        <span class="k">if</span> <span class="p">((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">size</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span> <span class="p">{</span>
+            <span class="k">goto</span> <span class="n">wrong_chunk</span><span class="p">;</span>
+        <span class="p">}</span>
+        <span class="c1">// 目标对象对应的位
+</span><span class="c1"></span>        <span class="n">m</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="p">((((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span> <span class="o">&gt;&gt;</span> <span class="n">shift</span><span class="p">)</span>
+                              <span class="o">+</span> <span class="n">NGX_SLAB_MAP_SHIFT</span><span class="p">);</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">slab</span> <span class="o">&amp;</span> <span class="n">m</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">slot</span> <span class="o">=</span> <span class="n">shift</span> <span class="o">-</span> <span class="n">pool</span><span class="o">-&gt;</span><span class="n">min_shift</span><span class="p">;</span>
+            <span class="c1">// 如果当前页不在slot链表中（即释放前是满的），重新加回链表
+</span><span class="c1"></span>            <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>
+                <span class="n">slots</span> <span class="o">=</span> <span class="n">ngx_slab_slots</span><span class="p">(</span><span class="n">pool</span><span class="p">);</span>
+
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">next</span><span class="p">;</span>
+                <span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">next</span> <span class="o">=</span> <span class="n">page</span><span class="p">;</span>
+
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="o">&amp;</span><span class="n">slots</span><span class="p">[</span><span class="n">slot</span><span class="p">]</span> <span class="o">|</span> <span class="n">NGX_SLAB_BIG</span><span class="p">;</span>
+                <span class="n">page</span><span class="o">-&gt;</span><span class="n">next</span><span class="o">-&gt;</span><span class="n">prev</span> <span class="o">=</span> <span class="p">(</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">page</span> <span class="o">|</span> <span class="n">NGX_SLAB_BIG</span><span class="p">;</span>
+            <span class="p">}</span>
+
+            <span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">&amp;=</span> <span class="o">~</span><span class="n">m</span><span class="p">;</span>
+            <span class="c1">// 如果空了，就释放该页
+</span><span class="c1"></span>            <span class="k">if</span> <span class="p">(</span><span class="n">page</span><span class="o">-&gt;</span><span class="n">slab</span> <span class="o">&amp;</span> <span class="n">NGX_SLAB_MAP_MASK</span><span class="p">)</span> <span class="p">{</span>
+                <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+            <span class="p">}</span>
+
+            <span class="n">ngx_slab_free_pages</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">page</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>
+
+            <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">total</span> <span class="o">-=</span> <span class="n">ngx_pagesize</span> <span class="o">&gt;&gt;</span> <span class="n">shift</span><span class="p">;</span>
+
+            <span class="k">goto</span> <span class="n">done</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="k">goto</span> <span class="n">chunk_already_free</span><span class="p">;</span>
+
+    <span class="k">case</span> <span class="nl">NGX_SLAB_PAGE</span><span class="p">:</span>
+
+        <span class="k">if</span> <span class="p">((</span><span class="n">uintptr_t</span><span class="p">)</span> <span class="n">p</span> <span class="o">&amp;</span> <span class="p">(</span><span class="n">ngx_pagesize</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span> <span class="p">{</span>
+            <span class="k">goto</span> <span class="n">wrong_chunk</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="p">(</span><span class="n">slab</span> <span class="o">&amp;</span> <span class="n">NGX_SLAB_PAGE_START</span><span class="p">))</span> <span class="p">{</span>
+            <span class="n">ngx_slab_error</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">NGX_LOG_ALERT</span><span class="p">,</span>
+                           <span class="s">&#34;ngx_slab_free(): page is already free&#34;</span><span class="p">);</span>
+            <span class="k">goto</span> <span class="n">fail</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="k">if</span> <span class="p">(</span><span class="n">slab</span> <span class="o">==</span> <span class="n">NGX_SLAB_PAGE_BUSY</span><span class="p">)</span> <span class="p">{</span>
+            <span class="n">ngx_slab_error</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">NGX_LOG_ALERT</span><span class="p">,</span>
+                           <span class="s">&#34;ngx_slab_free(): pointer to wrong page&#34;</span><span class="p">);</span>
+            <span class="k">goto</span> <span class="n">fail</span><span class="p">;</span>
+        <span class="p">}</span>
+
+        <span class="n">size</span> <span class="o">=</span> <span class="n">slab</span> <span class="o">&amp;</span> <span class="o">~</span><span class="n">NGX_SLAB_PAGE_START</span><span class="p">;</span>
+
+        <span class="n">ngx_slab_free_pages</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">page</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
+
+        <span class="n">ngx_slab_junk</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">size</span> <span class="o">&lt;&lt;</span> <span class="n">ngx_pagesize_shift</span><span class="p">);</span>
+
+        <span class="k">return</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="cm">/* not reached */</span>
+
+    <span class="k">return</span><span class="p">;</span>
+
+<span class="nl">done</span><span class="p">:</span>
+
+    <span class="n">pool</span><span class="o">-&gt;</span><span class="n">stats</span><span class="p">[</span><span class="n">slot</span><span class="p">].</span><span class="n">used</span><span class="o">--</span><span class="p">;</span>  <span class="c1">// 对象使用数减1
+</span><span class="c1"></span>
+    <span class="n">ngx_slab_junk</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
+
+    <span class="k">return</span><span class="p">;</span>
+
+<span class="nl">wrong_chunk</span><span class="p">:</span>
+
+    <span class="n">ngx_slab_error</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">NGX_LOG_ALERT</span><span class="p">,</span>
+                   <span class="s">&#34;ngx_slab_free(): pointer to wrong chunk&#34;</span><span class="p">);</span>
+
+    <span class="k">goto</span> <span class="n">fail</span><span class="p">;</span>
+
+<span class="nl">chunk_already_free</span><span class="p">:</span>
+
+    <span class="n">ngx_slab_error</span><span class="p">(</span><span class="n">pool</span><span class="p">,</span> <span class="n">NGX_LOG_ALERT</span><span class="p">,</span>
+                   <span class="s">&#34;ngx_slab_free(): chunk is already free&#34;</span><span class="p">);</span>
+
+<span class="nl">fail</span><span class="p">:</span>
+
+    <span class="k">return</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="shared-memory-destruction">Shared Memory Destruction</h2>
+<p>We talked about initialization, allocation logic, and release logic earlier, so we&rsquo;ll talk about destruction logic here in order not to lose completeness.</p>
+<p>I searched the whole code and found no place to release the shared memory, only when cycle_init() fails, munmap() will release the newly created shared memory, or reload will release the replaced shared memory.</p>
+<p>So I guess the release is done automatically when the process exits. So how do we verify this? Let&rsquo;s write a simple test program.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="cp">#include</span> <span class="cpf">&lt;stdio.h&gt;</span><span class="cp">
+</span><span class="cp">#include</span> <span class="cpf">&lt;sys/mman.h&gt;</span><span class="cp">
+</span><span class="cp"></span>
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span>
+<span class="p">{</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">addr</span> <span class="o">=</span> <span class="p">(</span><span class="kt">char</span> <span class="o">*</span><span class="p">)</span><span class="mh">0x7f1000000000</span><span class="p">;</span>
+    <span class="n">size_t</span> <span class="n">size</span> <span class="o">=</span> <span class="mi">8192</span><span class="p">;</span>
+    <span class="kt">char</span> <span class="o">*</span><span class="n">p</span> <span class="o">=</span> <span class="n">mmap</span><span class="p">(</span><span class="n">addr</span><span class="p">,</span> <span class="n">size</span><span class="p">,</span> <span class="n">PROT_READ</span><span class="o">|</span><span class="n">PROT_WRITE</span><span class="p">,</span>
+                   <span class="n">MAP_SHARED</span><span class="o">|</span><span class="n">MAP_ANONYMOUS</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">0</span><span class="p">);</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;addr p = %p, size = %zu</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">p</span><span class="p">,</span> <span class="n">size</span><span class="p">);</span>
+    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>For testing convenience, a suggested address is specified in the parameters. The output of running the program is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="err">$</span> <span class="p">.</span><span class="o">/</span><span class="n">a</span><span class="p">.</span><span class="n">out</span>
+<span class="n">addr</span> <span class="n">p</span> <span class="o">=</span> <span class="mh">0x7f1000000000</span><span class="p">,</span> <span class="n">size</span> <span class="o">=</span> <span class="mi">8192</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Then, we write a systemtap script that prints parameter information and call stack information.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="n">probe</span> <span class="n">kernel</span><span class="p">.</span><span class="n">function</span><span class="p">(</span><span class="s">&#34;unmap_page_range&#34;</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="p">(</span><span class="err">$</span><span class="n">addr</span> <span class="o">!=</span> <span class="mh">0x7f1000000000</span><span class="p">)</span>
+        <span class="n">next</span><span class="p">;</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;--------</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;addr: 0x%lx, size: %lu</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="err">$</span><span class="n">addr</span><span class="p">,</span> <span class="err">$</span><span class="n">end</span><span class="o">-</span><span class="err">$</span><span class="n">addr</span><span class="p">);</span>
+    <span class="n">print_backtrace</span><span class="p">();</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;--------</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We run the stap script, and then execute <code>. /a.out</code> The result is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">--------
+addr: 0x7f1000000000, size: 8192
+ 0xffffffff8bc168e0 : unmap_page_range+0x0/0xd00 [kernel]
+ 0xffffffff8bc1765d : unmap_single_vma+0x7d/0xf0 [kernel]
+ 0xffffffff8bc179a1 : unmap_vmas+0x51/0xb0 [kernel]
+ 0xffffffff8bc21535 : exit_mmap+0xb5/0x1d0 [kernel]
+ 0xffffffff8ba8b5e7 : mmput+0x57/0x140 [kernel]
+ 0xffffffff8ba93b22 : do_exit+0x352/0xb90 [kernel]
+ 0xffffffff8ba943e3 : do_group_exit+0x43/0xb0 [kernel]
+ 0xffffffff8ba94464 : SyS_exit_group+0x14/0x20 [kernel]
+ 0xffffffff8ba03a43 : do_syscall_64+0x73/0x130 [kernel]
+ 0xffffffff8c400085 : entry_SYSCALL_64_after_hwframe+0x41/0xa6 [kernel]
+ 0xffffffff8c400085 : entry_SYSCALL_64_after_hwframe+0x41/0xa6 [kernel]
+--------
+</code></pre></td></tr></table>
+</div>
+</div><p>You can see that the memory we allocated with mmap is automatically unmaped when the process exits.</p>
+<h2 id="statistics-and-monitoring">Statistics and monitoring</h2>
+<p>The <a href="https://github.com/hongxiaolong/ngx_slab_stat">ngx_slab_stat module</a> can be used to view slab statistics, and it looks like this.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">^_^$ curl http://127.0.0.1:50090/slab
+* shared memory: SSL
+total:          64(KB) free:          20(KB) size:           4(KB)
+pages:          20(KB) start:00007FA1F9D8C000 end:00007FA1F9D9B000
+slot:           8(Bytes) total:         504 used:           1 reqs:           1 fails:           0
+slot:          16(Bytes) total:         254 used:           1 reqs:           1 fails:           0
+slot:          32(Bytes) total:         127 used:           1 reqs:           1 fails:           0
+slot:          64(Bytes) total:          64 used:           2 reqs:           2 fails:           0
+slot:         128(Bytes) total:          32 used:          12 reqs:          15 fails:           0
+slot:         256(Bytes) total:          16 used:           2 reqs:           2 fails:           0
+slot:         512(Bytes) total:           8 used:           1 reqs:           1 fails:           0
+slot:        1024(Bytes) total:           4 used:           1 reqs:           1 fails:           0
+slot:        2048(Bytes) total:           2 used:           2 reqs:           5 fails:           0
+</code></pre></td></tr></table>
+</div>
+</div><p>The main thing is to read those statistics from the <code>ngx_slab_stat_t</code> structure. Of course it needs to be added to the module at compile time, and then the appropriate configuration items added to the access interface to get it. If this is not acceptable, it is possible to implement similar functionality non-invasively using systemtap.</p>
+<h2 id="ssl-session-cache">ssl session cache</h2>
+<p>A final mention of ssl session cache, which is an example of actual use of shared memory and why I am writing this blog. <code>ngx_ssl_session_cache_init</code> is its private initialization function, which mainly initializes the <code>ngx_ssl_session_cache_t</code> structure, including the initialization of the red-black tree and the queue. The red-black tree is used for session cache lookup, and the queue is used for expiry elimination. Then the pointers are assigned to the private data <code>data</code> fields of <code>ngx_shm_zone_t</code> and <code>ngx_slab_pool_t</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-h" data-lang="h"><span class="n">ngx_int_t</span>
+<span class="nf">ngx_ssl_session_cache_init</span><span class="p">(</span><span class="n">ngx_shm_zone_t</span> <span class="o">*</span><span class="n">shm_zone</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">data</span><span class="p">)</span>
+<span class="p">{</span>
+    <span class="n">size_t</span>                    <span class="n">len</span><span class="p">;</span>
+    <span class="n">ngx_slab_pool_t</span>          <span class="o">*</span><span class="n">shpool</span><span class="p">;</span>
+    <span class="n">ngx_ssl_session_cache_t</span>  <span class="o">*</span><span class="n">cache</span><span class="p">;</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">data</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">shm_zone</span><span class="o">-&gt;</span><span class="n">data</span> <span class="o">=</span> <span class="n">data</span><span class="p">;</span>
+        <span class="k">return</span> <span class="n">NGX_OK</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">shpool</span> <span class="o">=</span> <span class="p">(</span><span class="n">ngx_slab_pool_t</span> <span class="o">*</span><span class="p">)</span> <span class="n">shm_zone</span><span class="o">-&gt;</span><span class="n">shm</span><span class="p">.</span><span class="n">addr</span><span class="p">;</span>
+
+    <span class="k">if</span> <span class="p">(</span><span class="n">shm_zone</span><span class="o">-&gt;</span><span class="n">shm</span><span class="p">.</span><span class="n">exists</span><span class="p">)</span> <span class="p">{</span>
+        <span class="n">shm_zone</span><span class="o">-&gt;</span><span class="n">data</span> <span class="o">=</span> <span class="n">shpool</span><span class="o">-&gt;</span><span class="n">data</span><span class="p">;</span>
+        <span class="k">return</span> <span class="n">NGX_OK</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">cache</span> <span class="o">=</span> <span class="n">ngx_slab_alloc</span><span class="p">(</span><span class="n">shpool</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">ngx_ssl_session_cache_t</span><span class="p">));</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">cache</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="n">NGX_ERROR</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">shpool</span><span class="o">-&gt;</span><span class="n">data</span> <span class="o">=</span> <span class="n">cache</span><span class="p">;</span>
+    <span class="n">shm_zone</span><span class="o">-&gt;</span><span class="n">data</span> <span class="o">=</span> <span class="n">cache</span><span class="p">;</span>
+
+    <span class="n">ngx_rbtree_init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cache</span><span class="o">-&gt;</span><span class="n">session_rbtree</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">cache</span><span class="o">-&gt;</span><span class="n">sentinel</span><span class="p">,</span>
+                    <span class="n">ngx_ssl_session_rbtree_insert_value</span><span class="p">);</span>
+
+    <span class="n">ngx_queue_init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">cache</span><span class="o">-&gt;</span><span class="n">expire_queue</span><span class="p">);</span>
+
+    <span class="n">len</span> <span class="o">=</span> <span class="k">sizeof</span><span class="p">(</span><span class="s">&#34; in SSL session shared cache </span><span class="se">\&#34;\&#34;</span><span class="s">&#34;</span><span class="p">)</span> <span class="o">+</span> <span class="n">shm_zone</span><span class="o">-&gt;</span><span class="n">shm</span><span class="p">.</span><span class="n">name</span><span class="p">.</span><span class="n">len</span><span class="p">;</span>
+
+    <span class="n">shpool</span><span class="o">-&gt;</span><span class="n">log_ctx</span> <span class="o">=</span> <span class="n">ngx_slab_alloc</span><span class="p">(</span><span class="n">shpool</span><span class="p">,</span> <span class="n">len</span><span class="p">);</span>
+    <span class="k">if</span> <span class="p">(</span><span class="n">shpool</span><span class="o">-&gt;</span><span class="n">log_ctx</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="n">NGX_ERROR</span><span class="p">;</span>
+    <span class="p">}</span>
+
+    <span class="n">ngx_sprintf</span><span class="p">(</span><span class="n">shpool</span><span class="o">-&gt;</span><span class="n">log_ctx</span><span class="p">,</span> <span class="s">&#34; in SSL session shared cache </span><span class="se">\&#34;</span><span class="s">%V</span><span class="se">\&#34;</span><span class="s">%Z&#34;</span><span class="p">,</span>
+                <span class="o">&amp;</span><span class="n">shm_zone</span><span class="o">-&gt;</span><span class="n">shm</span><span class="p">.</span><span class="n">name</span><span class="p">);</span>
+
+    <span class="n">shpool</span><span class="o">-&gt;</span><span class="n">log_nomem</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+
+    <span class="k">return</span> <span class="n">NGX_OK</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p><code>ngx_ssl_new_session()</code> is used to create a new session cache, each creation will first try to eliminate up to 2 expired sessions, so as to ensure that the cache will not pile up, but also inert elimination will not let the event take too long. Each time the application fails, there is a chance to force the elimination. Because of the underlying slab mechanism, no matter how many expired sessions are eliminated, there is no guarantee that the new session will be applied successfully. Unless the eliminated object and the newly allocated belong to the same slot, or the eliminated object happens to be empty after a page.</p>
+<p>Because ssl session cache originally belongs to a kind of optimization, so optimization failure is also normal. If you are more concerned about this, then when forced elimination occurs, it already means that the shared memory space is not enough and you need to increase the cache capacity or reduce the timeout accordingly. The cache capacity and timeout should satisfy the following relationship.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">Cache capacity &gt; ∑ [( TPS / timeout time ) * individual size]
+</code></pre></td></tr></table>
+</div>
+</div>
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/nginx/">nginx</a>
+          <a href="/tags/linux/">linux</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/how-the-linux-kernel-is-booted/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">How the Linux kernel is booted</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/mmap/">
+            <span class="next-text nav-default">In-depth understanding of mmap - kernel code analysis and driver demo examples</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
