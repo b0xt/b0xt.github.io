@@ -1,0 +1,943 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Understanding Go Execution Tracer by Example - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Go Execution Tracer is not a silver bullet, it can&#39;t help you solve all the problems in your Go application. Usually when doing performance analysis on Go applications, we use pprof to find hotspots first, and then after eliminating them, we use Go Execution Tracer to look at the execution of goroutines in the whole Go application in a holistic way, find out the problematic points through View trace or Goroutine analysis and analyze them in detail." /><meta name="keywords" content="golang, Execution, Tracer" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/go-execution-tracer-by-example/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Understanding Go Execution Tracer by Example" />
+<meta property="og:description" content="Go Execution Tracer is not a silver bullet, it can&#39;t help you solve all the problems in your Go application. Usually when doing performance analysis on Go applications, we use pprof to find hotspots first, and then after eliminating them, we use Go Execution Tracer to look at the execution of goroutines in the whole Go application in a holistic way, find out the problematic points through View trace or Goroutine analysis and analyze them in detail." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/go-execution-tracer-by-example/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-27T16:52:30+08:00" />
+<meta property="article:modified_time" content="2022-03-27T16:52:30+08:00" />
+
+<meta itemprop="name" content="Understanding Go Execution Tracer by Example">
+<meta itemprop="description" content="Go Execution Tracer is not a silver bullet, it can&#39;t help you solve all the problems in your Go application. Usually when doing performance analysis on Go applications, we use pprof to find hotspots first, and then after eliminating them, we use Go Execution Tracer to look at the execution of goroutines in the whole Go application in a holistic way, find out the problematic points through View trace or Goroutine analysis and analyze them in detail."><meta itemprop="datePublished" content="2022-03-27T16:52:30+08:00" />
+<meta itemprop="dateModified" content="2022-03-27T16:52:30+08:00" />
+<meta itemprop="wordCount" content="5006">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Understanding Go Execution Tracer by Example"/>
+<meta name="twitter:description" content="Go Execution Tracer is not a silver bullet, it can&#39;t help you solve all the problems in your Go application. Usually when doing performance analysis on Go applications, we use pprof to find hotspots first, and then after eliminating them, we use Go Execution Tracer to look at the execution of goroutines in the whole Go application in a holistic way, find out the problematic points through View trace or Goroutine analysis and analyze them in detail."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Understanding Go Execution Tracer by Example</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-27 16:52:30 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 5006 words </span>
+          <span class="more-meta"> 10 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li>
+          <ul>
+            <li><a href="#1-what-exactly-can-go-execution-tracer-do">1. What exactly can Go Execution Tracer do?</a></li>
+            <li><a href="#2-adding-a-tracer-to-a-go-application">2. Adding a Tracer to a Go application</a></li>
+            <li><a href="#3-tracer-data-analysis">3. Tracer data analysis</a></li>
+            <li><a href="#4-example-understanding">4. Example Understanding</a></li>
+            <li><a href="#5-summary">5. Summary</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/219632ec47694774a090fba0c4e10f4d.png" alt="Go Execution"></p>
+<p>Netflix&rsquo;s performance architect <a href="http://www.brendangregg.com/">Brendan Gregg</a> in his book <a href="https://book.douban.com/subject/34467459/">&ldquo;BPF Performance Tools&rdquo;</a> gives a detailed description of tracing, sampling, and other concepts are described in detail to help developers understand these concepts and classify performance optimization aids based on these concepts and clarify their applicability. Some of them are cited here as follows.</p>
+<blockquote>
+<p>Sampling tools use a subset of measurements to paint a rough picture of the target; this is also known as creating a profile or profiling. profiling tools use timer-based sampling for running code. The disadvantage is that sampling provides only a rough picture of the target and may miss events.</p>
+<p>Tracing is event-based logging, and once tracing is turned on, the tracing tool is able to record all raw events and event metadata.</p>
+</blockquote>
+<p>In the Go tool chain, the go tool pprof (used in conjunction with runtime/pprof or net/http/pprof) is a sampling-based performance profiling (profiing) aid. It is based on a timer that samples various aspects of the running go program, including things like CPU time, memory allocation, and so on. However, go pprof also has the shortcoming of the sampling-based tool described above, which is the problem of accuracy due to the lack of frequency of sampling. Internally at the Go runtime, CPU analysis uses the OS timer to interrupt execution at regular intervals (about 100 times per second, or once every 10ms). On each interrupt (also called a sample), it simultaneously collects the call stack at that time. When it comes to achieve higher frequency sampling (e.g. microsecond level sampling), the current go profile cannot support it (for this reason uber engineers proposed a high-precision, more accurate and hardware-monitored <a href="https://go.googlesource.com/proposal/+/refs/changes/08/219508/2/design/36821-perf-counter-pprof.md">proposal</a> called pprof++ ).</p>
+<p>The Go language also provides tools based on a tracing (trace) policy. Once trace is enabled, all specific events that occur in a Go application are logged and support saving them in files for subsequent analysis, a tool proposed by Google engineer <a href="https://github.com/dvyukov">Dmitry Vyukov</a> and implemented by Google engineer <a href="https://docs.google.com/document/u/1/d/1FP5apqzBgr7ahCCgFO-yoVhk4YZrNIDNf9RybngBc14/pub">Dmitry Vyukov</a>, and <a href="https://talks.golang.org/2015/dynamic-tools.slide">added to the Go toolchain</a> in the Go 1.5 release , this tool is called <strong>Go Execution Tracer</strong>.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/cc90a0584b574cddaa263a4f4276741c.png" alt="Go Execution Tracer"></p>
+<p>Compared to go pprof, Go Execution Tracer is relatively less used, but in specific scenarios, Go Execution Tracer can play a huge role in helping gopher find the deeper hidden quandaries in go applications. In this article, let&rsquo;s take a systematic look at <strong>Go Execution Tracer</strong> (hereafter referred to as Tracer).</p>
+<h3 id="1-what-exactly-can-go-execution-tracer-do">1. What exactly can Go Execution Tracer do?</h3>
+<p>The most commonly used go performance profiling tool is pprof (go tool pprof), which can help us uncover &ldquo;hot spots&rdquo; in the target being profiled by timing sampling and combining it with the runtime/pprof or net/http/pprof packages in the Go standard library. &ldquo;, for example, which lines of code consume more CPU, which lines of code allocate more memory, which lines of code are blocked for a longer time, etc. But sometimes this data based on timer sampling is not enough and we need more detailed information about the execution of each goroutine in the Go application. In Dmitry Vyukov&rsquo;s original design, he wanted Tracer to provide Go developers with at least the following information about goroutine execution.</p>
+<ul>
+<li>Event information related to goroutine scheduling: goroutine creation, start and end; goroutine blocking and unblocking on synchronization primitives (including mutex, channel send/receive operations).</li>
+<li>Network-related events: blocking and unblocking of goroutines on network I/O.</li>
+<li>Events related to system calls: goroutine entry and return from system calls.</li>
+<li>Events related to garbage collector: start/stop of GC, concurrency marker, start/stop of scavenging.</li>
+</ul>
+<p>With this event information, we can get a complete view of what each P (processor in the goroutine scheduler concept) and G (goroutine in the goroutine scheduler concept) &ldquo;do&rdquo; during the Tracer on from the perspective of each P and each G. <strong>It is through the analysis of the behavior of each P and G in the Tracer output data combined with detailed event data that developers can assist in problem diagnosis</strong> .</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/dbf083bebee24b25a3e1ea9ca48222da.png" alt="Go Execution Tracer"></p>
+<p>Also unlike pprof which supports 10ms frequency sampling based on system timer, Tracer timestamps each event to ** Nanosecond detailed information about the occurring events.</p>
+<p>As mentioned earlier, Tracer is event-based rather than timed sampling, so the overhead associated with Tracer on is significant compared to timed sampling, and is the kind of impact felt by the naked eye (the volume of data output to the file is also much more than pprof&rsquo;s sampled data file). In the original design draft, Dmitry Vyukov gave an estimate of 35% performance degradation, but in reality it is probably slightly better than that, but we don&rsquo;t usually keep Tracer on in production environments either.</p>
+<p>In the Tracer design document, Tracer author Dmitry Vyukov mentions three points, and in practice, Tracer is mainly used to assist in diagnosing specific problems in these three scenarios.</p>
+<ul>
+<li>problems with insufficient parallel execution: e.g., underutilization of multicore resources, etc.</li>
+<li>Problems of high latency due to GC.</li>
+<li>Goroutine execution analysis, which tries to discover the problems of goroutines with shorter effective runtime or delays due to various blocking (lock contention, system calls, scheduling, auxiliary GC).</li>
+</ul>
+<p>Go Tracer was added to the Go tool chain from Go version 1.5, and has evolved little since then. Here is a brief overview of the evolution of Go Tracer from Go 1.5 to Go 1.16.</p>
+<ul>
+<li>Go 1.5 release <a href="https://tip.golang.org/doc/go1.5#trace_command">adds Go Execution Tracer support</a> to the go toolchain and adds to the runtime, runtime/trace and net/http/pprof packages API functions to turn Trace on and off.</li>
+<li>The <a href="https://tip.golang.org/doc/go1.7#cmd_trace">&ldquo;go tool trace&rdquo; command introduced in Go 1.5 in Go version 1.7 has been improved in various ways</a>, including.
+<ul>
+<li>Significantly more efficient collection of tracer data compared to past versions. In this version, the general execution time overhead for collecting trace data is about 25%; in past versions, this was at least 400%.</li>
+<li>The new version of the trace file contains file and line number information, making it self-explanatory so that the raw executable becomes optional when running the trace tool (go tool trace).</li>
+<li>The go tool trace tool supports splitting large tracer data files to avoid hitting the limits of the browser&rsquo;s viewer.</li>
+<li>The format of tracer files has changed in this release, but it is still possible to read tracer files from earlier versions.</li>
+<li>Trace handler is added to the net/http/pprof package to support handling trace requests on /debug/pprof/trace.</li>
+</ul>
+</li>
+<li>Go tool trace adds a -pprof flag bit in Go version 1.8 to support converting tracer data to pprof format compatible data.</li>
+</ul>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$go</span> tool trace -pprof<span class="o">=</span>TYPE trace.out &gt; TYPE.pprof
+</code></pre></td></tr></table>
+</div>
+</div><p>Also, GC events are displayed more clearly in the trace view, with GC activity displayed on its own separate line, and goroutines that assist in GC are tagged with their role in the GC process.</p>
+<ul>
+<li>The runtime/trace package in Go 1.9 supports displaying GC flagged auxiliary events that indicate when an application&rsquo;s goroutine is forced to assist in garbage collection because it is being allocated too fast. sweep&rdquo; event now includes the entire process of finding free space for an allocation, rather than just recording each individual span that was swept. This reduces allocation latency when tracking programs with large allocations. sweep events support showing how many bytes were sweped and how many were actually reclaimed.</li>
+<li>Go version 1.11 supports <a href="https://tip.golang.org/pkg/runtime/trace/#hdr-User_annotation">user-defined application-level events</a> in the runtime/trace package, including: user task and user region. Once defined, the Once defined, these events can be displayed graphically in the go tool trace just like native events.</li>
+<li>As of Go 1.12, go tool trace supports graphing Minimum mutator utilization, which is useful for analyzing the impact of garbage collectors on application latency and throughput.</li>
+</ul>
+<h3 id="2-adding-a-tracer-to-a-go-application">2. Adding a Tracer to a Go application</h3>
+<p>Go provides three methods for <a href="https://tip.golang.org/cmd/trace/">adding a Tracer to a Go application</a>, let&rsquo;s look at them one by one.</p>
+<h4 id="1-manually-turn-on-and-off-tracer-in-go-application-via-runtimetrace-package">1) Manually turn on and off Tracer in Go application via runtime/trace package</h4>
+<p>No matter which method is used, the runtime/trace package is the foundation and core. We can directly use the API provided by runtime/trace package to turn on and off Tracer manually in Go applications.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;os&#34;</span>
+    <span class="s">&#34;runtime/trace&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">trace</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span><span class="p">)</span>
+    <span class="k">defer</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+    <span class="c1">// 下面是业务代码
+</span><span class="c1"></span>    <span class="o">...</span> <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the above code, we open the Tracer with trace.Start and stop it at the end of the program with trace.Stop. The data collected by the Tracer is output to os. We can also pass a file handle to trace.Start and let the Tracer write the data directly to the file, like the following.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">f</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Create</span><span class="p">(</span><span class="s">&#34;trace.out&#34;</span><span class="p">)</span>
+    <span class="k">defer</span> <span class="nx">f</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+    <span class="nx">trace</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">f</span><span class="p">)</span>
+    <span class="k">defer</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+    <span class="c1">// 下面是业务代码
+</span><span class="c1"></span>    <span class="o">...</span> <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>From the code, Tracer supports dynamic opening, <strong>but note that each opening must correspond to a separate file</strong>. If you write data (continued) to the same file after opening it multiple times, then go tool trace will report an error similar to the following when reading the file.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$go</span> tool trace trace.out
+2021/06/23 05:50:01 Parsing trace...
+failed to parse trace: unknown event <span class="nb">type</span> <span class="m">50</span> at offset 0x73c
+</code></pre></td></tr></table>
+</div>
+</div><h4 id="2-tracer-service-for-http-based-data-transfer-via-nethttppprof">2) Tracer service for http-based data transfer via net/http/pprof</h4>
+<p>If a Go application provides support for pprof sampling through the net/http/pprof package, then we can turn on Tracer and get Tracer data through the /debug/pprof/trace endpoint just like we do for cpu or heap profile data.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$wget</span> -O trace.out http://localhost:6060/debug/pprof/trace?seconds<span class="o">=</span><span class="m">5</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The <a href="https://tip.golang.org/pkg/net/http/pprof/#Trace">Trace function</a> in the net/http/pprof package is responsible for handling http requests sent to the /debug/pprof/trace endpoint, see the following code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// $GOROOT/src/net/http/pprof/pprof.go
+</span><span class="c1"></span>
+<span class="kd">func</span> <span class="nf">Trace</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Header</span><span class="p">().</span><span class="nf">Set</span><span class="p">(</span><span class="s">&#34;X-Content-Type-Options&#34;</span><span class="p">,</span> <span class="s">&#34;nosniff&#34;</span><span class="p">)</span>
+    <span class="nx">sec</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">strconv</span><span class="p">.</span><span class="nf">ParseFloat</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nf">FormValue</span><span class="p">(</span><span class="s">&#34;seconds&#34;</span><span class="p">),</span> <span class="mi">64</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">sec</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">sec</span> <span class="p">=</span> <span class="mi">1</span>
+    <span class="p">}</span>
+
+    <span class="k">if</span> <span class="nf">durationExceedsWriteTimeout</span><span class="p">(</span><span class="nx">r</span><span class="p">,</span> <span class="nx">sec</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nf">serveError</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="nx">http</span><span class="p">.</span><span class="nx">StatusBadRequest</span><span class="p">,</span> <span class="s">&#34;profile duration exceeds server&#39;s WriteTimeout&#34;</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+
+    <span class="c1">// Set Content Type assuming trace.Start will work,
+</span><span class="c1"></span>    <span class="c1">// because if it does it starts writing.
+</span><span class="c1"></span>    <span class="nx">w</span><span class="p">.</span><span class="nf">Header</span><span class="p">().</span><span class="nf">Set</span><span class="p">(</span><span class="s">&#34;Content-Type&#34;</span><span class="p">,</span> <span class="s">&#34;application/octet-stream&#34;</span><span class="p">)</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Header</span><span class="p">().</span><span class="nf">Set</span><span class="p">(</span><span class="s">&#34;Content-Disposition&#34;</span><span class="p">,</span> <span class="s">`attachment; filename=&#34;trace&#34;`</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">w</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="c1">// trace.Start failed, so no writes yet.
+</span><span class="c1"></span>        <span class="nf">serveError</span><span class="p">(</span><span class="nx">w</span><span class="p">,</span> <span class="nx">http</span><span class="p">.</span><span class="nx">StatusInternalServerError</span><span class="p">,</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;Could not enable tracing: %s&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">))</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="nf">sleep</span><span class="p">(</span><span class="nx">r</span><span class="p">,</span> <span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="nx">sec</span><span class="o">*</span><span class="nb">float64</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)))</span>
+    <span class="nx">trace</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that in this processing function, the function turns on the Tracer: trace.Start, and directly passes w as an implementer of io.Writer to the trace.</p>
+<p>We can see that dynamically switching the Tracer in this way is a relatively ideal way, which can be used in production environments to limit the overhead caused by the Tracer to a minimum.</p>
+<h4 id="3-get-tracer-data-via-go-test--trace">3) Get Tracer data via go test -trace</h4>
+<p>If we want to turn on Tracer during test execution, we can do so by using <code>go test -trace</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$go</span> <span class="nb">test</span> -trace trace.out ./...
+</code></pre></td></tr></table>
+</div>
+</div><p>After the command is executed, trace.out stores the tracer data during the test execution, which we can then display and analyze with go tool trace.</p>
+<h3 id="3-tracer-data-analysis">3. Tracer data analysis</h3>
+<p>Once we have the tracer data, we can use the go tool trace tool to analyze the file where the tracer data is stored.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$go</span> tool trace trace.out
+</code></pre></td></tr></table>
+</div>
+</div><p>The go tool trace parses and validates the data file output by the Tracer, and if the data is correct, it then creates a new page in the default browser and loads and renders that data, as shown in the following image.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/d163eb529b05489bb079d03a54270a7a.png" alt="Tracer data analysis"></p>
+<p>We see that the home page displays multiple hyperlinks to data analysis, each of which will open an analysis view where.</p>
+<ul>
+<li>View trace: rendering and displaying the tracer data in the form of a graphical page (see Figure 3 above), which is the feature we are most concerned about/use most often.</li>
+<li>Goroutine analysis: records the various trace data of multiple goroutines executing the same function in the form of a table. The table in Figure 5 below records the various data of the eight goroutines executing the same main.createColWorkers.func1.</li>
+</ul>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/dfcabd4364344b9b82dfa4cfb8f4f679.png" alt="Tracer data analysis"></p>
+<ul>
+<li>Network blocking profile: A call relationship diagram in the form of a pprof profile showing the network I/O blocking situation</li>
+<li>Synchronization blocking profile: A call relationship diagram in the form of a pprof profile showing synchronization blocking time consumption</li>
+<li>Syscall blocking profile: A call relationship diagram in the form of a pprof profile showing system call blocking time consumption</li>
+<li>Scheduler latency profile: A call relationship diagram in the form of a pprof profile showing scheduler latency</li>
+<li>User-defined tasks and User-defined regions: user-defined task and region of trace</li>
+<li>Minimum mutator utilization: a graph to analyze the impact of GC on application latency and throughput</li>
+</ul>
+<p>Usually we are most concerned about View trace and Goroutine analysis, and we will talk about the usage of these two in detail below.</p>
+<blockquote>
+<p>The official documentation on Go Execution Tracer is very scarce at the moment (<a href="https://github.com/golang/go/issues/16526">https://github.com/golang/go/issues/16526</a>), especially for go tool trace analysis of each view in the tracer data process, and what you can see on the web is mostly What you can see on the web is mostly &ldquo;experience data&rdquo; accumulated by third parties in the process of using go tool trace.</p>
+</blockquote>
+<h4 id="1-view-trace">1) View trace</h4>
+<p>Click on &ldquo;View trace&rdquo; to enter the Tracer data analysis view, see Figure 6 below.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/9e7db3bc9fd44fcfab38b6ba1289403a.png" alt="View trace"></p>
+<p>View trace view is implemented based on google&rsquo;s <a href="https://github.com/catapult-project/catapult">trace-viewer</a>, which can be roughly divided into four areas.</p>
+<ul>
+<li>Timeline (timeline)</li>
+</ul>
+<p>The timeline provides a time frame of reference for the View trace. The timeline of the View trace starts when the Tracer is opened, and the time of the events recorded in each area is based on the start time of the timeline <strong>relative time</strong> .</p>
+<p>The timeline is accurate up to nanoseconds, but the View trace view supports free scaling of the timeline&rsquo;s time scale, so that we can view the whole picture at the &ldquo;macro scale&rdquo; of seconds and milliseconds, as in Figure 6 above; we can also scale the time scale to the &ldquo;micro scale&rdquo; of microseconds and nanoseconds to view a particular We can also scale the time scale down to the microscopic scale of microseconds and nanoseconds to see the details of a very short event:</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/f156fe1fdb44483795571532434f8e59.png" alt="View trace Timeline"></p>
+<p>If the Tracer trace is long and the trace.out file is large, go tool trace will divide the View trace by time period to avoid hitting the limits of the trace-viewer.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/16344f7ebf8b4ff4af56d8f0ff2f8e92.png" alt="trace-viewer"></p>
+<p>View trace uses shortcuts to scale the timeline scale: the w key for zooming in (scaling from seconds to nanoseconds) and the s key for scaling out (scaling from nanoseconds to seconds). We can also use shortcuts to move left and right on the timeline: the s key for moving left and the d key for moving right. If you can&rsquo;t remember these shortcuts, you can click on the question mark in the upper right corner of the View trace view? button, the browser will bring up the View trace operation help dialog.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/c9cf3c9c33db42baa406c453896f5721.png" alt="View trace"></p>
+<p>All shortcuts of the View trace view are available here.</p>
+<ul>
+<li>Sampling Status Area (STATS)</li>
+</ul>
+<p>This area shows three metrics: Goroutines, Heap and Threads. The data for these three metrics at a point in time is a snapshot sampling of the state at that point in time.</p>
+<p>Goroutines: the number of goroutines started in the application at a certain point in time. When we click on the goroutines sampled status area at a certain point in time (we can use the shortcut m to mark exactly that point in time), the event details area will show the current goroutines indicator sampled status:</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/6d9a2591b34940099623e192456de40c.png" alt="sampled status"></p>
+<p>From the above figure we see that there are 9 goroutines at that point in time, 8 are running and the other 1 is ready and waiting to be scheduled. The number of goroutines in GCWaiting state is 0.</p>
+<p>The Heap indicator, on the other hand, shows the Go application heap allocation (both Allocated and NextGC, the target value for the next GC) at a point in time.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/b1431102b4a34c48b470c27f98ac0067.png" alt="Heap indicator"></p>
+<p>The Threads metric shows the number of threads started by the Go application at a given point in time, and the event details area will show the number of threads in both the InSyscall (blocking on a system call) and Running states.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/b217614ed4124fdda1240fde7a0c9371.png" alt="Threads metric"></p>
+<p>The continuous sampling data arranged on a time line depicts the trend situation of each indicator.</p>
+<ul>
+<li>P-view area (PROCS)</li>
+</ul>
+<p>The largest area of the View trace view is called the &ldquo;P-view area&rdquo;. This is because in this area, we can see all the events that occurred on each P (P in the Goroutine scheduling concept) in the Go application, including: EventProcStart, EventProcStop, EventGoStart, EventGoStop, EventGoPreempt, and EventGoPreempt. Goroutine assisted GC various events as well as Goroutine&rsquo;s GC blocking (STW), system call blocking, network blocking, and synchronization primitive blocking (mutex) events. In addition to the events occurring on each P, we can see all the events during GC displayed in a separate line.</p>
+<p>Also we see that each Proc corresponds to a strip with two rows, the top row represents the main event of the Goroutine running on that P, while the second row shows some other events, such as system calls, runtime events, etc., or some tasks done by the goroutine on behalf of the runtime, such as parallel tagging on behalf of the GC. The following Figure 13 shows the strips for each Proc.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/e7b3b6a8bb374729a690e48ab1fcf3d4.png" alt="P-view area (PROCS)"></p>
+<p>We zoomed in on the image to see the details of the stripes corresponding to Proc.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/93650d4b3512433c8312f01e8d36493d.png" alt="Proc"></p>
+<p>Let&rsquo;s take the strip in proc4 in the figure above as an example, which contains three events. The event in the first of the two rows of the strip indicates that the goroutine G1 is scheduled to run on P4. When we select the event, we can see the details of the event in the event details area.</p>
+<ul>
+<li>Title: the readable name of the event.</li>
+<li>Start: the start time of the event, relative to the start time on the timeline.</li>
+<li>Wall Duration: the duration of this event, here the duration of this execution of G1 on P4.</li>
+<li>Start Stack Trace: the call stack of G1 when P4 starts the execution of G1.</li>
+<li>End Stack Trace: the call stack of G1 when P4 ends the execution of G1; judging from the function at the top of the End Stack Trace stack as runtime.asyncPreempt above, the Goroutine G1 is forcibly preempted so that P4 ends its operation.</li>
+<li>Incoming flow: the event that triggers the execution of G1 by P4.</li>
+<li>Outgoing flow: events that trigger the end of the execution of G1 on P4.</li>
+<li>Preceding events: all previous events associated with the goroutine G1.</li>
+<li>Follwing events: all the events after the goroutine associated with G1</li>
+<li>All connected: all events related to the goroutine G1.</li>
+</ul>
+<p>The second line of the proc4 strip has two events occurring sequentially, one is stw, which means that GC suspends the execution of all goroutines; the other is a concurrent marker that allows G1, a goroutine, to assist in the execution of the GC process (probably because G1 allocates memory more and faster and GC chooses to let it surrender some of its arithmetic power to do the gc marker).</p>
+<p>With the above description, we can see that with the <strong>P perspective area</strong> we can visualize the entire program (each Proc) in its entirety on the timeline of program execution, and in particular, details of the events associated with each goroutine (each goroutine has a unique separate color) running on each P in timeline order.</p>
+<p>The P-view area is explicitly related to each event, and we can open the flow of related events via the &ldquo;flow events&rdquo; button at the top of the view, so that we can see the relationship between the events before and after an event in the diagram (Figure 15 below).</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/ccaf29458da8402abe9947aa2c83c80b.png" alt="flow events"></p>
+<ul>
+<li>Event details area</li>
+</ul>
+<p>At the bottom of the View trace view is the Event Details area, where detailed information about an event is displayed when we click on it, as in Figure 14 above.</p>
+<p>On a macro scale, the events in the second row of each P-band are mostly presented as a vertical line due to the short duration of the event, so it is not very easy to tap on these events. These events can be selected by either zooming in on the image or by sequentially selecting them with the two keyboard keys, left or right arrow, and then explicitly marking the event with the m key (and unmarking it by hitting the m key again).</p>
+<h4 id="2-goroutine-analysis">2) Goroutine analysis</h4>
+<p>Like the sub-pages of Goroutine analysis shown in Figure 5, Goroutine analysis provides us with a G-view of the Go application execution.</p>
+<p>By clicking on any of the Goroutine ids located in the first column of the table in Figure 5, we are taken to the Go perspective view of.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/9269ee1129744e14b553984696c2325e.png" alt="Goroutine analysis"></p>
+<p>We see that unlike View trace, this time the most expansive area of the page provides a G-view view instead of a P-view view. In this view, each G corresponds to a separate strip (like the P-view, each strip has two rows), and through this strip we can see the full execution of the G by timeline. Usually we just find the two fastest and slowest executing goroutines in the table page of goroutine analysis and compare them along the timeline in the Go view to try to find out what is wrong with the slow goroutine.</p>
+<h3 id="4-example-understanding">4. Example Understanding</h3>
+<p>Here is an example to understand how Go Execution Tracer helps us solve a problem. It is not easy to write such an example, as Francesc Campoy has previously given in his <a href="https://github.com/campoy/justforfunc">justforfunc column</a> <a href="https://medium.com/justforfunc/using-the-go-execution-tracer-to-speed-up-fractal-rendering-c06bb3760507">a nice example that can be used for Tracer</a>), which I borrow here ^_^.</p>
+<p>Francesc Campoy gives an example of generating a fractal image, the first version of the code is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// main.go
+</span><span class="c1"></span><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;image&#34;</span>
+    <span class="s">&#34;image/color&#34;</span>
+    <span class="s">&#34;image/png&#34;</span>
+    <span class="s">&#34;log&#34;</span>
+    <span class="s">&#34;os&#34;</span>
+    <span class="s">&#34;runtime/trace&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">const</span> <span class="p">(</span>
+    <span class="nx">output</span>     <span class="p">=</span> <span class="s">&#34;out.png&#34;</span>
+    <span class="nx">width</span>      <span class="p">=</span> <span class="mi">2048</span>
+    <span class="nx">height</span>     <span class="p">=</span> <span class="mi">2048</span>
+    <span class="nx">numWorkers</span> <span class="p">=</span> <span class="mi">8</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">trace</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span><span class="p">)</span>
+    <span class="k">defer</span> <span class="nx">trace</span><span class="p">.</span><span class="nf">Stop</span><span class="p">()</span>
+
+    <span class="nx">f</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Create</span><span class="p">(</span><span class="nx">output</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="nx">img</span> <span class="o">:=</span> <span class="nf">createSeq</span><span class="p">(</span><span class="nx">width</span><span class="p">,</span> <span class="nx">height</span><span class="p">)</span>
+
+    <span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">png</span><span class="p">.</span><span class="nf">Encode</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">img</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// createSeq fills one pixel at a time.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">createSeq</span><span class="p">(</span><span class="nx">width</span><span class="p">,</span> <span class="nx">height</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">image</span><span class="p">.</span><span class="nx">Image</span> <span class="p">{</span>
+    <span class="nx">m</span> <span class="o">:=</span> <span class="nx">image</span><span class="p">.</span><span class="nf">NewGray</span><span class="p">(</span><span class="nx">image</span><span class="p">.</span><span class="nf">Rect</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">width</span><span class="p">,</span> <span class="nx">height</span><span class="p">))</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">width</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">height</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+            <span class="nx">m</span><span class="p">.</span><span class="nf">Set</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span><span class="p">,</span> <span class="nf">pixel</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span><span class="p">,</span> <span class="nx">width</span><span class="p">,</span> <span class="nx">height</span><span class="p">))</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nx">m</span>
+<span class="p">}</span>
+
+<span class="c1">// pixel returns the color of a Mandelbrot fractal at the given point.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">pixel</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span><span class="p">,</span> <span class="nx">width</span><span class="p">,</span> <span class="nx">height</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">color</span><span class="p">.</span><span class="nx">Color</span> <span class="p">{</span>
+    <span class="c1">// Play with this constant to increase the complexity of the fractal.
+</span><span class="c1"></span>    <span class="c1">// In the justforfunc.com video this was set to 4.
+</span><span class="c1"></span>    <span class="kd">const</span> <span class="nx">complexity</span> <span class="p">=</span> <span class="mi">1024</span>
+
+    <span class="nx">xi</span> <span class="o">:=</span> <span class="nf">norm</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">width</span><span class="p">,</span> <span class="o">-</span><span class="mf">1.0</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="nx">yi</span> <span class="o">:=</span> <span class="nf">norm</span><span class="p">(</span><span class="nx">j</span><span class="p">,</span> <span class="nx">height</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+    <span class="kd">const</span> <span class="nx">maxI</span> <span class="p">=</span> <span class="mi">1000</span>
+    <span class="nx">x</span><span class="p">,</span> <span class="nx">y</span> <span class="o">:=</span> <span class="mf">0.</span><span class="p">,</span> <span class="mf">0.</span>
+
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="p">(</span><span class="nx">x</span><span class="o">*</span><span class="nx">x</span><span class="o">+</span><span class="nx">y</span><span class="o">*</span><span class="nx">y</span> <span class="p">&lt;</span> <span class="nx">complexity</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">maxI</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">x</span><span class="p">,</span> <span class="nx">y</span> <span class="p">=</span> <span class="nx">x</span><span class="o">*</span><span class="nx">x</span><span class="o">-</span><span class="nx">y</span><span class="o">*</span><span class="nx">y</span><span class="o">+</span><span class="nx">xi</span><span class="p">,</span> <span class="mi">2</span><span class="o">*</span><span class="nx">x</span><span class="o">*</span><span class="nx">y</span><span class="o">+</span><span class="nx">yi</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="nx">color</span><span class="p">.</span><span class="nx">Gray</span><span class="p">{</span><span class="nb">uint8</span><span class="p">(</span><span class="nx">x</span><span class="p">)}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">norm</span><span class="p">(</span><span class="nx">x</span><span class="p">,</span> <span class="nx">total</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">min</span><span class="p">,</span> <span class="nx">max</span> <span class="kt">float64</span><span class="p">)</span> <span class="kt">float64</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="p">(</span><span class="nx">max</span><span class="o">-</span><span class="nx">min</span><span class="p">)</span><span class="o">*</span><span class="nb">float64</span><span class="p">(</span><span class="nx">x</span><span class="p">)</span><span class="o">/</span><span class="nb">float64</span><span class="p">(</span><span class="nx">total</span><span class="p">)</span> <span class="o">-</span> <span class="nx">max</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This version of the code uses the pixel function to calculate the value of each pixel in the image to be output, this version of the code even without pprof can basically locate the program hotspots on the pixel function on the critical path, the more accurate location is the loop in the pixel. So how to optimize it? pprof has run out of tricks, we use Tracer to see.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$go</span> build main.go
+$./main &gt; seq.trace
+<span class="nv">$go</span> tool trace seq.trace
+</code></pre></td></tr></table>
+</div>
+</div><p>The view of the View trace displayed by the go tool trace is as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/9b11319ca9964836ac47f38c49390200.png" alt="go tool trace"></p>
+<p>From the View trace view above, we can see at a glance that this version of the program only uses one of the multiple cpu cores on the machine, while the rest of the cpu cores are idle.</p>
+<p>The author then gives an extreme concurrency solution, where each pixel computation starts a new goroutine (replacing createSeq in main.go with createPixcel above).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">createPixel</span><span class="p">(</span><span class="nx">width</span><span class="p">,</span> <span class="nx">height</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">image</span><span class="p">.</span><span class="nx">Image</span> <span class="p">{</span>
+    <span class="nx">m</span> <span class="o">:=</span> <span class="nx">image</span><span class="p">.</span><span class="nf">NewGray</span><span class="p">(</span><span class="nx">image</span><span class="p">.</span><span class="nf">Rect</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">width</span><span class="p">,</span> <span class="nx">height</span><span class="p">))</span>
+    <span class="kd">var</span> <span class="nx">w</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">width</span> <span class="o">*</span> <span class="nx">height</span><span class="p">)</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">width</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">height</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+            <span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+                <span class="nx">m</span><span class="p">.</span><span class="nf">Set</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span><span class="p">,</span> <span class="nf">pixel</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span><span class="p">,</span> <span class="nx">width</span><span class="p">,</span> <span class="nx">height</span><span class="p">))</span>
+                <span class="nx">w</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+            <span class="p">}(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nx">m</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This version of the program does have improved execution performance and makes full use of the cpu, check its Tracer data (due to the large Tracer data file pixel.trace in this version, it takes a while to wait) as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/ba053f8cae67407a967a92155935bd00.png" alt="large Tracer data file pixel.trace"></p>
+<p>Taking the event data around 261.954ms as an example, we see that all 8 cpu cores of the system are running at full capacity, but from the state collection data of goroutines, we see that only 7 goroutines are running, while 21971 goroutines are waiting to be scheduled, which puts a lot of pressure on the scheduling of go runtime; in addition, since This version of the code creates 2048×2048 goroutines (more than 400w), which leads to frequent memory allocation and puts a lot of pressure on the GC, and from the view, each goroutine seems to be assisting the GC in parallel marking. This shows that we cannot create so many goroutines, so the author gives a third version of the code, creating only 2048 goroutines, each goroutine being responsible for the generation of one column of pixels (replacing createPixel with the following createCol).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// createCol creates one goroutine per column.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">createCol</span><span class="p">(</span><span class="nx">width</span><span class="p">,</span> <span class="nx">height</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">image</span><span class="p">.</span><span class="nx">Image</span> <span class="p">{</span>
+    <span class="nx">m</span> <span class="o">:=</span> <span class="nx">image</span><span class="p">.</span><span class="nf">NewGray</span><span class="p">(</span><span class="nx">image</span><span class="p">.</span><span class="nf">Rect</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">width</span><span class="p">,</span> <span class="nx">height</span><span class="p">))</span>
+    <span class="kd">var</span> <span class="nx">w</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="nx">width</span><span class="p">)</span>
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">width</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="k">go</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+            <span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">height</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+                <span class="nx">m</span><span class="p">.</span><span class="nf">Set</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span><span class="p">,</span> <span class="nf">pixel</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span><span class="p">,</span> <span class="nx">width</span><span class="p">,</span> <span class="nx">height</span><span class="p">))</span>
+            <span class="p">}</span>
+            <span class="nx">w</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+        <span class="p">}(</span><span class="nx">i</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nx">m</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This version of the code works like a charm! Almost 5 times better performance. Can it be further optimized? So the authors implemented another version of the code based on the Worker concurrency pattern.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// createWorkers creates numWorkers workers and uses a channel to pass each pixel.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">createWorkers</span><span class="p">(</span><span class="nx">width</span><span class="p">,</span> <span class="nx">height</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">image</span><span class="p">.</span><span class="nx">Image</span> <span class="p">{</span>
+    <span class="nx">m</span> <span class="o">:=</span> <span class="nx">image</span><span class="p">.</span><span class="nf">NewGray</span><span class="p">(</span><span class="nx">image</span><span class="p">.</span><span class="nf">Rect</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">width</span><span class="p">,</span> <span class="nx">height</span><span class="p">))</span>
+
+    <span class="kd">type</span> <span class="nx">px</span> <span class="kd">struct</span><span class="p">{</span> <span class="nx">x</span><span class="p">,</span> <span class="nx">y</span> <span class="kt">int</span> <span class="p">}</span>
+    <span class="nx">c</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="nx">px</span><span class="p">)</span>
+
+    <span class="kd">var</span> <span class="nx">w</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+    <span class="k">for</span> <span class="nx">n</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">n</span> <span class="p">&lt;</span> <span class="nx">numWorkers</span><span class="p">;</span> <span class="nx">n</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">w</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+            <span class="k">for</span> <span class="nx">px</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">c</span> <span class="p">{</span>
+                <span class="nx">m</span><span class="p">.</span><span class="nf">Set</span><span class="p">(</span><span class="nx">px</span><span class="p">.</span><span class="nx">x</span><span class="p">,</span> <span class="nx">px</span><span class="p">.</span><span class="nx">y</span><span class="p">,</span> <span class="nf">pixel</span><span class="p">(</span><span class="nx">px</span><span class="p">.</span><span class="nx">x</span><span class="p">,</span> <span class="nx">px</span><span class="p">.</span><span class="nx">y</span><span class="p">,</span> <span class="nx">width</span><span class="p">,</span> <span class="nx">height</span><span class="p">))</span>
+            <span class="p">}</span>
+            <span class="nx">w</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+        <span class="p">}()</span>
+    <span class="p">}</span>
+
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">width</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">height</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+            <span class="nx">c</span> <span class="o">&lt;-</span> <span class="nx">px</span><span class="p">{</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span><span class="p">}</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="nb">close</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nx">m</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The author&rsquo;s machine is an 8-core host, so it pre-created 8 worker goroutines, with the main goroutine dispatching work to each goroutine via a channel c. However, the author did not see the expected performance, which was not as good as the version with one goroutine per pixel. Check the Tracer situation as follows (this version of the code has more Tracer data and takes longer to parse and load).</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/e851193a21cd45f79a82edc23ac0fa4f.png" alt="Tracer situation"></p>
+<p>We see a properly zoomed in View trace view, we see a lot of large Proc pauses and countless small pauses, obviously the goroutine is blocking, we then go through the Synchronization blocking profile to see exactly where the blocking time is the longest.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/c4c9aea56c2643bb9f7c8164d40f2c8d.png" alt="large Proc pauses"></p>
+<p>We see that all goroutines wait for nearly 60s on channel reception. From this version of the code, the main goroutine has to send more than 400 times, while the other 8 worker goroutines have to wait patiently on the channel reception, which is obviously not an optimal structure.</p>
+<p>The authors came up with the idea of createCol, i.e. instead of sending each pixel as a task to a worker, a column is sent to a worker as a work unit, and each worker completes the computation of a column of pixels, which brings us to the final version of the code (using the following createColWorkersBuffered replacement createWorkers).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="nf">createColWorkersBuffered</span><span class="p">(</span><span class="nx">width</span><span class="p">,</span> <span class="nx">height</span> <span class="kt">int</span><span class="p">)</span> <span class="nx">image</span><span class="p">.</span><span class="nx">Image</span> <span class="p">{</span>
+    <span class="nx">m</span> <span class="o">:=</span> <span class="nx">image</span><span class="p">.</span><span class="nf">NewGray</span><span class="p">(</span><span class="nx">image</span><span class="p">.</span><span class="nf">Rect</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">width</span><span class="p">,</span> <span class="nx">height</span><span class="p">))</span>
+
+    <span class="nx">c</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">width</span><span class="p">)</span>
+
+    <span class="kd">var</span> <span class="nx">w</span> <span class="nx">sync</span><span class="p">.</span><span class="nx">WaitGroup</span>
+    <span class="k">for</span> <span class="nx">n</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">n</span> <span class="p">&lt;</span> <span class="nx">numWorkers</span><span class="p">;</span> <span class="nx">n</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">w</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+            <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">c</span> <span class="p">{</span>
+                <span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">height</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+                    <span class="nx">m</span><span class="p">.</span><span class="nf">Set</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span><span class="p">,</span> <span class="nf">pixel</span><span class="p">(</span><span class="nx">i</span><span class="p">,</span> <span class="nx">j</span><span class="p">,</span> <span class="nx">width</span><span class="p">,</span> <span class="nx">height</span><span class="p">))</span>
+                <span class="p">}</span>
+            <span class="p">}</span>
+            <span class="nx">w</span><span class="p">.</span><span class="nf">Done</span><span class="p">()</span>
+        <span class="p">}()</span>
+    <span class="p">}</span>
+
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">width</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">c</span> <span class="o">&lt;-</span> <span class="nx">i</span>
+    <span class="p">}</span>
+
+    <span class="nb">close</span><span class="p">(</span><span class="nx">c</span><span class="p">)</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+    <span class="k">return</span> <span class="nx">m</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This version of the code does have the best performance of all versions, with the following View trace view of the Tracer.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/048370174c164d07b6b33f40a37bf3e9.png" alt="View trace view"></p>
+<p>This is almost a perfect View trace view!</p>
+<h3 id="5-summary">5. Summary</h3>
+<p>Go Execution Tracer is not a silver bullet, it can&rsquo;t help you solve all the problems in your Go application. Usually when doing performance analysis on Go applications, we use pprof to find hotspots first, and then after eliminating them, we use Go Execution Tracer to look at the execution of goroutines in the whole Go application in a holistic way, find out the problematic points through View trace or Goroutine analysis and analyze them in detail.</p>
+<p>Parallelism, latency, goroutine blocking and other aspects of Go applications are the &ldquo;main battlefield&rdquo; that Go Execution Tracer is good at.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/2022-03/go-metrics/">
+            <span class="next-text nav-default">Using go-metrics to add metrics to Go applications</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
