@@ -1,0 +1,756 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Go I/O multiplexing based TCP protocol stream parsing in practice - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article describes how to use the epoll model in golang. We replaced the blocking I/O model with an I/O multiplexing model and re-implemented a custom TCP stream protocol parser based on the gnet framework. With the strategy of synchronous answerback, the performance of the TCP stream protocol parser developed based on gnet is improved compared with the blocking I/O model program." /><meta name="keywords" content="golang, Multiplexing I/O, tcp, epoll" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/go-multiplexing-tcp/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Go I/O multiplexing based TCP protocol stream parsing in practice" />
+<meta property="og:description" content="This article describes how to use the epoll model in golang. We replaced the blocking I/O model with an I/O multiplexing model and re-implemented a custom TCP stream protocol parser based on the gnet framework. With the strategy of synchronous answerback, the performance of the TCP stream protocol parser developed based on gnet is improved compared with the blocking I/O model program." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/go-multiplexing-tcp/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-27T10:10:57+08:00" />
+<meta property="article:modified_time" content="2022-03-27T10:10:57+08:00" />
+
+<meta itemprop="name" content="Go I/O multiplexing based TCP protocol stream parsing in practice">
+<meta itemprop="description" content="This article describes how to use the epoll model in golang. We replaced the blocking I/O model with an I/O multiplexing model and re-implemented a custom TCP stream protocol parser based on the gnet framework. With the strategy of synchronous answerback, the performance of the TCP stream protocol parser developed based on gnet is improved compared with the blocking I/O model program."><meta itemprop="datePublished" content="2022-03-27T10:10:57+08:00" />
+<meta itemprop="dateModified" content="2022-03-27T10:10:57+08:00" />
+<meta itemprop="wordCount" content="2617">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Go I/O multiplexing based TCP protocol stream parsing in practice"/>
+<meta name="twitter:description" content="This article describes how to use the epoll model in golang. We replaced the blocking I/O model with an I/O multiplexing model and re-implemented a custom TCP stream protocol parser based on the gnet framework. With the strategy of synchronous answerback, the performance of the TCP stream protocol parser developed based on gnet is improved compared with the blocking I/O model program."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Go I/O multiplexing based TCP protocol stream parsing in practice</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-27 10:10:57 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2617 words </span>
+          <span class="more-meta"> 6 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li>
+          <ul>
+            <li><a href="#1-gnet-based-development-of-tcp-stream-protocol-parser">1. gnet-based development of TCP stream protocol parser</a></li>
+            <li><a href="#2-compression-test-comparison">2. Compression test comparison</a></li>
+            <li><a href="#2-asynchronous-reply">2. Asynchronous reply</a></li>
+            <li><a href="#3-summary">3. Summary</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/698259573bbb4a3e85eab2eefe2f7a14.png" alt="Go I/O multiplexing"></p>
+<p>In the article &ldquo;Go Classical Blocking TCP Stream Parsing in Practice&rdquo;, we implemented a custom TCP stream-based parsing protocol based on Go&rsquo;s classical blocking I/O model. The advantage of this <strong>one-connection-per-goroutine</strong> model is that it is <strong>simple, well-written, and well-understood</strong>, reducing the mental burden on developers. However, once the number of connections is up, the number of goroutines increases linearly. When faced with a large number of connections, this model is overwhelmed: there will be a large number of goroutines in the system, and the overhead of goroutine scheduling and switching will be too much.</p>
+<p>So how should we solve the massive connection scenario? The industry&rsquo;s mature solution: <strong>use I/O multiplexing model</strong> . If you know the implementation of Go net package, you will know that Go also uses I/O multiplexing at runtime, and its implementation is <a href="https://github.com/golang/go/tree/master/src/runtime/netpoll.go">netpoll</a> in runtime. Conn (both Accept and Dial) at the goroutine level exhibit &ldquo;blocking&rdquo; characteristics, but the fd (file descriptor) of the underlying net. The Go runtime is responsible for calling multiplexing mechanisms such as epoll to monitor whether these fd&rsquo;s are readable or writable, and wake up the goroutine to continue network I/O operations when appropriate, which reduces system calls and reduces the frequency of M (OS threads) running the goroutine getting stuck in kernel state waiting due to system calls and having to create new threads due to blocking and losing M. to create new threads.</p>
+<p>So what are the shortcomings of building your own I/O multiplexing at the user level? <strong>Complex, not easy to write, not easy to understand</strong> . But there doesn&rsquo;t seem to be any other better way. Unless you change the language, you&rsquo;ll have to tough it out ^_^. The good thing is, the Go community already has several good Go user-level non-blocking I/O multiplexing development framework libraries available, such as <a href="https://github.com/tidwall/evio">evio</a>, <a href="https://github.com/panjf2000/gnet">gnet</a>, <a href="https://github.com/mailru/easygo">easygo</a>, etc. We choose gnet. We choose gnet. But note: choosing does not mean recommending, here is only to do this practice only, whether to use gnet development on the production program, you need to determine your own evaluation.</p>
+<h3 id="1-gnet-based-development-of-tcp-stream-protocol-parser">1. gnet-based development of TCP stream protocol parser</h3>
+<p>One of the thresholds for <strong>using the framework is that you have to go and learn the framework itself</strong> . The good thing is that <a href="https://github.com/gnet-io/gnet-examples">gnet provides several very typical examples</a>, which we can base <a href="https://github.com/gnet-io/gnet-examples/tree/master/examples/custom_codec">custom_codec</a> to quickly develop our TCP stream protocol parser.</p>
+<p>The following is a key loop for implementing custom codec based on gnet framework. Understanding this loop, we know where to call Frame codec and packet codec, which determines the structure of the subsequent demo program.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/77bd96c6662d4a7895eb8aaf8997fd2b.png" alt="gnet custom_codec"></p>
+<p>The frame codec, packet codec and React in the dashed box on the right in the above figure are to be implemented by the user. The eventloop.loopRead method of the gnet framework will call the frame codec and React in a loop to realize the processing of TCP streams and the return of responses. With such a &ldquo;map&rdquo;, we can clarify the general location of each package in the demo program.</p>
+<p>Our demo is adapted from gnet&rsquo;s example <a href="https://github.com/gnet-io/gnet-examples/tree/master/examples/custom_codec">custom_codec</a>, whose main package structure comes from custom_codec.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/tree/master/tcp-stream-proto/demo4/cmd/server/main.go
+</span><span class="c1"></span>
+<span class="kd">type</span> <span class="nx">customCodecServer</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="o">*</span><span class="nx">gnet</span><span class="p">.</span><span class="nx">EventServer</span>
+    <span class="nx">addr</span>       <span class="kt">string</span>
+    <span class="nx">multicore</span>  <span class="kt">bool</span>
+    <span class="nx">async</span>      <span class="kt">bool</span>
+    <span class="nx">codec</span>      <span class="nx">gnet</span><span class="p">.</span><span class="nx">ICodec</span>
+    <span class="nx">workerPool</span> <span class="o">*</span><span class="nx">goroutine</span><span class="p">.</span><span class="nx">Pool</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">cs</span> <span class="o">*</span><span class="nx">customCodecServer</span><span class="p">)</span> <span class="nf">OnInitComplete</span><span class="p">(</span><span class="nx">srv</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Server</span><span class="p">)</span> <span class="p">(</span><span class="nx">action</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Action</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;custom codec server is listening on %s (multi-cores: %t, loops: %d)\n&#34;</span><span class="p">,</span>
+        <span class="nx">srv</span><span class="p">.</span><span class="nx">Addr</span><span class="p">.</span><span class="nf">String</span><span class="p">(),</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">Multicore</span><span class="p">,</span> <span class="nx">srv</span><span class="p">.</span><span class="nx">NumEventLoop</span><span class="p">)</span>
+    <span class="k">return</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">customCodecServe</span><span class="p">(</span><span class="nx">addr</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">multicore</span><span class="p">,</span> <span class="nx">async</span> <span class="kt">bool</span><span class="p">,</span> <span class="nx">codec</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">ICodec</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">err</span> <span class="kt">error</span>
+    <span class="nx">codec</span> <span class="p">=</span> <span class="nx">frame</span><span class="p">.</span><span class="nx">Frame</span><span class="p">{}</span>
+    <span class="nx">cs</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">customCodecServer</span><span class="p">{</span><span class="nx">addr</span><span class="p">:</span> <span class="nx">addr</span><span class="p">,</span> <span class="nx">multicore</span><span class="p">:</span> <span class="nx">multicore</span><span class="p">,</span> <span class="nx">async</span><span class="p">:</span> <span class="nx">async</span><span class="p">,</span> <span class="nx">codec</span><span class="p">:</span> <span class="nx">codec</span><span class="p">,</span> <span class="nx">workerPool</span><span class="p">:</span> <span class="nx">goroutine</span><span class="p">.</span><span class="nf">Default</span><span class="p">()}</span>
+    <span class="nx">err</span> <span class="p">=</span> <span class="nx">gnet</span><span class="p">.</span><span class="nf">Serve</span><span class="p">(</span><span class="nx">cs</span><span class="p">,</span> <span class="nx">addr</span><span class="p">,</span> <span class="nx">gnet</span><span class="p">.</span><span class="nf">WithMulticore</span><span class="p">(</span><span class="nx">multicore</span><span class="p">),</span> <span class="nx">gnet</span><span class="p">.</span><span class="nf">WithTCPKeepAlive</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nx">Minute</span><span class="o">*</span><span class="mi">5</span><span class="p">),</span> <span class="nx">gnet</span><span class="p">.</span><span class="nf">WithCodec</span><span class="p">(</span><span class="nx">codec</span><span class="p">))</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">port</span> <span class="kt">int</span>
+    <span class="kd">var</span> <span class="nx">multicore</span> <span class="kt">bool</span>
+
+    <span class="c1">// Example command: go run server.go --port 8888 --multicore=true
+</span><span class="c1"></span>    <span class="nx">flag</span><span class="p">.</span><span class="nf">IntVar</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">port</span><span class="p">,</span> <span class="s">&#34;port&#34;</span><span class="p">,</span> <span class="mi">8888</span><span class="p">,</span> <span class="s">&#34;server port&#34;</span><span class="p">)</span>
+    <span class="nx">flag</span><span class="p">.</span><span class="nf">BoolVar</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">multicore</span><span class="p">,</span> <span class="s">&#34;multicore&#34;</span><span class="p">,</span> <span class="kc">true</span><span class="p">,</span> <span class="s">&#34;multicore&#34;</span><span class="p">)</span>
+    <span class="nx">flag</span><span class="p">.</span><span class="nf">Parse</span><span class="p">()</span>
+    <span class="nx">addr</span> <span class="o">:=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;tcp://:%d&#34;</span><span class="p">,</span> <span class="nx">port</span><span class="p">)</span>
+    <span class="nf">customCodecServe</span><span class="p">(</span><span class="nx">addr</span><span class="p">,</span> <span class="nx">multicore</span><span class="p">,</span> <span class="kc">false</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Two things to note about the above code.</p>
+<ul>
+<li>The third parameter of customCodecServe we pass in false, i.e. we choose to reply to the answer synchronously instead of asynchronously.</li>
+<li>We pass the custom frame codec (which implements the gnet.ICodec interface) instance to the customCodecServer instance, so that the subsequent gnet loopRead call is our custom frame codec.</li>
+</ul>
+<p>In the order of the flowchart above, the byte stream read by gnet from conn will be passed to our frame codec, and we will see the implementation of gnet-based Frame codec below (our custom protocol definition can be found in the article &ldquo;Practice of Go Classical Blocking TCP Protocol Stream Parsing&rdquo;).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/tree/master/tcp-stream-proto/demo4/pkg/frame/frame.go
+</span><span class="c1"></span>
+<span class="kd">type</span> <span class="nx">Frame</span> <span class="p">[]</span><span class="kt">byte</span>
+
+<span class="kd">func</span> <span class="p">(</span><span class="nx">cc</span> <span class="nx">Frame</span><span class="p">)</span> <span class="nf">Decode</span><span class="p">(</span><span class="nx">c</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Conn</span><span class="p">)</span> <span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// read length
+</span><span class="c1"></span>    <span class="kd">var</span> <span class="nx">frameLength</span> <span class="kt">uint32</span>
+    <span class="k">if</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">header</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">ReadN</span><span class="p">(</span><span class="mi">4</span><span class="p">);</span> <span class="nx">n</span> <span class="o">==</span> <span class="mi">4</span> <span class="p">{</span>
+        <span class="nx">byteBuffer</span> <span class="o">:=</span> <span class="nx">bytes</span><span class="p">.</span><span class="nf">NewBuffer</span><span class="p">(</span><span class="nx">header</span><span class="p">)</span>
+        <span class="nx">_</span> <span class="p">=</span> <span class="nx">binary</span><span class="p">.</span><span class="nf">Read</span><span class="p">(</span><span class="nx">byteBuffer</span><span class="p">,</span> <span class="nx">binary</span><span class="p">.</span><span class="nx">BigEndian</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">frameLength</span><span class="p">)</span>
+
+        <span class="k">if</span> <span class="nx">frameLength</span> <span class="p">&gt;</span> <span class="mi">100</span> <span class="p">{</span>
+            <span class="nx">c</span><span class="p">.</span><span class="nf">ResetBuffer</span><span class="p">()</span>
+            <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;length value is wrong&#34;</span><span class="p">)</span>
+        <span class="p">}</span>
+
+        <span class="k">if</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">wholeFrame</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">ReadN</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">frameLength</span><span class="p">));</span> <span class="nx">n</span> <span class="o">==</span> <span class="nb">int</span><span class="p">(</span><span class="nx">frameLength</span><span class="p">)</span> <span class="p">{</span>
+            <span class="nx">c</span><span class="p">.</span><span class="nf">ShiftN</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">frameLength</span><span class="p">))</span> <span class="c1">// shift frame length
+</span><span class="c1"></span>            <span class="k">return</span> <span class="nx">wholeFrame</span><span class="p">[</span><span class="mi">4</span><span class="p">:],</span> <span class="kc">nil</span> <span class="c1">// return frame payload
+</span><span class="c1"></span>        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+            <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;not enough frame payload data&#34;</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="s">&#34;not enough frame length data&#34;</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The Decode implementation of Frame above is responsible for both frame decoding and checking the integrity of the current data of the frame, if a complete frame is not yet ready, Decode will return an error, and then gnet will call the Decode function again when the connection (conn) is readable. ReadN method, which is essentially a Peek operation (called lazyRead by gnet), that is, it only previews the data without moving the position of the &ldquo;read pointer&rdquo; in the data stream. When the frame is not fully ready, gnet uses the RingBuffer to store some of the data of the frame that is already in place. If the frame is ready, Decode calls the gnet.</p>
+<p>If the pre-read frame length is too long (the 100 in the code is a magic number for demo purposes only, you can use the maximum possible value for the frame), the current cache will be cleared and an error will be returned. (But gnet does not disconnect from the client because of this, whether this piece of gnet&rsquo;s mechanism is reasonable is still open to question.)</p>
+<p>If the decoding goes well, according to our custom protocol spec, we will return the payload of the frame, i.e. from the fifth byte of the frame.</p>
+<p>As seen in the above figure, the payload returned by frame Decode will be passed as input data to the eventHandler.React method, which is also implemented by ourselves.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/tree/master/tcp-stream-proto/demo4/cmd/server/main.go
+</span><span class="c1"></span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">cs</span> <span class="o">*</span><span class="nx">customCodecServer</span><span class="p">)</span> <span class="nf">React</span><span class="p">(</span><span class="nx">framePayload</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">c</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Conn</span><span class="p">)</span> <span class="p">(</span><span class="nx">out</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">action</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Action</span><span class="p">)</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">p</span> <span class="nx">packet</span><span class="p">.</span><span class="nx">Packet</span>
+    <span class="kd">var</span> <span class="nx">ackFramePayload</span> <span class="p">[]</span><span class="kt">byte</span>
+    <span class="nx">p</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">packet</span><span class="p">.</span><span class="nf">Decode</span><span class="p">(</span><span class="nx">framePayload</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;react: packet decode error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+        <span class="nx">action</span> <span class="p">=</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Close</span> <span class="c1">// close the connection
+</span><span class="c1"></span>        <span class="k">return</span>
+    <span class="p">}</span>
+
+    <span class="k">switch</span> <span class="nx">p</span><span class="p">.(</span><span class="kd">type</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="o">*</span><span class="nx">packet</span><span class="p">.</span><span class="nx">Submit</span><span class="p">:</span>
+        <span class="nx">submit</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.(</span><span class="o">*</span><span class="nx">packet</span><span class="p">.</span><span class="nx">Submit</span><span class="p">)</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;recv submit: id = %s, payload=%s\n&#34;</span><span class="p">,</span> <span class="nx">submit</span><span class="p">.</span><span class="nx">ID</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nx">submit</span><span class="p">.</span><span class="nx">Payload</span><span class="p">))</span>
+        <span class="nx">submitAck</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">packet</span><span class="p">.</span><span class="nx">SubmitAck</span><span class="p">{</span>
+            <span class="nx">ID</span><span class="p">:</span>     <span class="nx">submit</span><span class="p">.</span><span class="nx">ID</span><span class="p">,</span>
+            <span class="nx">Result</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="p">}</span>
+        <span class="nx">ackFramePayload</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">packet</span><span class="p">.</span><span class="nf">Encode</span><span class="p">(</span><span class="nx">submitAck</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;handleConn: packet encode error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="nx">action</span> <span class="p">=</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Close</span> <span class="c1">// close the connection
+</span><span class="c1"></span>            <span class="k">return</span>
+        <span class="p">}</span>
+        <span class="nx">out</span> <span class="p">=</span> <span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">ackFramePayload</span><span class="p">)</span>
+        <span class="k">return</span>
+    <span class="k">default</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Close</span> <span class="c1">// close the connection
+</span><span class="c1"></span>    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In React, we use the packet package to Decode the incoming frame payload and process the resulting Packet, and encode the packet response after processing (encode), and the byte sequence (ackFramePayload) obtained after encoding will be returned as the first return value out of React.</p>
+<p>Frame will Encode the ackFramePayload returned by React, and the encoded byte sequence will be written to the outbound tcp stream by gnet.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/tree/master/tcp-stream-proto/demo4/pkg/frame/frame.go
+</span><span class="c1"></span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">cc</span> <span class="nx">Frame</span><span class="p">)</span> <span class="nf">Encode</span><span class="p">(</span><span class="nx">c</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Conn</span><span class="p">,</span> <span class="nx">framePayload</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">result</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+
+    <span class="nx">buffer</span> <span class="o">:=</span> <span class="nx">bytes</span><span class="p">.</span><span class="nf">NewBuffer</span><span class="p">(</span><span class="nx">result</span><span class="p">)</span>
+
+    <span class="c1">// encode frame length(4+ framePayload length)
+</span><span class="c1"></span>    <span class="nx">length</span> <span class="o">:=</span> <span class="nb">uint32</span><span class="p">(</span><span class="mi">4</span> <span class="o">+</span> <span class="nb">len</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">framePayload</span><span class="p">)))</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">binary</span><span class="p">.</span><span class="nf">Write</span><span class="p">(</span><span class="nx">buffer</span><span class="p">,</span> <span class="nx">binary</span><span class="p">.</span><span class="nx">BigEndian</span><span class="p">,</span> <span class="nx">length</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">s</span> <span class="o">:=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;Pack length error , %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="c1">// encode frame payload
+</span><span class="c1"></span>    <span class="nx">n</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">buffer</span><span class="p">.</span><span class="nf">Write</span><span class="p">(</span><span class="nx">framePayload</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nx">s</span> <span class="o">:=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;Pack frame payload error , %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="k">if</span> <span class="nx">n</span> <span class="o">!=</span> <span class="nb">len</span><span class="p">(</span><span class="nx">framePayload</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nx">s</span> <span class="o">:=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;Pack frame payload length error , %v&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+        <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">errors</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nx">s</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="nx">buffer</span><span class="p">.</span><span class="nf">Bytes</span><span class="p">(),</span> <span class="kc">nil</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This completes a loopRead loop. We can test this program using the client from the article &ldquo;Go Classic Blocking TCP Protocol Stream Parsing in Practice&rdquo;.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">// demo2的client
+$./client
+2021/07/25 16:35:34 dial ok
+send submit <span class="nv">id</span> <span class="o">=</span> 00000001, <span class="nv">payload</span><span class="o">=</span>full-bluestreak-207e
+the result of submit ack<span class="o">[</span>00000001<span class="o">]</span> is <span class="m">0</span>
+send submit <span class="nv">id</span> <span class="o">=</span> 00000002, <span class="nv">payload</span><span class="o">=</span>cosmic-spider-ham-2985
+the result of submit ack<span class="o">[</span>00000002<span class="o">]</span> is <span class="m">0</span>
+send submit <span class="nv">id</span> <span class="o">=</span> 00000003, <span class="nv">payload</span><span class="o">=</span>true-forge-3552
+the result of submit ack<span class="o">[</span>00000003<span class="o">]</span> is <span class="m">0</span>
+
+// demo4的server
+$./server
+2021/07/25 16:35:31 custom codec server is listening on :8888 <span class="o">(</span>multi-cores: true, loops: 8<span class="o">)</span> recv submit: <span class="nv">id</span> <span class="o">=</span> 00000001, <span class="nv">payload</span><span class="o">=</span>full-bluestreak-207e
+recv submit: <span class="nv">id</span> <span class="o">=</span> 00000002, <span class="nv">payload</span><span class="o">=</span>cosmic-spider-ham-2985
+recv submit: <span class="nv">id</span> <span class="o">=</span> 00000003, <span class="nv">payload</span><span class="o">=</span>true-forge-3552
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="2-compression-test-comparison">2. Compression test comparison</h3>
+<p>gnet has made many optimizations for memory allocation, cache reuse, etc. Let&rsquo;s do a simple performance comparison with the blocking I/O model program (due to limited resources, our crush test here is also the same as in the previous article, using 100 client connections sent with best effort (best effort) instead of a huge number of connections).</p>
+<p>The following is a performance comparison of demo1 (blocking I/O model without optimization), demo3 (blocking I/O model after optimization) and demo4 (io multiplexing model).</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/d17514bb696f49e5917756806af61e70.png" alt="Compression test comparison"></p>
+<p>Roughly speaking, the program with the gnet I/O multiplexing model (demo4) is on average 15%-20% higher in performance than the program with the blocking I/O model optimized (demo3).</p>
+<p>In addition, the system monitoring data collected by dstat also shows that the cpu system time (sys) usage is also about 5 points less when running demo4 than demo3.</p>
+<p>The output of dstat -tcdngym when running demo3.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">----system---- ----total-cpu-usage---- -dsk/total- -net/total- ---paging-- ---system-- ------memory-usage-----
+     time     |usr sys idl wai hiq siq| read  writ| recv  send|  in   out | int   csw | used  buff  cach  free
+23-07 17:03:17|  2   1  97   0   0   0|3458B   19k|   0     0 |   0     0 | 535  2475 |1921M  225M 5354M 8386M
+23-07 17:03:18| 40  45   5   0   0  11|   0     0 |  66B   54B|   0     0 |  11k   15k|1922M  225M 5354M 8384M
+23-07 17:03:19| 39  46   6   0   0   9|   0     0 |  66B 1158B|   0     0 |  12k   18k|1922M  225M 5354M 8384M
+23-07 17:03:20| 35  48   7   0   0  11|   0     0 |  66B  462B|   0     0 |  12k   22k|1922M  225M 5354M 8385M
+23-07 17:03:21| 39  44   7   0   0  10|   0    12k|  66B  462B|   0     0 |  11k   16k|1922M  225M 5354M 8385M
+23-07 17:03:22| 38  45   6   0   0  10|   0     0 |  66B  102B|   0     0 |  11k   16k|1923M  225M 5354M 8384M
+23-07 17:03:23| 38  45   7   0   0  10|   0     0 |  66B  470B|   0     0 |  12k   20k|1923M  225M 5354M 8384M
+23-07 17:03:24| 39  46   6   0   0   9|   0     0 |  66B  462B|   0     0 |  11k   19k|1923M  225M 5354M 8384M
+</code></pre></td></tr></table>
+</div>
+</div><p>Output of dstat -tcdngym when running demo4.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">----system---- ----total-cpu-usage---- -dsk/total- -net/total- ---paging-- ---system-- ------memory-usage-----
+     time     |usr sys idl wai hiq siq| read  writ| recv  send|  in   out | int   csw | used  buff  cach  free
+24-07 20:28:38| 43  42   7   0   0   8|   0    20k|1050B   14k|   0     0 |  11k   18k|1954M  234M 5959M 7738M
+24-07 20:28:39| 44  41   9   0   0   7|   0    16k| 396B 7626B|   0     0 |  11k   17k|1954M  234M 5959M 7739M
+24-07 20:28:40| 43  42   6   0   0   8|   0     0 | 132B 7044B|   0     0 |  11k   16k|1954M  234M 5959M 7738M
+24-07 20:28:41| 42  42   8   0   0   8|   0     0 | 630B   12k|   0     0 |  12k   20k|1955M  234M 5959M 7738M
+24-07 20:28:42| 45  41   7   0   0   7|   0     0 | 726B 9980B|   0     0 |  11k   16k|1955M  234M 5959M 7738M
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="2-asynchronous-reply">2. Asynchronous reply</h3>
+<p>In the above example, we use the gnet synchronous reply method. gnet also supports the asynchronous reply method, that is, the ackFramePayload obtained in React is submitted to a goroutine worker pool created by gnet, and one of the free goroutines in the worker pool will subsequently encode the The ackFramePayload is encoded into a complete ackFrame and returned to the client.</p>
+<p>To support asynchronous replies, we need to make several changes to demo4 (see demo5), the main changes are in cmd/server/main.go.</p>
+<p>The first one: when the main function calls customCodecServe, set the third parameter async to true.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/tree/master/tcp-stream-proto/demo5/cmd/server/main.go
+</span><span class="c1"></span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="o">...</span> <span class="o">...</span>
+    <span class="nf">customCodecServe</span><span class="p">(</span><span class="nx">addr</span><span class="p">,</span> <span class="nx">multicore</span><span class="p">,</span> <span class="kc">true</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Second place: In the React method of customCodecServer, after we get the encoded ackFramePayload, we don&rsquo;t assign it to out and return it immediately, but judge whether to return the answer asynchronously. If the answer is returned asynchronously, the ackFramePayload will be submitted to the workerpool, and the workerPool will subsequently allocate the goroutine and write the answer back to the client via AsyncWrite of gnet. If it is not asynchronous, the ackFramePayload is assigned to out and returned after.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/tree/master/tcp-stream-proto/demo5/cmd/server/main.go
+</span><span class="c1"></span>
+<span class="kd">func</span> <span class="p">(</span><span class="nx">cs</span> <span class="o">*</span><span class="nx">customCodecServer</span><span class="p">)</span> <span class="nf">React</span><span class="p">(</span><span class="nx">framePayload</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">c</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Conn</span><span class="p">)</span> <span class="p">(</span><span class="nx">out</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">,</span> <span class="nx">action</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Action</span><span class="p">)</span> <span class="p">{</span>
+    <span class="o">...</span> <span class="o">...</span>
+    <span class="k">switch</span> <span class="nx">p</span><span class="p">.(</span><span class="kd">type</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">case</span> <span class="o">*</span><span class="nx">packet</span><span class="p">.</span><span class="nx">Submit</span><span class="p">:</span>
+        <span class="nx">submit</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.(</span><span class="o">*</span><span class="nx">packet</span><span class="p">.</span><span class="nx">Submit</span><span class="p">)</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;recv submit: id = %s, payload=%s\n&#34;</span><span class="p">,</span> <span class="nx">submit</span><span class="p">.</span><span class="nx">ID</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nx">submit</span><span class="p">.</span><span class="nx">Payload</span><span class="p">))</span>
+        <span class="nx">submitAck</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">packet</span><span class="p">.</span><span class="nx">SubmitAck</span><span class="p">{</span>
+            <span class="nx">ID</span><span class="p">:</span>     <span class="nx">submit</span><span class="p">.</span><span class="nx">ID</span><span class="p">,</span>
+            <span class="nx">Result</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+        <span class="p">}</span>
+        <span class="nx">ackFramePayload</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">packet</span><span class="p">.</span><span class="nf">Encode</span><span class="p">(</span><span class="nx">submitAck</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;handleConn: packet encode error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="nx">action</span> <span class="p">=</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Close</span> <span class="c1">// close the connection
+</span><span class="c1"></span>            <span class="k">return</span>
+        <span class="p">}</span>
+    <span class="k">default</span><span class="p">:</span>
+        <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">gnet</span><span class="p">.</span><span class="nx">Close</span> <span class="c1">// close the connection
+</span><span class="c1"></span>    <span class="p">}</span>
+
+    <span class="k">if</span> <span class="nx">cs</span><span class="p">.</span><span class="nx">async</span> <span class="p">{</span>
+        <span class="nx">data</span> <span class="o">:=</span> <span class="nb">append</span><span class="p">([]</span><span class="kt">byte</span><span class="p">{},</span> <span class="nx">ackFramePayload</span><span class="o">...</span><span class="p">)</span>
+        <span class="nx">_</span> <span class="p">=</span> <span class="nx">cs</span><span class="p">.</span><span class="nx">workerPool</span><span class="p">.</span><span class="nf">Submit</span><span class="p">(</span><span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;handleConn: async write ackFramePayload&#34;</span><span class="p">)</span>
+            <span class="nx">c</span><span class="p">.</span><span class="nf">AsyncWrite</span><span class="p">(</span><span class="nx">data</span><span class="p">)</span>
+        <span class="p">})</span>
+        <span class="k">return</span>
+    <span class="p">}</span>
+    <span class="nx">out</span> <span class="p">=</span> <span class="nx">ackFramePayload</span>
+    <span class="k">return</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Other than that, the rest of the package code remains the same. We still also do a pressure test to see how the demo5 performance of asynchronous answerback really is!</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/27/8c29bc2bd0de4a56b0591dbe0e0ec07e.png" alt="asynchronous answerback"></p>
+<p>From the above figure, the performance of this scenario is much lower than that of the blocking I/O model by means of asynchronous replies. I didn&rsquo;t look deeper into this, but I guess it is possible that the workerpool creates many goroutines when there are too many replies and concentrated replies at the same time, which not only does not play the role of pooling, but also brings the overhead of goroutine creation and scheduling.</p>
+<h3 id="3-summary">3. Summary</h3>
+<p>In this paper, we have replaced the blocking I/O model with an I/O multiplexing model and re-implemented a custom TCP stream protocol parser based on the gnet framework. With the strategy of synchronous answer-back, the performance of the TCP stream protocol parser developed based on gnet has been improved compared to the blocking I/O model program.</p>
+<p>All the code covered in this paper can be downloaded from <a href="https://github.com/bigwhite/experiments/tree/master/tcp-stream-proto">here</a>.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/golang-plugin/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Figuring out the Golang plugin</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/go-block-tcp-parse/">
+            <span class="next-text nav-default">Go classical blocking TCP protocol stream parsing in practice</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
