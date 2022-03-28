@@ -1,0 +1,1330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Understanding Go escape analysis by example - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="In this article, we learn about the problems to be solved by escape analysis, the current state and simple principles of Go escape analysis, some examples of Go escape analysis, and a description of the output logs of escape analysis. Finally, we give a solution to forcibly avoid escape analysis, but use it with caution." /><meta name="keywords" content="golang, Escape" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/go-escape/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Understanding Go escape analysis by example" />
+<meta property="og:description" content="In this article, we learn about the problems to be solved by escape analysis, the current state and simple principles of Go escape analysis, some examples of Go escape analysis, and a description of the output logs of escape analysis. Finally, we give a solution to forcibly avoid escape analysis, but use it with caution." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/go-escape/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-28T17:07:17+08:00" />
+<meta property="article:modified_time" content="2022-03-28T17:07:17+08:00" />
+
+<meta itemprop="name" content="Understanding Go escape analysis by example">
+<meta itemprop="description" content="In this article, we learn about the problems to be solved by escape analysis, the current state and simple principles of Go escape analysis, some examples of Go escape analysis, and a description of the output logs of escape analysis. Finally, we give a solution to forcibly avoid escape analysis, but use it with caution."><meta itemprop="datePublished" content="2022-03-28T17:07:17+08:00" />
+<meta itemprop="dateModified" content="2022-03-28T17:07:17+08:00" />
+<meta itemprop="wordCount" content="5104">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Understanding Go escape analysis by example"/>
+<meta name="twitter:description" content="In this article, we learn about the problems to be solved by escape analysis, the current state and simple principles of Go escape analysis, some examples of Go escape analysis, and a description of the output logs of escape analysis. Finally, we give a solution to forcibly avoid escape analysis, but use it with caution."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Understanding Go escape analysis by example</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-28 17:07:17 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 5104 words </span>
+          <span class="more-meta"> 11 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#1-the-problem-to-be-solved-by-escape-analysis">1. The problem to be solved by escape analysis</a></li>
+        <li><a href="#2-escape-analysis-in-go">2. Escape Analysis in Go</a></li>
+        <li><a href="#3-examples-of-go-escape-analysis">3. Examples of Go escape analysis</a>
+          <ul>
+            <li><a href="#1-escape-analysis-of-a-simple-native-type-variable">1) Escape analysis of a simple native type variable</a></li>
+            <li><a href="#2-escape-analysis-of-sliced-variables-themselves-and-sliced-elements">2) Escape analysis of sliced variables themselves and sliced elements</a></li>
+            <li><a href="#3-fmtprintf-series-functions-let-variables-escape-to-the-heap-heap">3) fmt.Printf series functions let variables escape to the heap (heap)?</a></li>
+          </ul>
+        </li>
+        <li><a href="#4-manually-enforcing-escape-avoidance">4. Manually enforcing escape avoidance</a></li>
+        <li><a href="#5-summary">5. Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/28/3a30701fa1c04c45be20097fb44d7b16.png" alt="Go escape"></p>
+<p>Most Gophers don&rsquo;t really have to care about Go variable escape analysis, or can even ignore it. But if you&rsquo;re using Go in a performance-sensitive domain, where you want to completely squeeze the performance out of your Go application, then understanding Go escape analysis can be very beneficial. In this article, we&rsquo;ll take a look at understanding Go escape analysis together.</p>
+<h2 id="1-the-problem-to-be-solved-by-escape-analysis">1. The problem to be solved by escape analysis</h2>
+<p>C/C++ programmers have a &ldquo;clear-cut&rdquo; understanding of heap and stack memory. After the concept of virtual memory address for processes evolved in the operating system, the virtual memory address space of an application is divided into a heap memory area (heap in this figure) and a stack memory area (stack in this figure), as shown in the figure below.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/28/37a94dad7cb3441aa3d8ea02a1b5d778.png" alt="stack/heap memory"></p>
+<p>Under the x86 platform linux operating system, as shown above, the stack memory area is generally placed at the high address and the stack extends downward; while the heap memory goes at the low address and the heap extends upward, the advantage of doing so is to facilitate that the heap and stack can dynamically share that memory area.</p>
+<blockquote>
+<p>Does this mean that all memory object addresses allocated in the heap memory area must be smaller than the memory object addresses allocated in the stack memory area? In C/C++ it does, but in Go this is not necessarily the case because <a href="https://github.com/golang/go/issues/30554#issuecomment-469141498">the memory page used by the go heap memory is intertwined with the memory page used by the goroutine&rsquo;s stack</a>.</p>
+</blockquote>
+<p>Both stack memory and heap memory are legally available memory address spaces for applications. They are distinguished because of the need for memory allocation and management for the application.</p>
+<p>Storage space for objects on the stack is automatically allocated and destroyed without much involvement from the developer or the programming language runtime, as in the following C code (the difference between stack memory and heap memory is better illustrated in C code).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="c1">// github.com/bigwhite/experiments/blob/master/go-escape-analysis/c/cstack.c
+</span><span class="c1"></span>
+<span class="cp">#include</span> <span class="cpf">&lt;stdio.h&gt;</span><span class="cp">
+</span><span class="cp"></span>
+<span class="kt">void</span> <span class="nf">bar</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="n">e</span> <span class="o">=</span> <span class="mi">31</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">f</span> <span class="o">=</span> <span class="mi">32</span><span class="p">;</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;e = %d</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">e</span><span class="p">);</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;f = %d</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">f</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">void</span> <span class="nf">foo</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="n">c</span> <span class="o">=</span> <span class="mi">21</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">d</span> <span class="o">=</span> <span class="mi">22</span><span class="p">;</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;c = %d</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">c</span><span class="p">);</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;d = %d</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">d</span><span class="p">);</span>
+<span class="p">}</span>
+
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="n">a</span> <span class="o">=</span> <span class="mi">11</span><span class="p">;</span>
+    <span class="kt">int</span> <span class="n">b</span> <span class="o">=</span> <span class="mi">12</span><span class="p">;</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;a = %d</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">a</span><span class="p">);</span>
+    <span class="n">printf</span><span class="p">(</span><span class="s">&#34;b = %d</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">b</span><span class="p">);</span>
+    <span class="n">foo</span><span class="p">();</span>
+    <span class="n">bar</span><span class="p">();</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The C compiler automatically allocates space on the stack memory for these variables, so we don&rsquo;t have to think about when it is created and when it is destroyed. We only need to use it in a specific scope (inside the function it is in) without worrying about its memory address not being legal. This is why these variables that are allocated on the stack are also called &ldquo;automatic variables&rdquo;. However, if the address is returned to the outside of the function, then code outside the function will get an error when accessing these variables by dereferencing them, as in the following example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/blob/master/go-escape-analysis/c/cstack_coredump.c
+</span><span class="c1"></span>
+<span class="err">#</span><span class="nx">include</span> <span class="p">&lt;</span><span class="nx">stdio</span><span class="p">.</span><span class="nx">h</span><span class="p">&gt;</span>
+
+<span class="kt">int</span> <span class="o">*</span><span class="nf">foo</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="nx">c</span> <span class="p">=</span> <span class="mi">11</span><span class="p">;</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">c</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="o">*</span><span class="nx">p</span> <span class="p">=</span> <span class="nf">foo</span><span class="p">();</span>
+    <span class="nf">printf</span><span class="p">(</span><span class="s">&#34;the return value of foo = %d\n&#34;</span><span class="p">,</span> <span class="o">*</span><span class="nx">p</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>As the code shows, in the above example, we return the address of the automatic variable c in the foo function to the caller of the foo function (main) via the function return value, so that when we reference the address in the main function to output the value of the variable, we will get an exception, for example, if we run the above program on ubuntu, we will get the following result (on macos, gcc will give the same warning, but the program will run without dump core).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="cp"># gcc cstack_dumpcore.c
+</span><span class="cp"></span><span class="n">cstack_dumpcore</span><span class="p">.</span><span class="nl">c</span><span class="p">:</span> <span class="n">In</span> <span class="n">function</span> <span class="err">&#39;</span><span class="n">foo</span><span class="err">&#39;</span><span class="o">:</span>
+<span class="n">cstack_dumpcore</span><span class="p">.</span><span class="nl">c</span><span class="p">:</span><span class="mi">5</span><span class="o">:</span><span class="mi">12</span><span class="o">:</span> <span class="nl">warning</span><span class="p">:</span> <span class="n">function</span> <span class="n">returns</span> <span class="n">address</span> <span class="n">of</span> <span class="n">local</span> <span class="n">variable</span> <span class="p">[</span><span class="o">-</span><span class="n">Wreturn</span><span class="o">-</span><span class="n">local</span><span class="o">-</span><span class="n">addr</span><span class="p">]</span>
+     <span class="k">return</span> <span class="o">&amp;</span><span class="n">c</span><span class="p">;</span>
+            <span class="o">^~</span>
+<span class="cp"># ./a.out
+</span><span class="cp"></span><span class="n">Segmentation</span> <span class="n">fault</span> <span class="p">(</span><span class="n">core</span> <span class="n">dumped</span><span class="p">)</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>This leaves us with a memory object that can be legally used globally (across functions), which is the heap memory object. But unlike memory objects located on the stack that are created and destroyed by the program itself, heap memory objects need to be allocated and freed manually through a dedicated API, and the corresponding allocation and free methods in C are malloc and free.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/blob/master/go-escape-analysis/c/cheap.c
+</span><span class="c1"></span>
+<span class="err">#</span><span class="nx">include</span> <span class="p">&lt;</span><span class="nx">stdio</span><span class="p">.</span><span class="nx">h</span><span class="p">&gt;</span>
+<span class="err">#</span><span class="nx">include</span> <span class="p">&lt;</span><span class="nx">stdlib</span><span class="p">.</span><span class="nx">h</span><span class="p">&gt;</span>
+
+<span class="kt">int</span> <span class="o">*</span><span class="nf">foo</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="o">*</span><span class="nx">c</span> <span class="p">=</span> <span class="nf">malloc</span><span class="p">(</span><span class="nf">sizeof</span><span class="p">(</span><span class="kt">int</span><span class="p">));</span>
+    <span class="o">*</span><span class="nx">c</span> <span class="p">=</span> <span class="mi">12</span><span class="p">;</span>
+    <span class="k">return</span> <span class="nx">c</span><span class="p">;</span>
+<span class="p">}</span>
+
+<span class="kt">int</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kt">int</span> <span class="o">*</span><span class="nx">p</span> <span class="p">=</span> <span class="nf">foo</span><span class="p">();</span>
+    <span class="nf">printf</span><span class="p">(</span><span class="s">&#34;the return value of foo = %d\n&#34;</span><span class="p">,</span> <span class="o">*</span><span class="nx">p</span><span class="p">);</span>
+    <span class="nf">free</span><span class="p">(</span><span class="nx">p</span><span class="p">);</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In this example we use malloc to allocate a heap memory object in the foo function and return the object to the main function, which then calls the free function to manually free the heap memory block after using the object.</p>
+<p>Obviously, compared to automatic variables, the lifecycle management of heap memory objects will impose a significant mental burden on the developer. To reduce this mental burden, programming languages with GC (garbage collection) have emerged, such as Java, Go, and so on. These programming languages with GC automatically manage the objects located on the heap. When an object is unreachable (i.e. when no object of it refers to it), it will be recycled and reused.</p>
+<p>But although the advent of GC reduces the mental burden of memory management on developers, GC is not free and the performance loss it brings to programs is not negligible, especially when there are a large number of heap memory objects to be scanned on the heap memory, which will put too much pressure on the GC, thus making it take up more computational and storage resources that should be used to handle business logic. So people started to think of ways to minimize memory allocation on the heap, and variables that can be allocated on the stack stay on the stack as much as possible.</p>
+<p><strong>escape analysis is a method for statically analyzing which variables in the code need to be allocated on the stack and which need to be allocated on the heap</strong> during the compilation phase of a program based on the data flow in the program code. An ideal escape analysis algorithm would naturally be one that keeps as many variables on the stack as possible that one thinks need to be allocated on the stack, and &ldquo;escapes&rdquo; as few as possible to the heap. But this is too ideal, and each language has its own particular situation, and the accuracy of escape algorithms for each language is actually affected by this.</p>
+<h2 id="2-escape-analysis-in-go">2. Escape Analysis in Go</h2>
+<p>Escape analysis has been with Go since the day it was born. As mentioned above about the goal of escape analysis, the Go compiler uses escape analysis to determine which variables should be allocated on the stack of a goroutine and which variables should be allocated on the heap.</p>
+<p>As of today, there are two versions of Go&rsquo;s <strong>Escape analysis implementation</strong>, with a watershed in Go 1.13. The first version of Go&rsquo;s escape analysis implementation, prior to Go 1.13, was located in <code>src/cmd/compile/internal/gc/esc.go</code> in the Go source code (Go 1.12.7, for example), with a code size of 2400+ lines; Go version 1.13 includes a rewrite of <a href="https://github.com/golang/go/issues/23109">Version 2 Escape Analysis</a> by <a href="https://github.com/mdempsky">Matthew Dempsky</a>, and is turned on by default, and can be revert to using the first version of escape analysis via <code>-gcflags=&quot;-m -newescape=false&quot;</code>. The new version of the code is located in <code>src/cmd/compile/internal/gc/escape.go</code> in the Go project source code. It reduces the escape analysis code from 2400+ lines in the previous version to 1600+ lines, with more complete documentation and comments. Note, however, that <strong>there is no qualitative change in the accuracy of the algorithm in this new version of the code</strong>.</p>
+<p>But even so, after so many years of &ldquo;tinkering&rdquo;, those <a href="https://docs.Google.com/document/d/1CxgUBPlx9iJzkz9JWkb6tIpTe5q32QDmz8l0BouG0Cw/preview#">&ldquo;Go Escape Analysis Flaws&rdquo;</a> proposed by Dmitry Vyukov in 2015  have mostly been fixed. The Go project has a detailed test code for escape analysis built in (in the <code>test/escape*.go</code> file under the Go project). file).</p>
+<p>In the comments of the new version of the escape analysis implementation (<code>$GOROOT/src/cmd/compile/internal/gc/escape.go</code>), we can get a general idea of how escape analysis is implemented. The description of the principle in the notes mentions two invariants that the algorithm is based on.</p>
+<ol>
+<li>pointers to stack objects cannot be stored in the heap (pointers to stack objects cannot be stored in the heap).</li>
+<li>pointers to a stack object cannot outlive that object (i.e., pointers to a stack object cannot survive the destruction of the stack object).</li>
+</ol>
+<p>The general principle and process of Go escape analysis is also given in the source code comments. The input of Go escape analysis is the abstract syntax tree (AST) of the entire program obtained by the Go compiler after parsing the Go source file.</p>
+<p>The Node slice of the AST of the code obtained after source code parsing is xtop.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// $GOROOT/src/cmd/compile/internal/gc/go.go
+</span><span class="c1"></span><span class="kd">var</span> <span class="nx">xtop</span> <span class="p">[]</span><span class="o">*</span><span class="nx">Node</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the Main function, xtop is passed into the escape analysis entry function escapes.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// $GOROOT/src/cmd/compile/internal/gc/main.go
+</span><span class="c1"></span>
+<span class="c1">// Main parses flags and Go source files specified in the command-line
+</span><span class="c1">// arguments, type-checks the parsed Go package, compiles functions to machine
+</span><span class="c1">// code, and finally writes the compiled package definition to disk.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">Main</span><span class="p">(</span><span class="nx">archInit</span> <span class="kd">func</span><span class="p">(</span><span class="o">*</span><span class="nx">Arch</span><span class="p">))</span> <span class="p">{</span>
+    <span class="o">...</span> <span class="o">...</span>
+    <span class="c1">// Phase 6: Escape analysis.
+</span><span class="c1"></span>    <span class="c1">// Required for moving heap allocations onto stack,
+</span><span class="c1"></span>    <span class="c1">// which in turn is required by the closure implementation,
+</span><span class="c1"></span>    <span class="c1">// which stores the addresses of stack variables into the closure.
+</span><span class="c1"></span>    <span class="c1">// If the closure does not escape, it needs to be on the stack
+</span><span class="c1"></span>    <span class="c1">// or else the stack copier will not update it.
+</span><span class="c1"></span>    <span class="c1">// Large values are also moved off stack in escape analysis;
+</span><span class="c1"></span>    <span class="c1">// because large values may contain pointers, it must happen early.
+</span><span class="c1"></span>    <span class="nx">timings</span><span class="p">.</span><span class="nf">Start</span><span class="p">(</span><span class="s">&#34;fe&#34;</span><span class="p">,</span> <span class="s">&#34;escapes&#34;</span><span class="p">)</span>
+    <span class="nf">escapes</span><span class="p">(</span><span class="nx">xtop</span><span class="p">)</span>
+    <span class="o">...</span> <span class="o">...</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The following is an implementation of the escapes function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// $GOROOT/src/cmd/compile/internal/gc/esc.go
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">escapes</span><span class="p">(</span><span class="nx">all</span> <span class="p">[]</span><span class="o">*</span><span class="nx">Node</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nf">visitBottomUp</span><span class="p">(</span><span class="nx">all</span><span class="p">,</span> <span class="nx">escapeFuncs</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="c1">// $GOROOT/src/cmd/compile/internal/gc/scc.go
+</span><span class="c1">// 强连接node - 一个数据结构
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">visitBottomUp</span><span class="p">(</span><span class="nx">list</span> <span class="p">[]</span><span class="o">*</span><span class="nx">Node</span><span class="p">,</span> <span class="nx">analyze</span> <span class="kd">func</span><span class="p">(</span><span class="nx">list</span> <span class="p">[]</span><span class="o">*</span><span class="nx">Node</span><span class="p">,</span> <span class="nx">recursive</span> <span class="kt">bool</span><span class="p">))</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">v</span> <span class="nx">bottomUpVisitor</span>
+    <span class="nx">v</span><span class="p">.</span><span class="nx">analyze</span> <span class="p">=</span> <span class="nx">analyze</span>
+    <span class="nx">v</span><span class="p">.</span><span class="nx">nodeID</span> <span class="p">=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">map</span><span class="p">[</span><span class="o">*</span><span class="nx">Node</span><span class="p">]</span><span class="kt">uint32</span><span class="p">)</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">n</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">list</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">n</span><span class="p">.</span><span class="nx">Op</span> <span class="o">==</span> <span class="nx">ODCLFUNC</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nx">n</span><span class="p">.</span><span class="nx">Func</span><span class="p">.</span><span class="nf">IsHiddenClosure</span><span class="p">()</span> <span class="p">{</span>
+            <span class="nx">v</span><span class="p">.</span><span class="nf">visit</span><span class="p">(</span><span class="nx">n</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// $GOROOT/src/cmd/compile/internal/gc/escape.go
+</span><span class="c1"></span>
+<span class="c1">// escapeFuncs performs escape analysis on a minimal batch of
+</span><span class="c1">// functions.
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">escapeFuncs</span><span class="p">(</span><span class="nx">fns</span> <span class="p">[]</span><span class="o">*</span><span class="nx">Node</span><span class="p">,</span> <span class="nx">recursive</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">fns</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="nx">fn</span><span class="p">.</span><span class="nx">Op</span> <span class="o">!=</span> <span class="nx">ODCLFUNC</span> <span class="p">{</span>
+            <span class="nf">Fatalf</span><span class="p">(</span><span class="s">&#34;unexpected node: %v&#34;</span><span class="p">,</span> <span class="nx">fn</span><span class="p">)</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="kd">var</span> <span class="nx">e</span> <span class="nx">Escape</span>
+    <span class="nx">e</span><span class="p">.</span><span class="nx">heapLoc</span><span class="p">.</span><span class="nx">escapes</span> <span class="p">=</span> <span class="kc">true</span>
+
+    <span class="c1">// Construct data-flow graph from syntax trees.
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">fns</span> <span class="p">{</span>
+        <span class="nx">e</span><span class="p">.</span><span class="nf">initFunc</span><span class="p">(</span><span class="nx">fn</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">fns</span> <span class="p">{</span>
+        <span class="nx">e</span><span class="p">.</span><span class="nf">walkFunc</span><span class="p">(</span><span class="nx">fn</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">e</span><span class="p">.</span><span class="nx">curfn</span> <span class="p">=</span> <span class="kc">nil</span>
+
+    <span class="nx">e</span><span class="p">.</span><span class="nf">walkAll</span><span class="p">()</span>
+    <span class="nx">e</span><span class="p">.</span><span class="nf">finish</span><span class="p">(</span><span class="nx">fns</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>According to the annotation, the general principle of escapes is.</p>
+<ul>
+<li>First, a directed weighted graph is constructed, where the vertices (called &ldquo;locations&rdquo;, represented by gc.EscLocation) represent variables assigned by statements and expressions, and the edges (gc.EscEdge) represent assignments between variables (the weights represent the number of addresses addressed/fetched).</li>
+<li>Next, traverse (visitBottomUp) this directed weighted graph and look for assignment paths in the graph that may violate the above two invariant conditions. The assignment paths that violate the above invariants. A variable v is marked as requiring an assignment on the heap if its address is stored on the heap or elsewhere that may exceed its lifetime.</li>
+<li>To support inter-functional analysis, the algorithm also records the data flow from each function&rsquo;s arguments to the heap and to its result. The algorithm refers to this information as the &ldquo;parameter tag&rdquo;. This tag information is used during static calls to improve the escape analysis of function parameters.</li>
+</ul>
+<p>Of course, even after reading this, you may still be confused, it does not matter, this is not to explain the principle of escape analysis, if you want to understand the principle, then please read the more than 2400 lines of code carefully.</p>
+<blockquote>
+<p>Note: One thing needs to be clear, that is, the static escape analysis also can not determine the object will be placed on the heap, the subsequent precise GC will deal with these objects, so as to ensure the maximum degree of code security.</p>
+</blockquote>
+<h2 id="3-examples-of-go-escape-analysis">3. Examples of Go escape analysis</h2>
+<p>Go toolchain provides a way to view the escape analysis process, we can use -m in -gcflags to make Go compiler output the escape analysis process, here are some typical examples.</p>
+<h3 id="1-escape-analysis-of-a-simple-native-type-variable">1) Escape analysis of a simple native type variable</h3>
+<p>Let&rsquo;s look at the escape analysis process for a native integer variable, here is the sample code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/blob/master/go-escape-analysis/go/int.go
+</span><span class="c1"></span><span class="kn">package</span> <span class="nx">main</span>
+<span class="kn">import</span> <span class="s">&#34;testing&#34;</span>
+<span class="kd">func</span> <span class="nf">foo</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">a</span> <span class="o">:=</span> <span class="mi">11</span>
+    <span class="nx">p</span> <span class="o">:=</span> <span class="nb">new</span><span class="p">(</span><span class="kt">int</span><span class="p">)</span>
+    <span class="o">*</span><span class="nx">p</span> <span class="p">=</span> <span class="mi">12</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr of a is&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">a</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr that p point to is&#34;</span><span class="p">,</span> <span class="nx">p</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">bar</span><span class="p">()</span> <span class="p">(</span><span class="o">*</span><span class="kt">int</span><span class="p">,</span> <span class="o">*</span><span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">m</span> <span class="o">:=</span> <span class="mi">21</span>
+    <span class="nx">n</span> <span class="o">:=</span> <span class="mi">22</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr of m is&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">m</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr of n is&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">n</span><span class="p">)</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">m</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">n</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nb">println</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">testing</span><span class="p">.</span><span class="nf">AllocsPerRun</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="nx">foo</span><span class="p">)))</span>
+    <span class="nb">println</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">testing</span><span class="p">.</span><span class="nf">AllocsPerRun</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="nf">bar</span><span class="p">()</span>
+    <span class="p">})))</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We perform escape analysis with -gcflags &ldquo;-m -l&rdquo;. The reason for passing -l is to turn off inline and shield inline from this process and from the final code generation.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">// go 1.16版本 on MacOS
+<span class="nv">$go</span> build -gcflags <span class="s2">&#34;-m -l&#34;</span> int.go
+<span class="c1"># command-line-arguments</span>
+./int.go:7:10: new<span class="o">(</span>int<span class="o">)</span> does not escape
+./int.go:14:2: moved to heap: m
+./int.go:15:2: moved to heap: n
+./int.go:23:38: func literal does not escape
+</code></pre></td></tr></table>
+</div>
+</div><p>The result of the escape analysis is consistent with our manual analysis: m and n in the function bar escape to the heap (corresponding to the line with the words moved to heap: xx in the output above), and these two variables will be allocated storage on the heap. The a in the foo function and the pointer to the memory block pointed to are allocated on the stack (even if we created the int object by calling new, the new object in Go is not necessarily allocated on the heap, and the output log of the escape analysis specifically mentions that new(int) did not escape). Let&rsquo;s execute the example (also passing -l to close the inline).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$go</span> run -gcflags <span class="s2">&#34;-l&#34;</span> int.go
+addr of a is 0xc000074860
+addr that p point to is 0xc000074868
+addr of a is 0xc000074860
+addr that p point to is 0xc000074868
+<span class="m">0</span>
+addr of m is 0xc0000160e0
+addr of n is 0xc0000160e8
+addr of m is 0xc0000160f0
+addr of n is 0xc0000160f8
+<span class="m">2</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>First, we see that the unescaped a and p blocks are in the address area <code>0xc000074860~0xc000074868</code>, while the escaped m and n are allocated to the heap memory space, which from the output is in <code>0xc0000160e0~0xc0000160e8</code>. We can clearly see that these are two different memory address spaces; in addition The output of AllocsPerRun from the testing package also confirms that the function bar performs two heap memory allocation actions.</p>
+<p>Let&rsquo;s take a look at the assembly code corresponding to this code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$go</span> tool compile -S int.go <span class="p">|</span>grep new
+    0x002c <span class="m">00044</span> <span class="o">(</span>int.go:14<span class="o">)</span>    CALL    runtime.newobject<span class="o">(</span>SB<span class="o">)</span>
+    0x004d <span class="m">00077</span> <span class="o">(</span>int.go:15<span class="o">)</span>    CALL    runtime.newobject<span class="o">(</span>SB<span class="o">)</span>
+    rel 45+4 <span class="nv">t</span><span class="o">=</span><span class="m">8</span> runtime.newobject+0
+    rel 78+4 <span class="nv">t</span><span class="o">=</span><span class="m">8</span> runtime.newobject+0
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that in lines 14 and 15 of the corresponding source code, assembly calls runtime.newobject to perform a memory allocation action on the heap, which is exactly where the escaped m and n declarations are located. We can also see from the implementation of the newobject code below that it actually performs a malloc action on the memory managed by gc.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// $GOROOT/src/runtime/malloc.go
+</span><span class="c1"></span>
+<span class="c1">// implementation of new builtin
+</span><span class="c1">// compiler (both frontend and SSA backend) knows the signature
+</span><span class="c1">// of this function
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">newobject</span><span class="p">(</span><span class="nx">typ</span> <span class="o">*</span><span class="nx">_type</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+    <span class="k">return</span> <span class="nf">mallocgc</span><span class="p">(</span><span class="nx">typ</span><span class="p">.</span><span class="nx">size</span><span class="p">,</span> <span class="nx">typ</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><h3 id="2-escape-analysis-of-sliced-variables-themselves-and-sliced-elements">2) Escape analysis of sliced variables themselves and sliced elements</h3>
+<p>Any gopher who knows how slicing works knows that a sliced variable is essentially a triplet.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">//$GOROOT/src/runtime/slice.go
+</span><span class="c1"></span>
+<span class="kd">type</span> <span class="nx">slice</span> <span class="kd">struct</span> <span class="p">{</span>
+    <span class="nx">array</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span>
+    <span class="nx">len</span>   <span class="kt">int</span>
+    <span class="nx">cap</span>   <span class="kt">int</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The first field of this triplet, array, points to a pointer to the real storage element at the bottom of the slice. Thus when allocating memory for a slice variable, it is important to consider both where the slice itself (i.e. the slice structure above) is allocated and where the slice elements are stored. Let&rsquo;s look at the following example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/blob/master/go-escape-analysis/go/slice.go
+</span><span class="c1"></span><span class="kn">package</span> <span class="nx">main</span>
+<span class="kn">import</span> <span class="p">(</span>
+   <span class="s">&#34;reflect&#34;</span>
+   <span class="s">&#34;unsafe&#34;</span>
+<span class="p">)</span>
+<span class="kd">func</span> <span class="nf">noEscapeSliceWithDataInHeap</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">sl</span> <span class="p">[]</span><span class="kt">int</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr of local(noescape, data in heap) slice = &#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+    <span class="nf">printSliceHeader</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+    <span class="nx">sl</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">sl</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;append 1&#34;</span><span class="p">)</span>
+    <span class="nf">printSliceHeader</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;append 2&#34;</span><span class="p">)</span>
+    <span class="nx">sl</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">sl</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="nf">printSliceHeader</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;append 3&#34;</span><span class="p">)</span>
+    <span class="nx">sl</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">sl</span><span class="p">,</span> <span class="mi">3</span><span class="p">)</span>
+    <span class="nf">printSliceHeader</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;append 4&#34;</span><span class="p">)</span>
+    <span class="nx">sl</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">sl</span><span class="p">,</span> <span class="mi">4</span><span class="p">)</span>
+    <span class="nf">printSliceHeader</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">noEscapeSliceWithDataInStack</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">sl</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">int</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">8</span><span class="p">)</span>     
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr of local(noescape, data in stack) slice = &#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+    <span class="nf">printSliceHeader</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+    <span class="nx">sl</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">sl</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;append 1&#34;</span><span class="p">)</span>
+    <span class="nf">printSliceHeader</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+    <span class="nx">sl</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">sl</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;append 2&#34;</span><span class="p">)</span>
+    <span class="nf">printSliceHeader</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">escapeSlice</span><span class="p">()</span> <span class="o">*</span><span class="p">[]</span><span class="kt">int</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">sl</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">int</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">8</span><span class="p">)</span>     
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr of local(escape) slice = &#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+    <span class="nf">printSliceHeader</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+    <span class="nx">sl</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">sl</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;append 1&#34;</span><span class="p">)</span>
+    <span class="nf">printSliceHeader</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+    <span class="nx">sl</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">sl</span><span class="p">,</span> <span class="mi">2</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;append 2&#34;</span><span class="p">)</span>
+    <span class="nf">printSliceHeader</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">sl</span><span class="p">)</span>
+    <span class="k">return</span> <span class="o">&amp;</span><span class="nx">sl</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">printSliceHeader</span><span class="p">(</span><span class="nx">p</span> <span class="o">*</span><span class="p">[]</span><span class="kt">int</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">ph</span> <span class="o">:=</span> <span class="p">(</span><span class="o">*</span><span class="nx">reflect</span><span class="p">.</span><span class="nx">SliceHeader</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">p</span><span class="p">))</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;slice data =&#34;</span><span class="p">,</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">ph</span><span class="p">.</span><span class="nx">Data</span><span class="p">))</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nf">noEscapeSliceWithDataInHeap</span><span class="p">()</span>
+    <span class="nf">noEscapeSliceWithDataInStack</span><span class="p">()</span>
+    <span class="nf">escapeSlice</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Run escape analysis on the above example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$go</span> build -gcflags <span class="s2">&#34;-m -l&#34;</span> slice.go
+<span class="c1"># command-line-arguments</span>
+./slice.go:51:23: p does not escape
+./slice.go:27:15: make<span class="o">([]</span>int, 0, 8<span class="o">)</span> does not escape
+./slice.go:39:6: moved to heap: sl
+./slice.go:39:15: make<span class="o">([]</span>int, 0, 8<span class="o">)</span> escapes to heap
+</code></pre></td></tr></table>
+</div>
+</div><p>We see from the output that.</p>
+<ul>
+<li>the sl in the escapeSlice function located at line 39 escaped to the heap.</li>
+<li>the elements of the slice sl in the escapeSlice function located at line 39 also escaped to the heap.</li>
+<li>the elements of the slice sl located at line 27 did not escape.</li>
+</ul>
+<p>Since it is difficult to see if the elements of each slice in the three functions escape, let&rsquo;s see by running the example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">$go run -gcflags &#34; -l&#34; slice.go
+addr of local(noescape, data in heap) slice =  0xc00006af48
+slice data = 0x0
+append 1
+slice data = 0xc0000160c0
+append 2
+slice data = 0xc0000160d0
+append 3
+slice data = 0xc0000140c0
+append 4
+slice data = 0xc0000140c0
+
+addr of local(noescape, data in stack) slice =  0xc00006af48
+slice data = 0xc00006af08
+append 1
+slice data = 0xc00006af08
+append 2
+slice data = 0xc00006af08
+
+addr of local(escape) slice =  0xc00000c030
+slice data = 0xc00001a100
+append 1
+slice data = 0xc00001a100
+append 2
+slice data = 0xc00001a100
+</code></pre></td></tr></table>
+</div>
+</div><blockquote>
+<p>Note: We use the SliceHeader of the reflect package to output the fields in the slice triplet that represent the address of the underlying array, in this case slice data.</p>
+</blockquote>
+<p>We see that.</p>
+<ul>
+<li>The first function noEscapeWithDataInHeap declares an empty slice and appends elements to the slice later using append. (b) From the output, it appears that the slice itself is allocated on the stack, but the runtime chooses to store its elements on the heap when dynamically extending the slice.</li>
+<li>The second function noEscapeWithDataInStack directly initializes a slice with 8 elements in storage space. If there are more than 8 additional elements, the runtime allocates a larger space on the heap and copies the 8 elements from the original stack, and the subsequent elements of the slice are stored on the heap. This is why it is highly recommended to create a slice with a predicted cap parameter, not only to reduce the frequent allocation of heap memory, but also to improve performance when all elements are allocated on the stack under the cap capacity if the slice variable is not escaped.</li>
+<li>The third function escapeSlice, on the other hand, slice variables themselves and the storage of their elements on the heap.</li>
+</ul>
+<h3 id="3-fmtprintf-series-functions-let-variables-escape-to-the-heap-heap">3) fmt.Printf series functions let variables escape to the heap (heap)?</h3>
+<p>Many people in the go project issue feedback fmt.Printf series of functions let variables escape to the heap, is this really the case? Let&rsquo;s take a look at the following example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/blob/master/go-escape-analysis/go/printf1.go
+</span><span class="c1"></span><span class="kn">package</span> <span class="nx">main</span>
+<span class="kn">import</span> <span class="s">&#34;fmt&#34;</span>
+<span class="kd">func</span> <span class="nf">foo</span><span class="p">()</span> <span class="p">{</span>
+   <span class="kd">var</span> <span class="nx">a</span> <span class="kt">int</span> <span class="p">=</span> <span class="mi">66666666</span>
+   <span class="kd">var</span> <span class="nx">b</span> <span class="kt">int</span> <span class="p">=</span> <span class="mi">77</span>
+   <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;a = %d\n&#34;</span><span class="p">,</span> <span class="nx">a</span><span class="p">)</span>
+   <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr of a in foo =&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">a</span><span class="p">)</span>
+   <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr of b in foo =&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">b</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nf">foo</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><blockquote>
+<p>Note: The println and print predefined functions do not have the &ldquo;side effects&rdquo; that affect the fugitive nature of variables like the fmt. So here println is used to output the actual allocated memory address of the variable.</p>
+</blockquote>
+<p>To run the escape analysis on the above code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">$go build -gcflags &#34;-m -l&#34; printf1.go
+# command-line-arguments
+./printf1.go:8:12: ... argument does not escape
+./printf1.go:8:13: a escapes to heap
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that the escape analysis outputs the variable &ldquo;a escapes to heap&rdquo; on line 8, but this &ldquo;escapes&rdquo; is a bit strange, because according to previous experience, if a variable really escapes, then the escape analysis will output in the line where it is declared output: &ldquo;moved to heap: xx&rdquo;. The above output is neither on the line where the variable is declared, nor does it say &ldquo;moved to heap: a&rdquo;. Let&rsquo;s run the above example to see if the address of variable a is on the heap or the stack.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$go</span> run -gcflags <span class="s2">&#34;-l&#34;</span> printf1.go
+<span class="nv">a</span> <span class="o">=</span> <span class="m">66666666</span>
+addr of a in <span class="nv">foo</span> <span class="o">=</span> 0xc000092f50
+addr of b in <span class="nv">foo</span> <span class="o">=</span> 0xc000092f48
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that the address of variable a is on the same stack space as the address of the non-escaped variable b. Variable a has not escaped! If you decompile to assembly, you will certainly not see the runtime.newobject call either.</p>
+<p>Then &ldquo;. /printf1.go:8:13: a escapes to heap&rdquo; line means what exactly? Obviously the escape analysis in this line is an analysis of the data flow into fmt.Printf, so let&rsquo;s modify the go standard library source code and then build -a recompile printf1.go to see the distribution of variables inside fmt.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// $GOROOT/src/fmt/print.go
+</span><span class="c1"></span>
+<span class="kd">func</span> <span class="nf">Printf</span><span class="p">(</span><span class="nx">format</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">a</span> <span class="o">...</span><span class="kd">interface</span><span class="p">{})</span> <span class="p">(</span><span class="nx">n</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+    <span class="c1">// 添加下面四行代码
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">a</span><span class="p">);</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nb">println</span><span class="p">(</span><span class="nx">a</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+        <span class="nb">println</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">a</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="nf">Fprintf</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span><span class="p">,</span> <span class="nx">format</span><span class="p">,</span> <span class="nx">a</span><span class="o">...</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Recompile printf1.go and run the compiled executable (to avoid).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$go</span> build -a -gcflags <span class="s2">&#34;-l&#34;</span> printf1.go
+$./printf1
+<span class="o">(</span>0x10af200,0xc0000160c8<span class="o">)</span>
+0xc00006cf58
+<span class="nv">a</span> <span class="o">=</span> <span class="m">66666666</span>
+addr of a in <span class="nv">foo</span> <span class="o">=</span> 0xc00006cf50
+addr of b in <span class="nv">foo</span> <span class="o">=</span> 0xc00006cf48
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that the real parameter a of fmt.Printf is passed in and boxed into a form variable of type interface{}, which itself is allocated on the stack (0xc00006cf58), and that the type and value parts of the form variable of type interface{} output via println point to 0x10af200 and 0xc0000160c8, respectively. Obviously the value part is allocated on the heap memory. Then &ldquo;. /printf1.go:8:13: a escapes to heap&rdquo; means that the value part of the boxed variable is allocated on the heap? We are not sure here.</p>
+<p>Let&rsquo;s look at an example to compare.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/blob/master/go-escape-analysis/go/printf2.go
+</span><span class="c1"></span><span class="kn">package</span> <span class="nx">main</span>
+<span class="kn">import</span> <span class="s">&#34;fmt&#34;</span>
+
+<span class="kd">func</span> <span class="nf">foo</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">a</span> <span class="kt">int</span> <span class="p">=</span> <span class="mi">66666666</span>
+    <span class="kd">var</span> <span class="nx">b</span> <span class="kt">int</span> <span class="p">=</span> <span class="mi">77</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;addr of a in bar = %p\n&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">a</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr of a in bar =&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">a</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr of b in bar =&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">b</span><span class="p">)</span>
+<span class="p">}</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nf">foo</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>In the printf2.go example, unlike printf1.go, we use fmt.Printf in the foo function to output the address of the variable a: &amp;a. Let&rsquo;s run the new version of the escape analysis.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">// go 1.16
+
+<span class="nv">$go</span> build -gcflags <span class="s2">&#34;-m -l&#34;</span> printf2.go
+<span class="c1"># command-line-arguments</span>
+./printf2.go:6:6: moved to heap: a
+./printf2.go:8:12: ... argument does not escape
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that the variable a declared at line 6 actually does escape to the heap. Let&rsquo;s run printf2.go.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$go</span> build -a -gcflags <span class="s2">&#34;-l&#34;</span> printf2.go
+$./printf2
+<span class="o">(</span>0x10ab4a0,0xc0000160c8<span class="o">)</span>
+0xc00006cf58
+addr of a in <span class="nv">bar</span> <span class="o">=</span> 0xc0000160c8
+addr of a in <span class="nv">bar</span> <span class="o">=</span> 0xc0000160c8
+addr of b in <span class="nv">bar</span> <span class="o">=</span> 0xc00006cf48
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that the address of variable a is indeed very different from variable b on the stack, which should be on the heap, so it looks like the gopher who mentioned the issue in the go project was right. The address of variable a is passed into fmt.Printf as a real reference and then boxed into an interface{} formal reference variable, and from the results, fmt.Printf really requires the value of the boxed formal reference variable to be partially allocated on the heap, but according to the escape analysis invariant, the object on the heap cannot store an address on the stack, and this time the address of a is stored, so the a is determined to be an escape, and so a itself is allocated on the heap (0xc0000160c8).</p>
+<p>Let&rsquo;s run an older version of the escape analysis with go 1.12.7.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh">// go 1.12.7
+<span class="nv">$go</span> build -gcflags <span class="s2">&#34;-m -l&#34;</span> printf2.go
+<span class="c1"># command-line-arguments</span>
+./printf2.go:8:40: <span class="p">&amp;</span>a escapes to heap
+./printf2.go:8:40: <span class="p">&amp;</span>a escapes to heap
+./printf2.go:6:6: moved to heap: a
+./printf2.go:8:12: foo ... argument does not escape
+./printf2.go:9:32: foo <span class="p">&amp;</span>a does not escape
+./printf2.go:10:32: foo <span class="p">&amp;</span>b does not escape
+</code></pre></td></tr></table>
+</div>
+</div><p>The old version of escape analysis gives more detailed output, e.g., &ldquo;&amp;a escapes to heap&rdquo;, which must refer to &amp;a being boxed to heap memory; whereas println outputs &amp;a without &amp;a being boxed. But the final determination of the variable a thereafter is an escape.</p>
+<blockquote>
+<p>Go core team member <a href="https://github.com/randall77">Keith Randall</a> gave an <a href="https://github.com/golang/go/issues/30554#issuecomment-469117368">explanation</a> of the logs output from the escape analysis 469117368), which means that when the escape analysis output &ldquo;b escapes to heap&rdquo;, it means that the value stored in b escapes to the heap (which makes sense when b is a pointer variable), i.e. any object referenced by b must be allocated on the heap, but b itself does not; if b itself also escapes to the heap, then the escape analysis will output &ldquo;&amp;b escapes to heap&rdquo;.</p>
+</blockquote>
+<p>This problem is no longer fixed, and its core problem is in <a href="https://github.com/golang/go/issues/8618">8618 this issue</a>.</p>
+<h2 id="4-manually-enforcing-escape-avoidance">4. Manually enforcing escape avoidance</h2>
+<p>For the example in printf2.go, we are sure for sure as well as certain: a does not need to escape. However, if we use fmt.Printf, we cannot block the escape of a. So is there a way to interfere with the escape analysis so that memory objects that the escape analysis thinks need to be allocated on the heap but that we are sure don&rsquo;t think need to escape avoid escaping? In the Go runtime code, we found a function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// $GOROOT/src/runtime/stubs.go
+</span><span class="c1"></span><span class="kd">func</span> <span class="nf">noescape</span><span class="p">(</span><span class="nx">p</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+    <span class="nx">x</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">p</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">x</span> <span class="p">^</span> <span class="mi">0</span><span class="p">)</span> <span class="c1">// 任何数值与0的异或都是原数
+</span><span class="c1"></span><span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>And it is heavily used in the Go standard library and runtime implementation. The logic of this function is implemented so that the pointer value we pass in is the same as the pointer value we return. The function simply does a conversion via uintptr that converts the pointer to a value, which &ldquo;cuts off&rdquo; the data flow trace for escape analysis and causes the incoming pointer to avoid escaping.</p>
+<p>Let&rsquo;s look at the following example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// github.com/bigwhite/experiments/blob/master/go-escape-analysis/go/printf3.go
+</span><span class="c1"></span><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;fmt&#34;</span>
+    <span class="s">&#34;unsafe&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">noescape</span><span class="p">(</span><span class="nx">p</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span><span class="p">)</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nx">Pointer</span> <span class="p">{</span>
+    <span class="nx">x</span> <span class="o">:=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">p</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">x</span> <span class="p">^</span> <span class="mi">0</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">foo</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">a</span> <span class="kt">int</span> <span class="p">=</span> <span class="mi">66666666</span>
+    <span class="kd">var</span> <span class="nx">b</span> <span class="kt">int</span> <span class="p">=</span> <span class="mi">77</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;addr of a in bar = %p\n&#34;</span><span class="p">,</span> <span class="p">(</span><span class="o">*</span><span class="kt">int</span><span class="p">)(</span><span class="nf">noescape</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">a</span><span class="p">))))</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr of a in bar =&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">a</span><span class="p">)</span>
+    <span class="nb">println</span><span class="p">(</span><span class="s">&#34;addr of b in bar =&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">b</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nf">foo</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Implement a uniform analysis for this code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="nv">$go</span> build -gcflags <span class="s2">&#34;-m -l&#34;</span> printf3.go
+
+<span class="c1"># command-line-arguments</span>
+./printf3.go:8:15: p does not escape
+./printf3.go:16:12: ... argument does not escape
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that a has not escaped this time. Run the compiled executable.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">$./printf3
+(0x10ab4c0,0xc00009af50)
+0xc00009af58
+addr of a in bar = 0xc00009af50
+addr of a in bar = 0xc00009af50
+addr of b in bar = 0xc00009af4
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that a is not placed on the heap like printf2.go, this time it is allocated on the stack as well as b. And the stack address of a is always valid during the execution of fmt.Printf.</p>
+<p>There was a paper <a href="http://www.wingtecher.com/themes/WingTecherResearch/assets/papers/ICSE20.pdf">on optimizing performance by escape analysis</a> &ldquo;Escape from Escape Analysis of Golang The paper uses the above idea of noescape function, which you can download and read if you are interested.</p>
+<h2 id="5-summary">5. Summary</h2>
+<p>Through this article, we have learned about the problems to be solved by escape analysis, the current state and simple principles of Go escape analysis, some examples of Go escape analysis, and a description of the output logs of escape analysis. Finally, we give a solution to forcibly avoid escape analysis, but use it with caution.</p>
+<p>In everyday go development, escape analysis need not be considered in most cases, except in performance-sensitive areas. In these areas, doing an escape analysis of the system execution hotspots and the corresponding optimization may bring some performance improvement to the program.</p>
+<p>The source code involved in this article can be downloaded at <a href="https://github.com/bigwhite/experiments/blob/master/go-escape-analysis">here</a>.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/2022-03/go-source-analysis-with-functrace/">
+            <span class="next-text nav-default">Go project source code analysis with the help of functrace</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
