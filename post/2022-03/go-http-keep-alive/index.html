@@ -1,0 +1,1123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Understanding how the Go standard library http package handles keep-alive connections by example - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="In this article we&#39;ll take a look at the http.Server and http.Client of the net/http package in the Go standard library&#39;s handling of keep-alive long connections and how to turn off the keep-alive mechanism on the Server and Client side." /><meta name="keywords" content="golang, http, keep-alive connections" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/go-http-keep-alive/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Understanding how the Go standard library http package handles keep-alive connections by example" />
+<meta property="og:description" content="In this article we&#39;ll take a look at the http.Server and http.Client of the net/http package in the Go standard library&#39;s handling of keep-alive long connections and how to turn off the keep-alive mechanism on the Server and Client side." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/go-http-keep-alive/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-30T09:06:15+08:00" />
+<meta property="article:modified_time" content="2022-03-30T09:06:15+08:00" />
+
+<meta itemprop="name" content="Understanding how the Go standard library http package handles keep-alive connections by example">
+<meta itemprop="description" content="In this article we&#39;ll take a look at the http.Server and http.Client of the net/http package in the Go standard library&#39;s handling of keep-alive long connections and how to turn off the keep-alive mechanism on the Server and Client side."><meta itemprop="datePublished" content="2022-03-30T09:06:15+08:00" />
+<meta itemprop="dateModified" content="2022-03-30T09:06:15+08:00" />
+<meta itemprop="wordCount" content="3207">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Understanding how the Go standard library http package handles keep-alive connections by example"/>
+<meta name="twitter:description" content="In this article we&#39;ll take a look at the http.Server and http.Client of the net/http package in the Go standard library&#39;s handling of keep-alive long connections and how to turn off the keep-alive mechanism on the Server and Client side."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Understanding how the Go standard library http package handles keep-alive connections by example</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-30 09:06:15 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 3207 words </span>
+          <span class="more-meta"> 7 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#1-http-packages-enable-keep-alive-by-default">1. http packages enable keep-alive by default</a></li>
+        <li><a href="#2-http-client-side-sends-requests-based-on-non-keep-alive-connections">2. http client side sends requests based on non-keep-alive connections</a></li>
+        <li><a href="#3-create-an-http-server-that-does-not-support-keep-alive-connections">3. Create an http server that does not support keep-alive connections</a></li>
+        <li><a href="#4-http-server-that-supports-long-connection-idle-timeout-closure">4. http server that supports long connection idle timeout closure</a></li>
+        <li><a href="#5-one-http-client-can-manage-connections-to-multiple-servers">5. One http client can manage connections to multiple servers</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/30/f8b3c75fdddc4f188254d6e8645a756b.png" alt="go http"></p>
+<p>HTTP is the basic protocol of the Internet today, carrying the majority of the application layer traffic on the Internet, and from the current trend, in the next 10 years, http will remain the main protocol for Internet applications. Based on the Go standard library we can easily set up an http server to handle client-side http requests, or create an http client to send http requests to the server.</p>
+<p>Initially, the early http 1.0 protocol only supported short connections, i.e. for each request sent by the client, a new TCP connection was established with the server, and the connection would be removed after the request was processed. Obviously each tcp connection handshake and dismantling will bring a large loss, in order to make full use of the established connection, later http 1.0 updates and http 1.1 support the addition of <strong>Connection: keep-alive</strong> in the http request header to tell the other party not to close the link after the request response is complete, and to reuse the connection next time to continue to transmit subsequent requests and responses. The post-HTTP protocol specification specifies that HTTP/1.0 versions need to add <strong>Connection: keep-alive</strong> to the request header if they want to maintain a long connection, while HTTP/1.1 versions will support keep-alive long connections as the default option, with or without this request header.</p>
+<p>In this article we&rsquo;ll take a look at the <code>http.Server</code> and <code>http.Client</code> of the <code>net/http</code> package in the Go standard library&rsquo;s handling of keep-alive long connections and how to turn off the keep-alive mechanism on the Server and Client side.</p>
+<h2 id="1-http-packages-enable-keep-alive-by-default">1. http packages enable keep-alive by default</h2>
+<p>As per the HTTP/1.1 specification, the http server and client implementations of the Go http package treat all connections as long connections by default, regardless of whether the initial requests on those connections have <strong>Connection: keep-alive</strong>.</p>
+<p>The following is a http client and a http server implementation, respectively, using the default mechanism of the go http package.</p>
+<p>The http client implementation with keep-alive enabled by default.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">//github.com/bigwhite/experiments/http-keep-alive/client-keepalive-on/client.go
+</span><span class="c1"></span><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;fmt&#34;</span>
+    <span class="s">&#34;io/ioutil&#34;</span>
+    <span class="s">&#34;net/http&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">c</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">http</span><span class="p">.</span><span class="nx">Client</span><span class="p">{}</span>
+    <span class="nx">req</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">http</span><span class="p">.</span><span class="nf">NewRequest</span><span class="p">(</span><span class="s">&#34;Get&#34;</span><span class="p">,</span> <span class="s">&#34;http://localhost:8080&#34;</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;%#v\n&#34;</span><span class="p">,</span> <span class="o">*</span><span class="nx">req</span><span class="p">)</span>
+
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">5</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Do</span><span class="p">(</span><span class="nx">req</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;http get error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+        <span class="k">defer</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Body</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+
+        <span class="nx">b</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ioutil</span><span class="p">.</span><span class="nf">ReadAll</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Body</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;read body error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+        <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;response body:&#34;</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nx">b</span><span class="p">))</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The http server implementation with keep-alive enabled by default.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">//github.com/bigwhite/experiments/http-keep-alive/server-keepalive-on/server.go
+</span><span class="c1"></span><span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;fmt&#34;</span>
+    <span class="s">&#34;net/http&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">Index</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;receive a request from:&#34;</span><span class="p">,</span> <span class="nx">r</span><span class="p">.</span><span class="nx">RemoteAddr</span><span class="p">,</span> <span class="nx">r</span><span class="p">.</span><span class="nx">Header</span><span class="p">)</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Write</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;ok&#34;</span><span class="p">))</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">s</span> <span class="p">=</span> <span class="nx">http</span><span class="p">.</span><span class="nx">Server</span><span class="p">{</span>
+        <span class="nx">Addr</span><span class="p">:</span>    <span class="s">&#34;:8080&#34;</span><span class="p">,</span>
+        <span class="nx">Handler</span><span class="p">:</span> <span class="nx">http</span><span class="p">.</span><span class="nf">HandlerFunc</span><span class="p">(</span><span class="nx">Index</span><span class="p">),</span>
+    <span class="p">}</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nf">ListenAndServe</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Now we start the http server above:</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// server-keepalive-on目录下
+</span><span class="c1"></span><span class="err">$</span><span class="k">go</span> <span class="nx">run</span> <span class="nx">server</span><span class="p">.</span><span class="k">go</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We use the above client to make 5 http requests to the server.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// client-keepalive-on目录下
+</span><span class="c1"></span><span class="err">$</span><span class="k">go</span> <span class="nx">run</span> <span class="nx">client</span><span class="p">.</span><span class="k">go</span>
+<span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">{</span><span class="nx">Method</span><span class="p">:</span><span class="s">&#34;Get&#34;</span><span class="p">,</span> <span class="nx">URL</span><span class="p">:(</span><span class="o">*</span><span class="nx">url</span><span class="p">.</span><span class="nx">URL</span><span class="p">)(</span><span class="mh">0xc00016a000</span><span class="p">),</span> <span class="nx">Proto</span><span class="p">:</span><span class="s">&#34;HTTP/1.1&#34;</span><span class="p">,</span> <span class="nx">ProtoMajor</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span> <span class="nx">ProtoMinor</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span> <span class="nx">Header</span><span class="p">:</span><span class="nx">http</span><span class="p">.</span><span class="nx">Header</span><span class="p">{},</span> <span class="nx">Body</span><span class="p">:</span><span class="nx">io</span><span class="p">.</span><span class="nf">ReadCloser</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">GetBody</span><span class="p">:(</span><span class="kd">func</span><span class="p">()</span> <span class="p">(</span><span class="nx">io</span><span class="p">.</span><span class="nx">ReadCloser</span><span class="p">,</span> <span class="kt">error</span><span class="p">))(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">ContentLength</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span> <span class="nx">TransferEncoding</span><span class="p">:[]</span><span class="nb">string</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">Close</span><span class="p">:</span><span class="kc">false</span><span class="p">,</span> <span class="nx">Host</span><span class="p">:</span><span class="s">&#34;localhost:8080&#34;</span><span class="p">,</span> <span class="nx">Form</span><span class="p">:</span><span class="nx">url</span><span class="p">.</span><span class="nf">Values</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">PostForm</span><span class="p">:</span><span class="nx">url</span><span class="p">.</span><span class="nf">Values</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">MultipartForm</span><span class="p">:(</span><span class="o">*</span><span class="nx">multipart</span><span class="p">.</span><span class="nx">Form</span><span class="p">)(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">Trailer</span><span class="p">:</span><span class="nx">http</span><span class="p">.</span><span class="nf">Header</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">RemoteAddr</span><span class="p">:</span><span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">RequestURI</span><span class="p">:</span><span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">TLS</span><span class="p">:(</span><span class="o">*</span><span class="nx">tls</span><span class="p">.</span><span class="nx">ConnectionState</span><span class="p">)(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">Cancel</span><span class="p">:(</span><span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span> <span class="p">{})(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">Response</span><span class="p">:(</span><span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Response</span><span class="p">)(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">ctx</span><span class="p">:(</span><span class="o">*</span><span class="nx">context</span><span class="p">.</span><span class="nx">emptyCtx</span><span class="p">)(</span><span class="mh">0xc00012c008</span><span class="p">)}</span>
+<span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The log output from the server side during this period is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">receive a request from: [::1]:55238 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+receive a request from: [::1]:55238 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+receive a request from: [::1]:55238 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+receive a request from: [::1]:55238 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+receive a request from: [::1]:55238 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+</code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s briefly analyze the output from both ends.</p>
+<ul>
+<li>From the header fields of the requests printed on the server side, the request header from the client side does not explicitly contain <strong>Connection: keep-alive</strong> , but only two header fields, Accept-Encoding and User-Agent.</li>
+<li>The five requests processed on the server side all came from the same connection &ldquo;[::1]:55238&rdquo;, and the server side kept the connection by default instead of closing it after processing a request, indicating that both sides reused the http connection created by the first request.</li>
+</ul>
+<p>Even if our client side sends a request every 5 seconds, the server side does not close the connection by default (we buffer log packets with fmt packets and output a timestamped log).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// client-keepalive-on目录下
+</span><span class="c1"></span><span class="err">$</span><span class="k">go</span> <span class="nx">run</span> <span class="nx">client</span><span class="o">-</span><span class="nx">with</span><span class="o">-</span><span class="nx">delay</span><span class="p">.</span><span class="k">go</span>
+<span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">{</span><span class="nx">Method</span><span class="p">:</span><span class="s">&#34;Get&#34;</span><span class="p">,</span> <span class="nx">URL</span><span class="p">:(</span><span class="o">*</span><span class="nx">url</span><span class="p">.</span><span class="nx">URL</span><span class="p">)(</span><span class="mh">0xc00016a000</span><span class="p">),</span> <span class="nx">Proto</span><span class="p">:</span><span class="s">&#34;HTTP/1.1&#34;</span><span class="p">,</span> <span class="nx">ProtoMajor</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span> <span class="nx">ProtoMinor</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span> <span class="nx">Header</span><span class="p">:</span><span class="nx">http</span><span class="p">.</span><span class="nx">Header</span><span class="p">{},</span> <span class="nx">Body</span><span class="p">:</span><span class="nx">io</span><span class="p">.</span><span class="nf">ReadCloser</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">GetBody</span><span class="p">:(</span><span class="kd">func</span><span class="p">()</span> <span class="p">(</span><span class="nx">io</span><span class="p">.</span><span class="nx">ReadCloser</span><span class="p">,</span> <span class="kt">error</span><span class="p">))(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">ContentLength</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span> <span class="nx">TransferEncoding</span><span class="p">:[]</span><span class="nb">string</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">Close</span><span class="p">:</span><span class="kc">false</span><span class="p">,</span> <span class="nx">Host</span><span class="p">:</span><span class="s">&#34;localhost:8080&#34;</span><span class="p">,</span> <span class="nx">Form</span><span class="p">:</span><span class="nx">url</span><span class="p">.</span><span class="nf">Values</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">PostForm</span><span class="p">:</span><span class="nx">url</span><span class="p">.</span><span class="nf">Values</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">MultipartForm</span><span class="p">:(</span><span class="o">*</span><span class="nx">multipart</span><span class="p">.</span><span class="nx">Form</span><span class="p">)(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">Trailer</span><span class="p">:</span><span class="nx">http</span><span class="p">.</span><span class="nf">Header</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">RemoteAddr</span><span class="p">:</span><span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">RequestURI</span><span class="p">:</span><span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">TLS</span><span class="p">:(</span><span class="o">*</span><span class="nx">tls</span><span class="p">.</span><span class="nx">ConnectionState</span><span class="p">)(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">Cancel</span><span class="p">:(</span><span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span> <span class="p">{})(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">Response</span><span class="p">:(</span><span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Response</span><span class="p">)(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">ctx</span><span class="p">:(</span><span class="o">*</span><span class="nx">context</span><span class="p">.</span><span class="nx">emptyCtx</span><span class="p">)(</span><span class="mh">0xc00012c008</span><span class="p">)}</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">25</span><span class="p">:</span><span class="mi">21</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">25</span><span class="p">:</span><span class="mi">26</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">25</span><span class="p">:</span><span class="mi">31</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">25</span><span class="p">:</span><span class="mi">36</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">25</span><span class="p">:</span><span class="mi">41</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+
+<span class="c1">// server-keepalive-on目录下
+</span><span class="c1"></span><span class="err">$</span><span class="k">go</span> <span class="nx">run</span> <span class="nx">server</span><span class="p">.</span><span class="k">go</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">25</span><span class="p">:</span><span class="mi">21</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">58419</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">25</span><span class="p">:</span><span class="mi">26</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">58419</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">25</span><span class="p">:</span><span class="mi">31</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">58419</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">25</span><span class="p">:</span><span class="mi">36</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">58419</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">25</span><span class="p">:</span><span class="mi">41</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">58419</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+</code></pre></td></tr></table>
+</div>
+</div><h2 id="2-http-client-side-sends-requests-based-on-non-keep-alive-connections">2. http client side sends requests based on non-keep-alive connections</h2>
+<p>Sometimes the http client does not have a high density of data requests on a connection, so the client does not want to keep the connection for a long time (taking up port resources), so how can the client coordinate with the Server to close the connection after the request returns an answer? Let&rsquo;s see how to implement this scenario in Go.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">//github.com/bigwhite/experiments/http-keep-alive/client-keepalive-off/client.go
+</span><span class="c1"></span><span class="o">...</span> <span class="o">...</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">tr</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">http</span><span class="p">.</span><span class="nx">Transport</span><span class="p">{</span>
+        <span class="nx">DisableKeepAlives</span><span class="p">:</span> <span class="kc">true</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="nx">c</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">http</span><span class="p">.</span><span class="nx">Client</span><span class="p">{</span>
+        <span class="nx">Transport</span><span class="p">:</span> <span class="nx">tr</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="nx">req</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">http</span><span class="p">.</span><span class="nf">NewRequest</span><span class="p">(</span><span class="s">&#34;Get&#34;</span><span class="p">,</span> <span class="s">&#34;http://localhost:8080&#34;</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">5</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Do</span><span class="p">(</span><span class="nx">req</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;http get error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+        <span class="k">defer</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Body</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+
+        <span class="nx">b</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ioutil</span><span class="p">.</span><span class="nf">ReadAll</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Body</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;read body error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;response body:&#34;</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nx">b</span><span class="p">))</span>
+        <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">5</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+    <span class="p">}</span>
+
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The underlying data connection establishment and maintenance of http.Client is implemented by http.Transport. http.Transport structure has a DisableKeepAlives field with a default value of false, which starts keep-alive. alive, and then assign this Transport instance to the Transport field of the http Client instance as the initial value.</p>
+<p>Next, we use this client to send five requests to the http server above, with an interval of 5 seconds between requests (to simulate an idle connection), and we get the following results (observed by printing information from the server side).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 在client-keepalive-off下面
+</span><span class="c1"></span><span class="err">$</span><span class="k">go</span> <span class="nx">run</span> <span class="nx">client</span><span class="p">.</span><span class="k">go</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">42</span><span class="p">:</span><span class="mi">38</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">42</span><span class="p">:</span><span class="mi">43</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">42</span><span class="p">:</span><span class="mi">48</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">42</span><span class="p">:</span><span class="mi">53</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">42</span><span class="p">:</span><span class="mi">58</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+
+<span class="c1">// 在server-keepalive-on下面
+</span><span class="c1"></span>
+<span class="err">$</span><span class="k">go</span> <span class="nx">run</span> <span class="nx">server</span><span class="p">.</span><span class="k">go</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">42</span><span class="p">:</span><span class="mi">38</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">62287</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">Connection</span><span class="p">:[</span><span class="nx">close</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">42</span><span class="p">:</span><span class="mi">43</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">62301</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">Connection</span><span class="p">:[</span><span class="nx">close</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">42</span><span class="p">:</span><span class="mi">48</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">62314</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">Connection</span><span class="p">:[</span><span class="nx">close</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">42</span><span class="p">:</span><span class="mi">53</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">62328</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">Connection</span><span class="p">:[</span><span class="nx">close</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">12</span><span class="p">:</span><span class="mi">42</span><span class="p">:</span><span class="mi">58</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">62342</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">Connection</span><span class="p">:[</span><span class="nx">close</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>From the output of the Server, the request from the client adds the <strong>Connection:[close]</strong> header field, and when such a request is received, the Server side no longer maintains this connection. We also see in the logs above that each request is sent out on a different client port, so clearly these are five different connections.</p>
+<h2 id="3-create-an-http-server-that-does-not-support-keep-alive-connections">3. Create an http server that does not support keep-alive connections</h2>
+<p>Suppose we have a requirement that the server does not support keep-alive connections at all, and the server will close the connection after returning an answer, regardless of whether the client sends a request with <strong>Connection: keep-alive</strong> explicitly in the header. So how can we achieve this in Go? Let&rsquo;s look at the following code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">//github.com/bigwhite/experiments/http-keep-alive/server-keepalive-off/server.go
+</span><span class="c1"></span>
+<span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;log&#34;</span>
+    <span class="s">&#34;net/http&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">Index</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;receive a request from:&#34;</span><span class="p">,</span> <span class="nx">r</span><span class="p">.</span><span class="nx">RemoteAddr</span><span class="p">,</span> <span class="nx">r</span><span class="p">.</span><span class="nx">Header</span><span class="p">)</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Write</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;ok&#34;</span><span class="p">))</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">s</span> <span class="p">=</span> <span class="nx">http</span><span class="p">.</span><span class="nx">Server</span><span class="p">{</span>
+        <span class="nx">Addr</span><span class="p">:</span>    <span class="s">&#34;:8080&#34;</span><span class="p">,</span>
+        <span class="nx">Handler</span><span class="p">:</span> <span class="nx">http</span><span class="p">.</span><span class="nf">HandlerFunc</span><span class="p">(</span><span class="nx">Index</span><span class="p">),</span>
+    <span class="p">}</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nf">SetKeepAlivesEnabled</span><span class="p">(</span><span class="kc">false</span><span class="p">)</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nf">ListenAndServe</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that before ListenAndServe, we call the SetKeepAlivesEnabled method of http.Server and pass in the false argument, so that we turn off support for keep-alive connections to that Server at the global level, and we use the previous client-keepalive -on the following client to send five requests to the Server.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 在client-keepalive-on下面
+</span><span class="c1"></span><span class="err">$</span><span class="k">go</span> <span class="nx">run</span> <span class="nx">client</span><span class="p">.</span><span class="k">go</span>
+<span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">{</span><span class="nx">Method</span><span class="p">:</span><span class="s">&#34;Get&#34;</span><span class="p">,</span> <span class="nx">URL</span><span class="p">:(</span><span class="o">*</span><span class="nx">url</span><span class="p">.</span><span class="nx">URL</span><span class="p">)(</span><span class="mh">0xc000174000</span><span class="p">),</span> <span class="nx">Proto</span><span class="p">:</span><span class="s">&#34;HTTP/1.1&#34;</span><span class="p">,</span> <span class="nx">ProtoMajor</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span> <span class="nx">ProtoMinor</span><span class="p">:</span><span class="mi">1</span><span class="p">,</span> <span class="nx">Header</span><span class="p">:</span><span class="nx">http</span><span class="p">.</span><span class="nx">Header</span><span class="p">{},</span> <span class="nx">Body</span><span class="p">:</span><span class="nx">io</span><span class="p">.</span><span class="nf">ReadCloser</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">GetBody</span><span class="p">:(</span><span class="kd">func</span><span class="p">()</span> <span class="p">(</span><span class="nx">io</span><span class="p">.</span><span class="nx">ReadCloser</span><span class="p">,</span> <span class="kt">error</span><span class="p">))(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">ContentLength</span><span class="p">:</span><span class="mi">0</span><span class="p">,</span> <span class="nx">TransferEncoding</span><span class="p">:[]</span><span class="nb">string</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">Close</span><span class="p">:</span><span class="kc">false</span><span class="p">,</span> <span class="nx">Host</span><span class="p">:</span><span class="s">&#34;localhost:8080&#34;</span><span class="p">,</span> <span class="nx">Form</span><span class="p">:</span><span class="nx">url</span><span class="p">.</span><span class="nf">Values</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">PostForm</span><span class="p">:</span><span class="nx">url</span><span class="p">.</span><span class="nf">Values</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">MultipartForm</span><span class="p">:(</span><span class="o">*</span><span class="nx">multipart</span><span class="p">.</span><span class="nx">Form</span><span class="p">)(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">Trailer</span><span class="p">:</span><span class="nx">http</span><span class="p">.</span><span class="nf">Header</span><span class="p">(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">RemoteAddr</span><span class="p">:</span><span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">RequestURI</span><span class="p">:</span><span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">TLS</span><span class="p">:(</span><span class="o">*</span><span class="nx">tls</span><span class="p">.</span><span class="nx">ConnectionState</span><span class="p">)(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">Cancel</span><span class="p">:(</span><span class="o">&lt;-</span><span class="kd">chan</span> <span class="kd">struct</span> <span class="p">{})(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">Response</span><span class="p">:(</span><span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Response</span><span class="p">)(</span><span class="kc">nil</span><span class="p">),</span> <span class="nx">ctx</span><span class="p">:(</span><span class="o">*</span><span class="nx">context</span><span class="p">.</span><span class="nx">emptyCtx</span><span class="p">)(</span><span class="mh">0xc00013a008</span><span class="p">)}</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">13</span><span class="p">:</span><span class="mi">30</span><span class="p">:</span><span class="mi">08</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">13</span><span class="p">:</span><span class="mi">30</span><span class="p">:</span><span class="mi">08</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">13</span><span class="p">:</span><span class="mi">30</span><span class="p">:</span><span class="mi">08</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">13</span><span class="p">:</span><span class="mi">30</span><span class="p">:</span><span class="mi">08</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">13</span><span class="p">:</span><span class="mi">30</span><span class="p">:</span><span class="mi">08</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+
+<span class="c1">// 在server-keepalive-off下面
+</span><span class="c1"></span><span class="err">$</span><span class="k">go</span> <span class="nx">run</span> <span class="nx">server</span><span class="p">.</span><span class="k">go</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">13</span><span class="p">:</span><span class="mi">30</span><span class="p">:</span><span class="mi">08</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">53005</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">13</span><span class="p">:</span><span class="mi">30</span><span class="p">:</span><span class="mi">08</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">53006</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">13</span><span class="p">:</span><span class="mi">30</span><span class="p">:</span><span class="mi">08</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">53007</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">13</span><span class="p">:</span><span class="mi">30</span><span class="p">:</span><span class="mi">08</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">53008</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">13</span><span class="p">:</span><span class="mi">30</span><span class="p">:</span><span class="mi">08</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">53009</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that the Server closes the connection transmitting the request after processing each request, which causes the client to measure having to create a new connection for each request (as seen by the client address and port output from the server).</p>
+<h2 id="4-http-server-that-supports-long-connection-idle-timeout-closure">4. http server that supports long connection idle timeout closure</h2>
+<p>Obviously the above server is &ldquo;too overbearing&rdquo; and the above &ldquo;one-size-fits-all&rdquo; mechanism does not make sense for a client who wants to reuse connections and improve the efficiency of request and reply transmission. So is there a mechanism that allows the http server to keep-alive on connections with high data density, and to clean up those idle connections that have not been transmitted for a long time, releasing the occupied system resources? Let&rsquo;s look at the following go implementation of the server.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">//github.com/bigwhite/experiments/http-keep-alive/server-keepalive-with-idletimeout/server.go
+</span><span class="c1"></span>
+<span class="kn">package</span> <span class="nx">main</span>
+
+<span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;log&#34;</span>
+    <span class="s">&#34;net/http&#34;</span>
+    <span class="s">&#34;time&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">Index</span><span class="p">(</span><span class="nx">w</span> <span class="nx">http</span><span class="p">.</span><span class="nx">ResponseWriter</span><span class="p">,</span> <span class="nx">r</span> <span class="o">*</span><span class="nx">http</span><span class="p">.</span><span class="nx">Request</span><span class="p">)</span> <span class="p">{</span>
+    <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;receive a request from:&#34;</span><span class="p">,</span> <span class="nx">r</span><span class="p">.</span><span class="nx">RemoteAddr</span><span class="p">,</span> <span class="nx">r</span><span class="p">.</span><span class="nx">Header</span><span class="p">)</span>
+    <span class="nx">w</span><span class="p">.</span><span class="nf">Write</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;ok&#34;</span><span class="p">))</span>
+<span class="p">}</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="kd">var</span> <span class="nx">s</span> <span class="p">=</span> <span class="nx">http</span><span class="p">.</span><span class="nx">Server</span><span class="p">{</span>
+        <span class="nx">Addr</span><span class="p">:</span>        <span class="s">&#34;:8080&#34;</span><span class="p">,</span>
+        <span class="nx">Handler</span><span class="p">:</span>     <span class="nx">http</span><span class="p">.</span><span class="nf">HandlerFunc</span><span class="p">(</span><span class="nx">Index</span><span class="p">),</span>
+        <span class="nx">IdleTimeout</span><span class="p">:</span> <span class="mi">5</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">,</span>
+    <span class="p">}</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nf">ListenAndServe</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>From the code we see that we only explicitly assign an explicit value to the field IdleTimeout when we create the <code>http.Server</code> instance, setting the idle connection timeout to 5s. Here is a comment from the Go standard library about the field IdleTimeout for <code>http.Server</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// $GOROOT/src/net/server.go
+</span><span class="c1"></span>
+<span class="c1">// IdleTimeout是当启用keep-alive时等待下一个请求的最大时间。
+</span><span class="c1">// 如果IdleTimeout为零，则使用ReadTimeout的值。如果两者都是
+</span><span class="c1">// 零，则没有超时。
+</span><span class="c1"></span><span class="nx">IdleTimeout</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Duration</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s see how it works and if it is what we expect. To test the effect, we modified the client side and put it under client-keepalive-on-with-idle.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">//github.com/bigwhite/experiments/http-keep-alive/client-keepalive-on-with-idle/client.go
+</span><span class="c1"></span><span class="o">...</span> <span class="o">...</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">c</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">http</span><span class="p">.</span><span class="nx">Client</span><span class="p">{}</span>
+    <span class="nx">req</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">http</span><span class="p">.</span><span class="nf">NewRequest</span><span class="p">(</span><span class="s">&#34;Get&#34;</span><span class="p">,</span> <span class="s">&#34;http://localhost:8080&#34;</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">5</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;round %d begin:\n&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+        <span class="k">for</span> <span class="nx">j</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">j</span> <span class="p">&lt;</span> <span class="nx">i</span><span class="o">+</span><span class="mi">1</span><span class="p">;</span> <span class="nx">j</span><span class="o">++</span> <span class="p">{</span>
+            <span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Do</span><span class="p">(</span><span class="nx">req</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;http get error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+                <span class="k">return</span>
+            <span class="p">}</span>
+            <span class="k">defer</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Body</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+
+            <span class="nx">b</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ioutil</span><span class="p">.</span><span class="nf">ReadAll</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Body</span><span class="p">)</span>
+            <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+                <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;read body error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+                <span class="k">return</span>
+            <span class="p">}</span>
+            <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;response body:&#34;</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nx">b</span><span class="p">))</span>
+        <span class="p">}</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;round %d end\n&#34;</span><span class="p">,</span> <span class="nx">i</span><span class="o">+</span><span class="mi">1</span><span class="p">)</span>
+        <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">7</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>The client request is divided into 5 rounds, with an interval of 7 seconds between rounds, and the following is the communication process and results.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// 在client-keepalive-on-with-idle下
+</span><span class="c1"></span><span class="err">$</span><span class="k">go</span> <span class="nx">run</span> <span class="nx">client</span><span class="p">.</span><span class="k">go</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mo">05</span> <span class="nx">round</span> <span class="mi">1</span> <span class="nx">begin</span><span class="p">:</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mo">05</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mo">05</span> <span class="nx">round</span> <span class="mi">1</span> <span class="nx">end</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">12</span> <span class="nx">round</span> <span class="mi">2</span> <span class="nx">begin</span><span class="p">:</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">12</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">12</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">12</span> <span class="nx">round</span> <span class="mi">2</span> <span class="nx">end</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">19</span> <span class="nx">round</span> <span class="mi">3</span> <span class="nx">begin</span><span class="p">:</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">19</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">19</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">19</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">19</span> <span class="nx">round</span> <span class="mi">3</span> <span class="nx">end</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">26</span> <span class="nx">round</span> <span class="mi">4</span> <span class="nx">begin</span><span class="p">:</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">26</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">26</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">26</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">26</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">26</span> <span class="nx">round</span> <span class="mi">4</span> <span class="nx">end</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">33</span> <span class="nx">round</span> <span class="mi">5</span> <span class="nx">begin</span><span class="p">:</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">33</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">33</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">33</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">33</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">33</span> <span class="nx">response</span> <span class="nx">body</span><span class="p">:</span> <span class="nx">ok</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">33</span> <span class="nx">round</span> <span class="mi">5</span> <span class="nx">end</span>
+
+<span class="c1">// 在server-keepalive-with-idletimeout下
+</span><span class="c1"></span><span class="err">$</span><span class="k">go</span> <span class="nx">run</span> <span class="nx">server</span><span class="p">.</span><span class="k">go</span>
+
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mo">05</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64071</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">12</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64145</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">12</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64145</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">19</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64189</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">19</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64189</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">19</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64189</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">26</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64250</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">26</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64250</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">26</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64250</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">26</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64250</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">33</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64304</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">33</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64304</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">33</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64304</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">33</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64304</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+<span class="mi">2021</span><span class="o">/</span><span class="mo">01</span><span class="o">/</span><span class="mo">03</span> <span class="mi">14</span><span class="p">:</span><span class="mi">17</span><span class="p">:</span><span class="mi">33</span> <span class="nx">receive</span> <span class="nx">a</span> <span class="nx">request</span> <span class="nx">from</span><span class="p">:</span> <span class="p">[::</span><span class="mi">1</span><span class="p">]:</span><span class="mi">64304</span> <span class="kd">map</span><span class="p">[</span><span class="nx">Accept</span><span class="o">-</span><span class="nx">Encoding</span><span class="p">:[</span><span class="nx">gzip</span><span class="p">]</span> <span class="nx">User</span><span class="o">-</span><span class="nx">Agent</span><span class="p">:[</span><span class="nx">Go</span><span class="o">-</span><span class="nx">http</span><span class="o">-</span><span class="nx">client</span><span class="o">/</span><span class="mf">1.1</span><span class="p">]]</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that.</p>
+<ul>
+<li>(a) Within each round, all requests on the client side are multiplexed with established connections.</li>
+<li>However, between each round, as Sleep is 7 seconds beyond the idletimeout on the server side, the connection from the previous round is dismantled and the new round has to rebuild the connection.</li>
+</ul>
+<p>The effect we expect is achieved!</p>
+<h2 id="5-one-http-client-can-manage-connections-to-multiple-servers">5. One http client can manage connections to multiple servers</h2>
+<p>Client is not a one-to-one relationship with a server, it enables one-to-many http communication, meaning that a single http client can manage connections to multiple servers and prioritize multiplexing connections to the same server (keep-alive) instead of creating new connections, as we saw above. as we saw above. Let&rsquo;s create a client that sends requests to multiple servers.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">//github.com/bigwhite/experiments/http-keep-alive/client-keepalive-on-to-multiple-servers/client.go
+</span><span class="c1"></span><span class="o">...</span> <span class="o">...</span>
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">c</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">http</span><span class="p">.</span><span class="nx">Client</span><span class="p">{}</span>
+    <span class="nx">req1</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">http</span><span class="p">.</span><span class="nf">NewRequest</span><span class="p">(</span><span class="s">&#34;Get&#34;</span><span class="p">,</span> <span class="s">&#34;http://localhost:8080&#34;</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+    <span class="nx">req2</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">http</span><span class="p">.</span><span class="nf">NewRequest</span><span class="p">(</span><span class="s">&#34;Get&#34;</span><span class="p">,</span> <span class="s">&#34;http://localhost:8081&#34;</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+        <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+    <span class="p">}</span>
+
+    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">5</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+        <span class="nx">resp1</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Do</span><span class="p">(</span><span class="nx">req1</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;http get error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+        <span class="k">defer</span> <span class="nx">resp1</span><span class="p">.</span><span class="nx">Body</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+
+        <span class="nx">b1</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ioutil</span><span class="p">.</span><span class="nf">ReadAll</span><span class="p">(</span><span class="nx">resp1</span><span class="p">.</span><span class="nx">Body</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;read body error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;response1 body:&#34;</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nx">b1</span><span class="p">))</span>
+
+        <span class="nx">resp2</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">Do</span><span class="p">(</span><span class="nx">req2</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;http get error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+        <span class="k">defer</span> <span class="nx">resp2</span><span class="p">.</span><span class="nx">Body</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+
+        <span class="nx">b2</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ioutil</span><span class="p">.</span><span class="nf">ReadAll</span><span class="p">(</span><span class="nx">resp2</span><span class="p">.</span><span class="nx">Body</span><span class="p">)</span>
+        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;read body error:&#34;</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+            <span class="k">return</span>
+        <span class="p">}</span>
+        <span class="nx">log</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;response2 body:&#34;</span><span class="p">,</span> <span class="nb">string</span><span class="p">(</span><span class="nx">b2</span><span class="p">))</span>
+
+        <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">5</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+    <span class="p">}</span>
+
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>We create two default http servers, listening to 8080 and 8081 respectively, and run the above client.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">$go run client.go
+2021/01/03 14:52:20 response1 body: ok
+2021/01/03 14:52:20 response2 body: ok
+2021/01/03 14:52:25 response1 body: ok
+2021/01/03 14:52:25 response2 body: ok
+2021/01/03 14:52:30 response1 body: ok
+2021/01/03 14:52:30 response2 body: ok
+2021/01/03 14:52:35 response1 body: ok
+2021/01/03 14:52:35 response2 body: ok
+2021/01/03 14:52:40 response1 body: ok
+2021/01/03 14:52:40 response2 body: ok
+</code></pre></td></tr></table>
+</div>
+</div><p>The output of the server side is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt">// server1(8080):
+2021/01/03 14:52:20 receive a request from: [::1]:63871 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+2021/01/03 14:52:25 receive a request from: [::1]:63871 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+2021/01/03 14:52:30 receive a request from: [::1]:63871 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+2021/01/03 14:52:35 receive a request from: [::1]:63871 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+2021/01/03 14:52:40 receive a request from: [::1]:63871 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+
+// server2(8081):
+2021/01/03 14:52:20 receive a request from: [::1]:63872 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+2021/01/03 14:52:25 receive a request from: [::1]:63872 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+2021/01/03 14:52:30 receive a request from: [::1]:63872 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+2021/01/03 14:52:35 receive a request from: [::1]:63872 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+2021/01/03 14:52:40 receive a request from: [::1]:63872 map[Accept-Encoding:[gzip] User-Agent:[Go-http-client/1.1]]
+</code></pre></td></tr></table>
+</div>
+</div><p>We see that the client supports communication with multiple servers at the same time and for each server can use keep-alive connections for efficient communication.</p>
+<p>The source code for this article can be downloaded from <a href="https://github.com/bigwhite/experiments/tree/master/http-keep-alive">here</a>.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/migrate-docker-installation-directory/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Two ways to migrate the default installation (storage) directory for Docker</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/presto/">
+            <span class="next-text nav-default">Open Source Distributed Query Engine - Presto</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
