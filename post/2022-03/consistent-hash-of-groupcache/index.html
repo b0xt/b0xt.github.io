@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Consistent Hash Principle and GroupCache Source Code Analysis - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Consistent Hash is often used to alleviate the problem of large cache failures caused by scaling up and down nodes in distributed caching systems. Consistent Hash is more of a load balancing strategy than a Hash algorithm. GroupCache is an official golang distributed cache library that includes a simple implementation of Consistent Hash. The code is available at github.com/golang/groupcache/consistenthash. This article will provide insight into the principles of Consistency Hash" /><meta name="keywords" content="consistent-hash, Groupcache" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/consistent-hash-of-groupcache/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Consistent Hash Principle and GroupCache Source Code Analysis" />
+<meta property="og:description" content="Consistent Hash is often used to alleviate the problem of large cache failures caused by scaling up and down nodes in distributed caching systems. Consistent Hash is more of a load balancing strategy than a Hash algorithm. GroupCache is an official golang distributed cache library that includes a simple implementation of Consistent Hash. The code is available at github.com/golang/groupcache/consistenthash. This article will provide insight into the principles of Consistency Hash" />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/consistent-hash-of-groupcache/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-30T15:45:39+08:00" />
+<meta property="article:modified_time" content="2022-03-30T15:45:39+08:00" />
+
+<meta itemprop="name" content="Consistent Hash Principle and GroupCache Source Code Analysis">
+<meta itemprop="description" content="Consistent Hash is often used to alleviate the problem of large cache failures caused by scaling up and down nodes in distributed caching systems. Consistent Hash is more of a load balancing strategy than a Hash algorithm. GroupCache is an official golang distributed cache library that includes a simple implementation of Consistent Hash. The code is available at github.com/golang/groupcache/consistenthash. This article will provide insight into the principles of Consistency Hash"><meta itemprop="datePublished" content="2022-03-30T15:45:39+08:00" />
+<meta itemprop="dateModified" content="2022-03-30T15:45:39+08:00" />
+<meta itemprop="wordCount" content="1659">
+<meta itemprop="keywords" content="consistent-hash," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Consistent Hash Principle and GroupCache Source Code Analysis"/>
+<meta name="twitter:description" content="Consistent Hash is often used to alleviate the problem of large cache failures caused by scaling up and down nodes in distributed caching systems. Consistent Hash is more of a load balancing strategy than a Hash algorithm. GroupCache is an official golang distributed cache library that includes a simple implementation of Consistent Hash. The code is available at github.com/golang/groupcache/consistenthash. This article will provide insight into the principles of Consistency Hash"/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Consistent Hash Principle and GroupCache Source Code Analysis</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-30 15:45:39 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1659 words </span>
+          <span class="more-meta"> 4 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#caching-problems-due-to-cluster-expansion-and-contraction">Caching problems due to cluster expansion and contraction</a></li>
+        <li><a href="#principle-of-consistent-hash">Principle of Consistent Hash</a>
+          <ul>
+            <li><a href="#cache-failure-mitigation">Cache Failure Mitigation</a></li>
+            <li><a href="#data-skewing-and-virtual-nodes">Data Skewing and Virtual Nodes</a></li>
+            <li><a href="#add-function">Add function</a></li>
+            <li><a href="#get-function">Get function</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Consistent Hash is often used to alleviate the problem of large cache failures caused by scaling up and down nodes in distributed caching systems. Consistent Hash is more of a load balancing strategy than a Hash algorithm.</p>
+<p>GroupCache is an official golang distributed cache library that includes a simple implementation of Consistent Hash. The code is available at <a href="https://github.com/golang/groupcache/blob/master/consistenthash/consistenthash.go">github.com/golang/groupcache/consistenthash</a>. This article will provide insight into the principles of Consistency Hash based on GroupCache&rsquo;s Consistency Hash implementation.</p>
+<p>This paper will focus on the following points.</p>
+<ol>
+<li>the cache failure problem faced by traditional Hash-based load balancing during cluster expansion and contraction.</li>
+<li>the principle of Consistent Hash.</li>
+<li>how Golang&rsquo;s open source library GroupCache implements Consistent Hash.</li>
+</ol>
+<h2 id="caching-problems-due-to-cluster-expansion-and-contraction">Caching problems due to cluster expansion and contraction</h2>
+<p>Let&rsquo;s look at the traditional Hash-based load balancing and see what problems are encountered when the cluster is scaled up or down.</p>
+<p>Suppose we have three cache servers, each used to cache a portion of the user&rsquo;s information. The most common Hash load balancing practice is that for a given user, we can calculate the hash value of the user name or other unique information, and then divide the hash value by 3 to get the cache server corresponding to that user. This is shown in the figure below:</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/30/cdd20c93248549f087be77afdd9228af.png" alt="consistent-hash"></p>
+<p>When we need to expand or reduce the capacity of the cluster, adding or reducing some server nodes will cause large cache failures.</p>
+<p>For example, if we need to expand a server from 3 to 4 cache servers, then the previous policy of <code>hash(username) % 3</code> will be changed to <code>hash(username) % 4</code>. The whole load balancing policy is completely changed and there is a risk of hash failure for any user.</p>
+<p>And once the cache fails en masse, all requests cannot hit the cache, and the client requests directly to the back-end service, the system is likely to crash.</p>
+<h2 id="principle-of-consistent-hash">Principle of Consistent Hash</h2>
+<p>In response to the above problem, if we use Consistent Hash as a load balancing strategy for the caching system, we can effectively alleviate the cache failure problem caused by cluster expansion and contraction.</p>
+<p>In contrast to the direct hash modulo the target Server, Consistent Hash uses <strong>ordered Hash ring</strong> to select the target cache Server, as shown in the following figure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/30/584812f616e94b25b7d4ed2bfc123559.png" alt="Consistent Hash"></p>
+<p>For this ordered Hash ring, each node in the ring corresponds to a cache server, and each node also contains an integer value. The nodes are ordered by that integer value <strong>from smallest to largest</strong>.</p>
+<p>For a given user, we still first compute the hash value of the user name. Then, we search the Hash ring in order of value size, from smallest to largest, and find the <strong>first node</strong> that is greater than or equal to that hash value and use it as the target cache server.</p>
+<p>For example, we have three nodes <code>Node-A</code>, <code>Node-B</code>, and <code>Node-C</code> in the hash ring with values of 3, 7, and 13, respectively, and assume that for a user, the hash value of his username is 9, and the first node in the ring greater than 9 is <code>Node-C</code>, then <code>Node-C</code> is chosen as the cache server for that user. Node-C</p>
+<h3 id="cache-failure-mitigation">Cache Failure Mitigation</h3>
+<p>The above is the normal use of Consistent Hash. Next, let&rsquo;s see how Consistent Hash copes with the expansion and contraction of the cluster.</p>
+<p>When we expand the cluster and add a new node <code>New-Node</code>, assuming the value of the node is 11, then the new ordered Hash ring is as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/30/da2b4249d4974ebdbb106e392fe3fabc.png" alt="Cache Failure Mitigation"></p>
+<p>Let&rsquo;s look at the cache invalidation scenario: in this case, only the data cache with hash values between <code>Node-B</code> and <code>NewNode</code> (i.e., (7, 11]) is invalidated. This data, which was assigned to node <code>Node-C</code> (value 13), now needs to be migrated to the new node <code>NewNode</code>.</p>
+<p>The cached data that was assigned to nodes <code>Node-A</code> and <code>Node-B</code> will not be affected in any way. The data in the range between <code>NewNode</code> and <code>Node-B</code> (i.e., (11, 13]) is assigned to <code>Node-C</code>. After the new node appears, this data still belongs to <code>Node-C</code> and will not be affected in any way.</p>
+<p>Consistent Hash makes use of the ordered Hash ring to cleverly mitigate the cache invalidation problem caused by cluster expansion and contraction. Note that we say &ldquo;mitigate&rdquo; here; cache invalidation cannot be completely avoided, but its impact can be minimized.</p>
+<p>A small problem here is that since an ordered Hash ring requires each node in it to have hold an integer value, how is this integer value obtained? The general approach is that we can use the node&rsquo;s unique information to calculate its Hash value, such as <code>hash(ip:port)</code>.</p>
+<h3 id="data-skewing-and-virtual-nodes">Data Skewing and Virtual Nodes</h3>
+<p>The above describes the basic process of consistent hash, so it seems that consistent hash is indeed effective as a means to mitigate cache failures.</p>
+<p>But let&rsquo;s consider a limiting case. Suppose there are only two cache nodes in the whole cluster: <code>Node-A</code> and <code>Node-B</code>. Then <code>Node-B</code> will hold data with a Hash value in the range <code>(Node-A, Node-B]</code>. And <code>Node-A</code> will take two parts of the data: <code>hash &lt; Node-A</code> and <code>hash &gt; Node-B</code>.</p>
+<p>From this range of values, we can easily see that the value space of <code>Node-A</code> is actually much larger than that of <code>Node-B</code>. When the amount of data is large, <code>Node-A</code> will also carry much more data than <code>Node-B</code>. In fact, when there are too few nodes, it is easy to allocate far more data to one node than to others. This phenomenon we often call `Data Skew'.</p>
+<p>For such problems, we can introduce the concept of virtual nodes, or replica nodes. Each real cache Server corresponds to multiple virtual nodes on the Hash ring. This is shown in the following figure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/03/30/685c1658a8bc46ffbf70f573ff638c98.png" alt="Data Skewing and Virtual Nodes"></p>
+<p>For the above diagram, we still have only three cache servers, but each server has a copy, e.g. <code>V-Node-A</code> and <code>Node-A</code> both correspond to the same cache server.</p>
+<p>Consistent Hash Implementation of #GroupCache</p>
+<p>GroupCache provides a simple implementation of consistent hash. The code is available at <a href="https://github.com/golang/groupcache/blob/master/consistenthash/consistenthash.go">github.com/golang/groupcache/consistenthash</a>.</p>
+<p>Let&rsquo;s look at how it is used.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kn">import</span> <span class="p">(</span>
+    <span class="s">&#34;fmt&#34;</span>
+    <span class="s">&#34;github.com/golang/groupcache/consistenthash&#34;</span>
+<span class="p">)</span>
+
+<span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="c1">// 构造一个 consistenthash 对象，每个节点在 Hash 环上都一共有三个虚拟节点。
+</span><span class="c1"></span>    <span class="nx">hash</span> <span class="o">:=</span> <span class="nx">consistenthash</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="mi">3</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+
+    <span class="c1">// 添加节点
+</span><span class="c1"></span>    <span class="nx">hash</span><span class="p">.</span><span class="nf">Add</span><span class="p">(</span>
+        <span class="s">&#34;127.0.0.1:8080&#34;</span><span class="p">,</span>
+        <span class="s">&#34;127.0.0.1:8081&#34;</span><span class="p">,</span>
+        <span class="s">&#34;127.0.0.1:8082&#34;</span><span class="p">,</span>
+    <span class="p">)</span>
+
+    <span class="c1">// 根据 key 获取其对应的节点
+</span><span class="c1"></span>    <span class="nx">node</span> <span class="o">:=</span> <span class="nx">hash</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="s">&#34;cyhone.com&#34;</span><span class="p">)</span>
+
+    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="nx">node</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>consistenthash provides three functions for external use.</p>
+<ol>
+<li><code>New(replicas int, fn Hash)</code>: construct a consistenthash object, <code>replicas</code> represents the number of virtual nodes for each node, for example replicas equals 3, which means that each node corresponds to three virtual nodes on the Hash ring. <code>fn</code> represents a custom hash function, passing nil will use the default hash function.</li>
+<li>the <code>Add</code> function: adds nodes to the Hash ring; 3. the <code>Get</code> function: adds nodes to the Hash ring.</li>
+<li><code>Get</code> function: pass in a key and get the node it is assigned to.</li>
+</ol>
+<h3 id="add-function">Add function</h3>
+<p>The Add function is used to add nodes to the Hash ring. Its source code is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">Add</span><span class="p">(</span><span class="nx">keys</span> <span class="o">...</span><span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">key</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">keys</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">m</span><span class="p">.</span><span class="nx">replicas</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+            <span class="nx">hash</span> <span class="o">:=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nf">hash</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">strconv</span><span class="p">.</span><span class="nf">Itoa</span><span class="p">(</span><span class="nx">i</span><span class="p">)</span> <span class="o">+</span> <span class="nx">key</span><span class="p">)))</span>
+            <span class="nx">m</span><span class="p">.</span><span class="nx">keys</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">keys</span><span class="p">,</span> <span class="nx">hash</span><span class="p">)</span>
+            <span class="nx">m</span><span class="p">.</span><span class="nx">hashMap</span><span class="p">[</span><span class="nx">hash</span><span class="p">]</span> <span class="p">=</span> <span class="nx">key</span>
+        <span class="p">}</span>
+    <span class="p">}</span>
+
+    <span class="c1">// 排序，这个动作非常重要，因为只有这样，才能构造一个有序的 Hash 环
+</span><span class="c1"></span>    <span class="nx">sort</span><span class="p">.</span><span class="nf">Ints</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">keys</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>There are two important properties involved in the Add function. 1:</p>
+<ol>
+<li>keys: type <code>[]int</code>. This is actually the ordered Hash ring we mentioned above, represented here as an array. Each item in the array represents a virtual node and its value.</li>
+<li>hashMap: type <code>map[int]string</code> . This is the mapping of virtual nodes to real nodes passed by the user. map&rsquo;s key is the element of the <code>keys</code> property.</li>
+</ol>
+<p>In this function, there is an operation to generate virtual nodes. For example, if the user passes <code>[&quot;Node-A&quot;, &quot;Node-B&quot;]</code> with replicas equal to 2, then <code>Node-A</code> will correspond to two virtual nodes in the Hash ring: <code>0Node-A</code>, <code>1Node-A</code>, and the values corresponding to these two nodes will be obtained by directly computing hash on them.</p>
+<p>Note that the function will sort the <code>keys</code> at the end of each Add. So it is better to add all the nodes at once to avoid multiple sorting.</p>
+<h3 id="get-function">Get function</h3>
+<p>Next, we analyze the use of the Get function, which is used to assign the corresponding node to the specified key. The source code is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Map</span><span class="p">)</span> <span class="nf">Get</span><span class="p">(</span><span class="nx">key</span> <span class="kt">string</span><span class="p">)</span> <span class="kt">string</span> <span class="p">{</span>
+    <span class="k">if</span> <span class="nx">m</span><span class="p">.</span><span class="nf">IsEmpty</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="s">&#34;&#34;</span>
+    <span class="p">}</span>
+
+    <span class="nx">hash</span> <span class="o">:=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nf">hash</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">key</span><span class="p">)))</span>
+
+    <span class="c1">// Binary search for appropriate replica.
+</span><span class="c1"></span>    <span class="c1">// 二分查找
+</span><span class="c1"></span>    <span class="nx">idx</span> <span class="o">:=</span> <span class="nx">sort</span><span class="p">.</span><span class="nf">Search</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">keys</span><span class="p">),</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span> <span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nx">keys</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="o">&gt;=</span> <span class="nx">hash</span> <span class="p">})</span>
+
+    <span class="c1">// Means we have cycled back to the first replica.
+</span><span class="c1"></span>    <span class="c1">// 如果没有找到，则使用首元素
+</span><span class="c1"></span>    <span class="k">if</span> <span class="nx">idx</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">keys</span><span class="p">)</span> <span class="p">{</span>
+        <span class="nx">idx</span> <span class="p">=</span> <span class="mi">0</span>
+    <span class="p">}</span>
+
+    <span class="k">return</span> <span class="nx">m</span><span class="p">.</span><span class="nx">hashMap</span><span class="p">[</span><span class="nx">m</span><span class="p">.</span><span class="nx">keys</span><span class="p">[</span><span class="nx">idx</span><span class="p">]]</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><p>First calculate the hash value of the key passed by the user, and then use <code>sort.Search</code> to dichotomize in <code>keys</code> to get the smallest value in the array that satisfies the situation. Since <code>keys</code> is an ordered array, using dichotomous search can speed up the query.</p>
+<p>If not found, then use the first element, this is the basic operation of the ring array. Finally, use <code>hashMap[keys[idx]]</code> to get the real node from the virtual node.</p>
+<p>The above is the implementation of Groupcache for Consistent Hash. This implementation is simple and effective, and can help us understand the principle of Consistent Hash quickly.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/consistent-hash/">consistent-hash</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/2022-03/service-graceful-shutdown/">
+            <span class="next-text nav-default">Gracefully shutdown the service</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Gracefully shutdown the service - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Taking services offline is not just a job at the Ops level. It requires the cooperation of the whole RPC implementation, service architecture and operation and maintenance system to achieve graceful service offline perfectly. This article will analyze how to achieve graceful termination of microservices based on the whole process of service offline." /><meta name="keywords" content="golang, Graceful Shutdown, k8s" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.92.2 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-03/service-graceful-shutdown/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Gracefully shutdown the service" />
+<meta property="og:description" content="Taking services offline is not just a job at the Ops level. It requires the cooperation of the whole RPC implementation, service architecture and operation and maintenance system to achieve graceful service offline perfectly. This article will analyze how to achieve graceful termination of microservices based on the whole process of service offline." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-03/service-graceful-shutdown/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-03-30T15:28:11+08:00" />
+<meta property="article:modified_time" content="2022-03-30T15:28:11+08:00" />
+
+<meta itemprop="name" content="Gracefully shutdown the service">
+<meta itemprop="description" content="Taking services offline is not just a job at the Ops level. It requires the cooperation of the whole RPC implementation, service architecture and operation and maintenance system to achieve graceful service offline perfectly. This article will analyze how to achieve graceful termination of microservices based on the whole process of service offline."><meta itemprop="datePublished" content="2022-03-30T15:28:11+08:00" />
+<meta itemprop="dateModified" content="2022-03-30T15:28:11+08:00" />
+<meta itemprop="wordCount" content="1274">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Gracefully shutdown the service"/>
+<meta name="twitter:description" content="Taking services offline is not just a job at the Ops level. It requires the cooperation of the whole RPC implementation, service architecture and operation and maintenance system to achieve graceful service offline perfectly. This article will analyze how to achieve graceful termination of microservices based on the whole process of service offline."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SoByte</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SoByte</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Gracefully shutdown the service</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-03-30 15:28:11 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1274 words </span>
+          <span class="more-meta"> 3 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#active-offline-of-the-service-registry">Active offline of the service registry</a></li>
+        <li><a href="#graceful-termination-of-rpc">Graceful termination of RPC</a></li>
+        <li><a href="#graceful-termination-of-k8s">Graceful termination of k8s</a></li>
+        <li><a href="#summary-of-the-process-of-graceful-termination">Summary of the process of graceful termination</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>&ldquo;Graceful termination&rdquo; means that when a service needs to be taken offline or restarted, there are measures and methods to let other services perceive the current service being taken offline as soon as possible on the one hand, and minimize the impact on the current processing requests on the other. Elegant termination can improve the high availability of services, reduce the service jitter caused by going offline, and improve service stability and user experience.</p>
+<p>Taking services offline is not just a job at the Ops level. It requires the cooperation of the whole RPC implementation, service architecture and operation and maintenance system to achieve graceful service offline perfectly. This article will analyze how to achieve graceful termination of microservices based on the whole process of service offline</p>
+<ul>
+<li>Active offline of service registry</li>
+<li>Analysis of how gRPC can achieve graceful termination based on the source code of gRPC-Go</li>
+<li>Exploring the graceful termination of k8s</li>
+</ul>
+<h2 id="active-offline-of-the-service-registry">Active offline of the service registry</h2>
+<p>If the service uses a service registry (e.g. Consul, etc.), then the first step is to first take the service offline from the registry. This will ensure that new requests are not sent to this node as soon as possible.</p>
+<p>Although most service registries have a heartbeat and timeout auto-cleanup mechanism for the node, the heartbeat has a fixed interval and the registry needs to wait until the preset heartbeat timeout to find out that the node is offline. Therefore, active offline can greatly shorten the process of exception discovery.</p>
+<p>If the service is managed and scheduled based on k8s, it is very convenient to do this.</p>
+<p>First, k8s itself comes with a reliable <a href="https://kubernetes.io/zh/docs/concepts/services-networking/service/#%E4%BA%91%E5%8E%9F%E7%94%9F%E6%9C%8D%E5%8A%A1%E5%8F%91%E7%8E%B0">service discovery</a>, and k8s will naturally be the first to sense when pods are going up or down on k8s.</p>
+<p>If you are using an external name service, you can use the <code>preStop</code> feature of k8s. k8s natively supports <a href="https://kubernetes.io/zh/docs/concepts/containers/container-lifecycle-hooks/">container lifecycle callbacks</a>, we can define the pod&rsquo;s <code>preStop</code> hook to enable cleanup operations before the service goes offline. As follows.</p>
+<p>Example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-yml" data-lang="yml"><span class="nt">containers</span><span class="p">:</span><span class="w">
+</span><span class="w"></span>- <span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-container</span><span class="w">
+</span><span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l">my-app-image</span><span class="w">
+</span><span class="w">  </span><span class="nt">lifecycle</span><span class="p">:</span><span class="w">
+</span><span class="w">    </span><span class="nt">preStop</span><span class="p">:</span><span class="w">
+</span><span class="w">      </span><span class="nt">exec</span><span class="p">:</span><span class="w">
+</span><span class="w">        </span><span class="nt">command</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">&#34;/bin/sh&#34;</span><span class="p">,</span><span class="s2">&#34;-c&#34;</span><span class="p">,</span><span class="s2">&#34;/app/pre_stop.sh&#34;</span><span class="p">]</span><span class="w">
+</span></code></pre></td></tr></table>
+</div>
+</div><p>Before a pod goes offline, it first executes the <code>/app/pre_stop.sh</code> command, in which we can do a lot of pre-cleanup policies.</p>
+<h2 id="graceful-termination-of-rpc">Graceful termination of RPC</h2>
+<p>Removing a service node from the name service can block new traffic from entering the node, which is the first step towards graceful termination. However, for the established client connections on that node, a hasty disconnect would cause an abrupt suspension of the ongoing business logic. Therefore, we need to implement RPC-level graceful termination of connections and request processing to ensure that the business logic is minimally affected.</p>
+<p>Take gRPC-Go as an example. gRPC implements two stop interfaces <code>GracefulStop</code> and <code>Stop</code>, representing graceful and non-graceful termination of the service, respectively. Let&rsquo;s look at how gRPC terminates gracefully.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">func</span> <span class="p">(</span><span class="nx">s</span> <span class="o">*</span><span class="nx">Server</span><span class="p">)</span> <span class="nf">GracefulStop</span><span class="p">()</span> <span class="p">{</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">quit</span><span class="p">.</span><span class="nf">Fire</span><span class="p">()</span>
+    <span class="k">defer</span> <span class="nx">s</span><span class="p">.</span><span class="nx">done</span><span class="p">.</span><span class="nf">Fire</span><span class="p">()</span>
+
+    <span class="o">...</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+
+    <span class="c1">// 首先关闭监听 socket，保证不会有新的连接到来
+</span><span class="c1"></span>    <span class="k">for</span> <span class="nx">lis</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">s</span><span class="p">.</span><span class="nx">lis</span> <span class="p">{</span>
+        <span class="nx">lis</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+    <span class="p">}</span>
+
+    <span class="nx">s</span><span class="p">.</span><span class="nx">lis</span> <span class="p">=</span> <span class="kc">nil</span>
+    <span class="k">if</span> <span class="p">!</span><span class="nx">s</span><span class="p">.</span><span class="nx">drain</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="nx">st</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">s</span><span class="p">.</span><span class="nx">conns</span> <span class="p">{</span>
+            <span class="nx">st</span><span class="p">.</span><span class="nf">Drain</span><span class="p">()</span>
+        <span class="p">}</span>
+        <span class="nx">s</span><span class="p">.</span><span class="nx">drain</span> <span class="p">=</span> <span class="kc">true</span>
+    <span class="p">}</span>
+
+    <span class="c1">// Wait for serving threads to be ready to exit.  Only then can we be sure no
+</span><span class="c1"></span>    <span class="c1">// new conns will be created.
+</span><span class="c1"></span>    <span class="nx">s</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">serveWG</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Lock</span><span class="p">()</span>
+
+    <span class="k">for</span> <span class="nb">len</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nx">conns</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+        <span class="nx">s</span><span class="p">.</span><span class="nx">cv</span><span class="p">.</span><span class="nf">Wait</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="o">...</span>
+    <span class="nx">s</span><span class="p">.</span><span class="nx">mu</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></td></tr></table>
+</div>
+</div><ul>
+<li><strong>Step 1:</strong> Call <code>s.quit.Fire()</code> . When this statement is executed, gRPC discards all new Accept arrivals directly.</li>
+<li><strong>Step 2:</strong> Call <code>lis.Close()</code> one by one. Close the listening socket so that no more new connections will arrive.</li>
+<li><strong>Step 3:</strong> Call <code>st.Drain()</code> one by one for the established connections. Since gRPC is based on the HTTP2 implementation, the <code>goAway</code> frame of HTTP2 will be applied here.
+The <code>goAway</code> frame is equivalent to the server-side active signal to the client to close the connection, and upon receiving this signal, the client will close all HTTP2 streams on that connection. This way the client side can actively sense that the connection is closed and will not continue to send new requests over.</li>
+<li><strong>Step 4:</strong> Call <code>s.serveWG.Wait()</code>. Ensure that the Serve function of gRPC has exited properly.</li>
+<li><strong>Step 5:</strong> Call <code>s.cv.Wait()</code> . This logic is used to wait for the normal end of all business processing logic for established connections. This way no abnormalities in the business logic will be caused by the sudden shutdown of the service.</li>
+</ul>
+<p>The above is the graceful termination process of gRPC. In short, gRPC needs to ensure the proper closure of each layer of logic from the outside in.</p>
+<p>However, there is a problem here that may be easy to overlook. The last step calls <code>s.cv.Wait()</code>, which is used to wait for the business processing logic to finish properly. But there may be an exception here that if the business logic has a deadlock or dead loop due to a code bug, then the business logic will never finish and <code>s.cv.Wait()</code> will always be stuck. As a result, GracefulStop will also never end.</p>
+<p>To address this issue, you need to work with an external deployment system to force a timeout on the service. Next, let&rsquo;s look at how k8s does this.</p>
+<h2 id="graceful-termination-of-k8s">Graceful termination of k8s</h2>
+<p>Before k8s takes a pod offline, the cluster does not forcibly kill the pod, but instead needs to perform a series of steps before the pod is decently taken offline.</p>
+<ol>
+<li>Check the pod lifecycle and execute the preStop hook first if it is configured with preStop. We can do things like pre-cleaning and service registry offline.</li>
+<li>send <code>SIGTERM</code> signal to the pod. <code>SIGTERM</code> is actually the equivalent of the linux command <code>kill -15</code>. This requires the RPC to listen for the <code>SIGTERM</code> signal itself and perform a graceful termination once it receives the signal; 3.</li>
+<li>wait for a while, if the pod still does not stop by itself, then send <code>SIGKILL</code> signal to the pod, which is equivalent to the linux command <code>kill -9</code>, and the pod will be forcibly terminated. And the waiting time depends on the pod&rsquo;s configured graceful termination time <code>terminationGracePeriodSeconds</code> parameter, the default is 30 seconds.</li>
+</ol>
+<h2 id="summary-of-the-process-of-graceful-termination">Summary of the process of graceful termination</h2>
+<p>The above content talks about how to achieve graceful termination of services in various aspects respectively, and summarizes the whole process of graceful termination.</p>
+<ol>
+<li>First, the service node is actively taken offline from the service registry to ensure the service registry. If the service is scheduled and managed based on k8s, the preStop callback can be used to take the service registry offline. 2.</li>
+<li>RPC needs to implement a complete set of graceful termination logic. Ensure that existing business logic is not damaged as much as possible.</li>
+<li>k8s waits for the pod graceful termination period to expire and force the pod to stop.</li>
+</ol>
+<p>Based on the above set of processes, you can achieve graceful termination of the service, which is basically enough for stateless services. However, for stateful services, the challenge of graceful termination is a bit more difficult.</p>
+<p>This article focuses on graceful termination of services, so since there is graceful termination, it also corresponds to graceful startup of services. The graceful termination of the service is from the outside to the inside, first shutting down the outermost traffic entry, and then gradually stopping the logic inward. The graceful start of the service is from inside to outside to ensure that the logic of each layer is opened normally, in order to complete the final online.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-03/consistent-hash-of-groupcache/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Consistent Hash Principle and GroupCache Source Code Analysis</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-03/gin-cache/">
+            <span class="next-text nav-default">Design and implementation of a Gin caching middleware</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
