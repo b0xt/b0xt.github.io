@@ -36,7 +36,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.92.2 with theme even" />
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
 
 
 <link rel="canonical" href="https://www.sobyte.net/post/2021-10/replace-implementations-in-go-std-libs-at-runtime/" />
@@ -184,10 +184,10 @@ There are even times when we need to change specific methods of the standard lib
 </span><span class="lnt">3
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">   <span class="nx">localAddrDialier</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">net</span><span class="p">.</span><span class="nx">Dialer</span><span class="p">{</span>
-   <span class="nx">LocalAddr</span><span class="p">:</span> <span class="nx">localAddr</span><span class="p">,</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl">   <span class="nx">localAddrDialier</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">net</span><span class="p">.</span><span class="nx">Dialer</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">LocalAddr</span><span class="p">:</span> <span class="nx">localAddr</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>This is a good, traditional method, the only irritation is that for each type I need to address, access mysql, access redis, access kafka, access third party libraries, access the server &hellip;&hellip; , is there a one-and-done approach?</p>
 <p>There is!</p>
@@ -238,43 +238,43 @@ There are even times when we need to change specific methods of the standard lib
 </span><span class="lnt">36
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go">   <span class="c1">// 指定要使用的本地地址. // by https://colobu.com
-</span><span class="c1"></span>   <span class="nx">localAddr</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">net</span><span class="p">.</span><span class="nx">TCPAddr</span><span class="p">{</span>
-	<span class="nx">IP</span><span class="p">:</span>   <span class="nx">net</span><span class="p">.</span><span class="nf">ParseIP</span><span class="p">(</span><span class="nx">localIP</span><span class="p">),</span>
-	<span class="nx">Port</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
-<span class="p">}</span>
-<span class="kd">var</span> <span class="nx">d</span> <span class="o">*</span><span class="nx">net</span><span class="p">.</span><span class="nx">Dialer</span>
-   <span class="c1">// 替换Dialer.DialContext方法
-</span><span class="c1"></span><span class="nx">dialContextGuard</span> <span class="p">=</span> <span class="nx">monkey</span><span class="p">.</span><span class="nf">PatchInstanceMethod</span><span class="p">(</span><span class="nx">reflect</span><span class="p">.</span><span class="nf">TypeOf</span><span class="p">(</span><span class="nx">d</span><span class="p">),</span> <span class="s">&#34;DialContext&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">net</span><span class="p">.</span><span class="nx">Dialer</span><span class="p">,</span> <span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">network</span><span class="p">,</span> <span class="nx">address</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">net</span><span class="p">.</span><span class="nx">Conn</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-       <span class="c1">// 临时恢复
-</span><span class="c1"></span>	<span class="nx">dialContextGuard</span><span class="p">.</span><span class="nf">Unpatch</span><span class="p">()</span>
-	<span class="k">defer</span> <span class="nx">dialContextGuard</span><span class="p">.</span><span class="nf">Restore</span><span class="p">()</span>
-	<span class="k">if</span> <span class="nx">network</span> <span class="o">==</span> <span class="s">&#34;tcp&#34;</span> <span class="o">||</span> <span class="nx">network</span> <span class="o">==</span> <span class="s">&#34;tcp4&#34;</span> <span class="o">||</span> <span class="nx">network</span> <span class="o">==</span> <span class="s">&#34;tcp6&#34;</span> <span class="p">{</span>
-		<span class="nx">localAddrDialier</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">net</span><span class="p">.</span><span class="nx">Dialer</span><span class="p">{</span>
-			<span class="nx">LocalAddr</span><span class="p">:</span> <span class="nx">localAddr</span><span class="p">,</span>
-		<span class="p">}</span>
-           <span class="c1">// 使用指定本地地址的dialer
-</span><span class="c1"></span>		<span class="k">return</span> <span class="nx">localAddrDialier</span><span class="p">.</span><span class="nf">DialContext</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">network</span><span class="p">,</span> <span class="nx">address</span><span class="p">)</span>
-	<span class="p">}</span>
-       <span class="c1">// 其它情况，比如UDP、UnixDomain等，使用标准库的方法
-</span><span class="c1"></span>	<span class="k">return</span> <span class="nx">d</span><span class="p">.</span><span class="nf">DialContext</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">network</span><span class="p">,</span> <span class="nx">address</span><span class="p">)</span>
-<span class="p">})</span>
-   <span class="c1">// 替换Dail方法
-</span><span class="c1"></span><span class="nx">dialGuard</span> <span class="p">=</span> <span class="nx">monkey</span><span class="p">.</span><span class="nf">PatchInstanceMethod</span><span class="p">(</span><span class="nx">reflect</span><span class="p">.</span><span class="nf">TypeOf</span><span class="p">(</span><span class="nx">d</span><span class="p">),</span> <span class="s">&#34;Dial&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">net</span><span class="p">.</span><span class="nx">Dialer</span><span class="p">,</span> <span class="nx">network</span><span class="p">,</span> <span class="nx">address</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">net</span><span class="p">.</span><span class="nx">Conn</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-       <span class="c1">// 临时恢复
-</span><span class="c1"></span>	<span class="nx">dialGuard</span><span class="p">.</span><span class="nf">Unpatch</span><span class="p">()</span>
-	<span class="k">defer</span> <span class="nx">dialGuard</span><span class="p">.</span><span class="nf">Restore</span><span class="p">()</span>
-	<span class="k">if</span> <span class="nx">network</span> <span class="o">==</span> <span class="s">&#34;tcp&#34;</span> <span class="o">||</span> <span class="nx">network</span> <span class="o">==</span> <span class="s">&#34;tcp4&#34;</span> <span class="o">||</span> <span class="nx">network</span> <span class="o">==</span> <span class="s">&#34;tcp6&#34;</span> <span class="p">{</span>
-		<span class="nx">localAddrDialier</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">net</span><span class="p">.</span><span class="nx">Dialer</span><span class="p">{</span>
-			<span class="nx">LocalAddr</span><span class="p">:</span> <span class="nx">localAddr</span><span class="p">,</span>
-		<span class="p">}</span>
-           <span class="c1">// 使用指定本地地址的dialer
-</span><span class="c1"></span>		<span class="k">return</span> <span class="nx">localAddrDialier</span><span class="p">.</span><span class="nf">Dial</span><span class="p">(</span><span class="nx">network</span><span class="p">,</span> <span class="nx">address</span><span class="p">)</span>
-	<span class="p">}</span>
-       <span class="c1">// 其它情况，比如UDP、UnixDomain等，使用标准库的方法
-</span><span class="c1"></span>	<span class="k">return</span> <span class="nx">d</span><span class="p">.</span><span class="nf">Dial</span><span class="p">(</span><span class="nx">network</span><span class="p">,</span> <span class="nx">address</span><span class="p">)</span>
-<span class="p">})</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl">   <span class="c1">// 指定要使用的本地地址. // by https://colobu.com
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="nx">localAddr</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">net</span><span class="p">.</span><span class="nx">TCPAddr</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">IP</span><span class="p">:</span>   <span class="nx">net</span><span class="p">.</span><span class="nf">ParseIP</span><span class="p">(</span><span class="nx">localIP</span><span class="p">),</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">Port</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="kd">var</span> <span class="nx">d</span> <span class="o">*</span><span class="nx">net</span><span class="p">.</span><span class="nx">Dialer</span>
+</span></span><span class="line"><span class="cl">   <span class="c1">// 替换Dialer.DialContext方法
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="nx">dialContextGuard</span> <span class="p">=</span> <span class="nx">monkey</span><span class="p">.</span><span class="nf">PatchInstanceMethod</span><span class="p">(</span><span class="nx">reflect</span><span class="p">.</span><span class="nf">TypeOf</span><span class="p">(</span><span class="nx">d</span><span class="p">),</span> <span class="s">&#34;DialContext&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">net</span><span class="p">.</span><span class="nx">Dialer</span><span class="p">,</span> <span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">network</span><span class="p">,</span> <span class="nx">address</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">net</span><span class="p">.</span><span class="nx">Conn</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">       <span class="c1">// 临时恢复
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">dialContextGuard</span><span class="p">.</span><span class="nf">Unpatch</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">dialContextGuard</span><span class="p">.</span><span class="nf">Restore</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">network</span> <span class="o">==</span> <span class="s">&#34;tcp&#34;</span> <span class="o">||</span> <span class="nx">network</span> <span class="o">==</span> <span class="s">&#34;tcp4&#34;</span> <span class="o">||</span> <span class="nx">network</span> <span class="o">==</span> <span class="s">&#34;tcp6&#34;</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">localAddrDialier</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">net</span><span class="p">.</span><span class="nx">Dialer</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">LocalAddr</span><span class="p">:</span> <span class="nx">localAddr</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">           <span class="c1">// 使用指定本地地址的dialer
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">return</span> <span class="nx">localAddrDialier</span><span class="p">.</span><span class="nf">DialContext</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">network</span><span class="p">,</span> <span class="nx">address</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">       <span class="c1">// 其它情况，比如UDP、UnixDomain等，使用标准库的方法
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">return</span> <span class="nx">d</span><span class="p">.</span><span class="nf">DialContext</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">network</span><span class="p">,</span> <span class="nx">address</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">})</span>
+</span></span><span class="line"><span class="cl">   <span class="c1">// 替换Dail方法
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="nx">dialGuard</span> <span class="p">=</span> <span class="nx">monkey</span><span class="p">.</span><span class="nf">PatchInstanceMethod</span><span class="p">(</span><span class="nx">reflect</span><span class="p">.</span><span class="nf">TypeOf</span><span class="p">(</span><span class="nx">d</span><span class="p">),</span> <span class="s">&#34;Dial&#34;</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">d</span> <span class="o">*</span><span class="nx">net</span><span class="p">.</span><span class="nx">Dialer</span><span class="p">,</span> <span class="nx">network</span><span class="p">,</span> <span class="nx">address</span> <span class="kt">string</span><span class="p">)</span> <span class="p">(</span><span class="nx">net</span><span class="p">.</span><span class="nx">Conn</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">       <span class="c1">// 临时恢复
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">dialGuard</span><span class="p">.</span><span class="nf">Unpatch</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">dialGuard</span><span class="p">.</span><span class="nf">Restore</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">network</span> <span class="o">==</span> <span class="s">&#34;tcp&#34;</span> <span class="o">||</span> <span class="nx">network</span> <span class="o">==</span> <span class="s">&#34;tcp4&#34;</span> <span class="o">||</span> <span class="nx">network</span> <span class="o">==</span> <span class="s">&#34;tcp6&#34;</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">localAddrDialier</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">net</span><span class="p">.</span><span class="nx">Dialer</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">LocalAddr</span><span class="p">:</span> <span class="nx">localAddr</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">           <span class="c1">// 使用指定本地地址的dialer
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">return</span> <span class="nx">localAddrDialier</span><span class="p">.</span><span class="nf">Dial</span><span class="p">(</span><span class="nx">network</span><span class="p">,</span> <span class="nx">address</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">       <span class="c1">// 其它情况，比如UDP、UnixDomain等，使用标准库的方法
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="k">return</span> <span class="nx">d</span><span class="p">.</span><span class="nf">Dial</span><span class="p">(</span><span class="nx">network</span><span class="p">,</span> <span class="nx">address</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">})</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>After replacing these two methods, even if a new <code>net.Dailer</code> object is created afterwards, it will be executed using the replaced methods.</p>
 <blockquote>
@@ -353,7 +353,7 @@ There are even times when we need to change specific methods of the standard lib
 
 
 
-<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
   <script type="text/javascript">
     window.MathJax = {
       tex: {

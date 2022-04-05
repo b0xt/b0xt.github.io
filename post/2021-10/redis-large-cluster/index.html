@@ -36,7 +36,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.92.2 with theme even" />
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
 
 
 <link rel="canonical" href="https://www.sobyte.net/post/2021-10/redis-large-cluster/" />
@@ -357,106 +357,106 @@
 </span><span class="lnt">99
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="kt">void</span> <span class="nf">clusterReplyMultiBulkSlots</span><span class="p">(</span><span class="n">client</span> <span class="o">*</span><span class="n">c</span><span class="p">)</span> <span class="p">{</span>
-    <span class="cm">/* Format: 1) 1) start slot
-</span><span class="cm">     *            2) end slot
-</span><span class="cm">     *            3) 1) master IP
-</span><span class="cm">     *               2) master port
-</span><span class="cm">     *               3) node ID
-</span><span class="cm">     *            4) 1) replica IP
-</span><span class="cm">     *               2) replica port
-</span><span class="cm">     *               3) node ID
-</span><span class="cm">     *           ... continued until done
-</span><span class="cm">     */</span>
- 
-    <span class="kt">int</span> <span class="n">num_masters</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
-    <span class="kt">void</span> <span class="o">*</span><span class="n">slot_replylen</span> <span class="o">=</span> <span class="n">addDeferredMultiBulkLength</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
- 
-    <span class="n">dictEntry</span> <span class="o">*</span><span class="n">de</span><span class="p">;</span>
-    <span class="n">dictIterator</span> <span class="o">*</span><span class="n">di</span> <span class="o">=</span> <span class="n">dictGetSafeIterator</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">cluster</span><span class="o">-&gt;</span><span class="n">nodes</span><span class="p">);</span>
-    <span class="k">while</span><span class="p">((</span><span class="n">de</span> <span class="o">=</span> <span class="n">dictNext</span><span class="p">(</span><span class="n">di</span><span class="p">))</span> <span class="o">!=</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>
-        <span class="cm">/*注意：此处是对当前Redis节点记录的集群所有主节点都进行了遍历*/</span>
-        <span class="n">clusterNode</span> <span class="o">*</span><span class="n">node</span> <span class="o">=</span> <span class="n">dictGetVal</span><span class="p">(</span><span class="n">de</span><span class="p">);</span>
-        <span class="kt">int</span> <span class="n">j</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">start</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
- 
-        <span class="cm">/* Skip slaves (that are iterated when producing the output of their
-</span><span class="cm">         * master) and  masters not serving any slot. */</span>
-        <span class="cm">/*跳过备节点。备节点的信息会从主节点侧获取。*/</span>
-        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">nodeIsMaster</span><span class="p">(</span><span class="n">node</span><span class="p">)</span> <span class="o">||</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">numslots</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="k">continue</span><span class="p">;</span>
-        <span class="k">for</span> <span class="p">(</span><span class="n">j</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">j</span> <span class="o">&lt;</span> <span class="n">CLUSTER_SLOTS</span><span class="p">;</span> <span class="n">j</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
-            <span class="cm">/*注意：此处是对当前节点中记录的所有slot进行了遍历*/</span>
-            <span class="kt">int</span> <span class="n">bit</span><span class="p">,</span> <span class="n">i</span><span class="p">;</span>
-            <span class="cm">/*确认当前节点是不是占有循环终端的slot*/</span>
-            <span class="k">if</span> <span class="p">((</span><span class="n">bit</span> <span class="o">=</span> <span class="n">clusterNodeGetSlotBit</span><span class="p">(</span><span class="n">node</span><span class="p">,</span><span class="n">j</span><span class="p">))</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
-                <span class="k">if</span> <span class="p">(</span><span class="n">start</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="n">start</span> <span class="o">=</span> <span class="n">j</span><span class="p">;</span>
-            <span class="p">}</span>
-            <span class="cm">/*简单分析，此处的逻辑大概就是找出连续的区间，是的话放到返回中；不是的话继续往下递归slot。
-</span><span class="cm">              如果是开始的话，开始一个连续区间，直到和当前的不连续。*/</span>
-            <span class="k">if</span> <span class="p">(</span><span class="n">start</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="o">!</span><span class="n">bit</span> <span class="o">||</span> <span class="n">j</span> <span class="o">==</span> <span class="n">CLUSTER_SLOTS</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span> <span class="p">{</span>
-                <span class="kt">int</span> <span class="n">nested_elements</span> <span class="o">=</span> <span class="mi">3</span><span class="p">;</span> <span class="cm">/* slots (2) + master addr (1). */</span>
-                <span class="kt">void</span> <span class="o">*</span><span class="n">nested_replylen</span> <span class="o">=</span> <span class="n">addDeferredMultiBulkLength</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
- 
-                <span class="k">if</span> <span class="p">(</span><span class="n">bit</span> <span class="o">&amp;&amp;</span> <span class="n">j</span> <span class="o">==</span> <span class="n">CLUSTER_SLOTS</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="n">j</span><span class="o">++</span><span class="p">;</span>
- 
-                <span class="cm">/* If slot exists in output map, add to it&#39;s list.
-</span><span class="cm">                 * else, create a new output map for this slot */</span>
-                <span class="k">if</span> <span class="p">(</span><span class="n">start</span> <span class="o">==</span> <span class="n">j</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
-                    <span class="n">addReplyLongLong</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">start</span><span class="p">);</span> <span class="cm">/* only one slot; low==high */</span>
-                    <span class="n">addReplyLongLong</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">start</span><span class="p">);</span>
-                <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
-                    <span class="n">addReplyLongLong</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">start</span><span class="p">);</span> <span class="cm">/* low */</span>
-                    <span class="n">addReplyLongLong</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">j</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>   <span class="cm">/* high */</span>
-                <span class="p">}</span>
-                <span class="n">start</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
- 
-                <span class="cm">/* First node reply position is always the master */</span>
-                <span class="n">addReplyMultiBulkLen</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="mi">3</span><span class="p">);</span>
-                <span class="n">addReplyBulkCString</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">ip</span><span class="p">);</span>
-                <span class="n">addReplyLongLong</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">port</span><span class="p">);</span>
-                <span class="n">addReplyBulkCBuffer</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">name</span><span class="p">,</span> <span class="n">CLUSTER_NAMELEN</span><span class="p">);</span>
- 
-                <span class="cm">/* Remaining nodes in reply are replicas for slot range */</span>
-                <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">numslaves</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
-                    <span class="cm">/*注意：此处遍历了节点下面的备节点信息，用于返回*/</span>
-                    <span class="cm">/* This loop is copy/pasted from clusterGenNodeDescription()
-</span><span class="cm">                     * with modifications for per-slot node aggregation */</span>
-                    <span class="k">if</span> <span class="p">(</span><span class="n">nodeFailed</span><span class="p">(</span><span class="n">node</span><span class="o">-&gt;</span><span class="n">slaves</span><span class="p">[</span><span class="n">i</span><span class="p">]))</span> <span class="k">continue</span><span class="p">;</span>
-                    <span class="n">addReplyMultiBulkLen</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="mi">3</span><span class="p">);</span>
-                    <span class="n">addReplyBulkCString</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">slaves</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">-&gt;</span><span class="n">ip</span><span class="p">);</span>
-                    <span class="n">addReplyLongLong</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">slaves</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">-&gt;</span><span class="n">port</span><span class="p">);</span>
-                    <span class="n">addReplyBulkCBuffer</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">slaves</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">-&gt;</span><span class="n">name</span><span class="p">,</span> <span class="n">CLUSTER_NAMELEN</span><span class="p">);</span>
-                    <span class="n">nested_elements</span><span class="o">++</span><span class="p">;</span>
-                <span class="p">}</span>
-                <span class="n">setDeferredMultiBulkLength</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">nested_replylen</span><span class="p">,</span> <span class="n">nested_elements</span><span class="p">);</span>
-                <span class="n">num_masters</span><span class="o">++</span><span class="p">;</span>
-            <span class="p">}</span>
-        <span class="p">}</span>
-    <span class="p">}</span>
-    <span class="n">dictReleaseIterator</span><span class="p">(</span><span class="n">di</span><span class="p">);</span>
-    <span class="n">setDeferredMultiBulkLength</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">slot_replylen</span><span class="p">,</span> <span class="n">num_masters</span><span class="p">);</span>
-<span class="p">}</span>
- 
-<span class="cm">/* Return the slot bit from the cluster node structure. */</span>
-<span class="cm">/*该函数用于判断指定的slot是否属于当前clusterNodes节点*/</span>
-<span class="kt">int</span> <span class="nf">clusterNodeGetSlotBit</span><span class="p">(</span><span class="n">clusterNode</span> <span class="o">*</span><span class="n">n</span><span class="p">,</span> <span class="kt">int</span> <span class="n">slot</span><span class="p">)</span> <span class="p">{</span>
-    <span class="k">return</span> <span class="n">bitmapTestBit</span><span class="p">(</span><span class="n">n</span><span class="o">-&gt;</span><span class="n">slots</span><span class="p">,</span><span class="n">slot</span><span class="p">);</span>
-<span class="p">}</span>
- 
-<span class="cm">/* Test bit &#39;pos&#39; in a generic bitmap. Return 1 if the bit is set,
-</span><span class="cm"> * otherwise 0. */</span>
-<span class="cm">/*此处流程用于判断指定的的位置在bitmap上是否为1*/</span>
-<span class="kt">int</span> <span class="nf">bitmapTestBit</span><span class="p">(</span><span class="kt">unsigned</span> <span class="kt">char</span> <span class="o">*</span><span class="n">bitmap</span><span class="p">,</span> <span class="kt">int</span> <span class="n">pos</span><span class="p">)</span> <span class="p">{</span>
-    <span class="n">off_t</span> <span class="n">byte</span> <span class="o">=</span> <span class="n">pos</span><span class="o">/</span><span class="mi">8</span><span class="p">;</span>
-    <span class="kt">int</span> <span class="n">bit</span> <span class="o">=</span> <span class="n">pos</span><span class="o">&amp;</span><span class="mi">7</span><span class="p">;</span>
-    <span class="k">return</span> <span class="p">(</span><span class="n">bitmap</span><span class="p">[</span><span class="n">byte</span><span class="p">]</span> <span class="o">&amp;</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="n">bit</span><span class="p">))</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">;</span>
-<span class="p">}</span>
-<span class="k">typedef</span> <span class="k">struct</span> <span class="n">clusterNode</span> <span class="p">{</span>
-    <span class="p">...</span>
-    <span class="cm">/*使用一个长度为CLUSTER_SLOTS/8的char数组对当前分配的slot进行记录*/</span>
-    <span class="kt">unsigned</span> <span class="kt">char</span> <span class="n">slots</span><span class="p">[</span><span class="n">CLUSTER_SLOTS</span><span class="o">/</span><span class="mi">8</span><span class="p">];</span> <span class="cm">/* slots handled by this node */</span>
-    <span class="p">...</span>
-<span class="p">}</span> <span class="n">clusterNode</span><span class="p">;</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">void</span> <span class="nf">clusterReplyMultiBulkSlots</span><span class="p">(</span><span class="n">client</span> <span class="o">*</span><span class="n">c</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* Format: 1) 1) start slot
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *            2) end slot
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *            3) 1) master IP
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *               2) master port
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *               3) node ID
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *            4) 1) replica IP
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *               2) replica port
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *               3) node ID
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *           ... continued until done
+</span></span></span><span class="line"><span class="cl"><span class="cm">     */</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="n">num_masters</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">void</span> <span class="o">*</span><span class="n">slot_replylen</span> <span class="o">=</span> <span class="n">addDeferredMultiBulkLength</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span><span class="line"><span class="cl">    <span class="n">dictEntry</span> <span class="o">*</span><span class="n">de</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="n">dictIterator</span> <span class="o">*</span><span class="n">di</span> <span class="o">=</span> <span class="n">dictGetSafeIterator</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">cluster</span><span class="o">-&gt;</span><span class="n">nodes</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="k">while</span><span class="p">((</span><span class="n">de</span> <span class="o">=</span> <span class="n">dictNext</span><span class="p">(</span><span class="n">di</span><span class="p">))</span> <span class="o">!=</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="cm">/*注意：此处是对当前Redis节点记录的集群所有主节点都进行了遍历*/</span>
+</span></span><span class="line"><span class="cl">        <span class="n">clusterNode</span> <span class="o">*</span><span class="n">node</span> <span class="o">=</span> <span class="n">dictGetVal</span><span class="p">(</span><span class="n">de</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="kt">int</span> <span class="n">j</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">start</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span><span class="line"><span class="cl">        <span class="cm">/* Skip slaves (that are iterated when producing the output of their
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * master) and  masters not serving any slot. */</span>
+</span></span><span class="line"><span class="cl">        <span class="cm">/*跳过备节点。备节点的信息会从主节点侧获取。*/</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">nodeIsMaster</span><span class="p">(</span><span class="n">node</span><span class="p">)</span> <span class="o">||</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">numslots</span> <span class="o">==</span> <span class="mi">0</span><span class="p">)</span> <span class="k">continue</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="k">for</span> <span class="p">(</span><span class="n">j</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">j</span> <span class="o">&lt;</span> <span class="n">CLUSTER_SLOTS</span><span class="p">;</span> <span class="n">j</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="cm">/*注意：此处是对当前节点中记录的所有slot进行了遍历*/</span>
+</span></span><span class="line"><span class="cl">            <span class="kt">int</span> <span class="n">bit</span><span class="p">,</span> <span class="n">i</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="cm">/*确认当前节点是不是占有循环终端的slot*/</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="p">((</span><span class="n">bit</span> <span class="o">=</span> <span class="n">clusterNodeGetSlotBit</span><span class="p">(</span><span class="n">node</span><span class="p">,</span><span class="n">j</span><span class="p">))</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="k">if</span> <span class="p">(</span><span class="n">start</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="n">start</span> <span class="o">=</span> <span class="n">j</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="p">}</span>
+</span></span><span class="line"><span class="cl">            <span class="cm">/*简单分析，此处的逻辑大概就是找出连续的区间，是的话放到返回中；不是的话继续往下递归slot。
+</span></span></span><span class="line"><span class="cl"><span class="cm">              如果是开始的话，开始一个连续区间，直到和当前的不连续。*/</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="p">(</span><span class="n">start</span> <span class="o">!=</span> <span class="o">-</span><span class="mi">1</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="o">!</span><span class="n">bit</span> <span class="o">||</span> <span class="n">j</span> <span class="o">==</span> <span class="n">CLUSTER_SLOTS</span><span class="o">-</span><span class="mi">1</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="kt">int</span> <span class="n">nested_elements</span> <span class="o">=</span> <span class="mi">3</span><span class="p">;</span> <span class="cm">/* slots (2) + master addr (1). */</span>
+</span></span><span class="line"><span class="cl">                <span class="kt">void</span> <span class="o">*</span><span class="n">nested_replylen</span> <span class="o">=</span> <span class="n">addDeferredMultiBulkLength</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span><span class="line"><span class="cl">                <span class="k">if</span> <span class="p">(</span><span class="n">bit</span> <span class="o">&amp;&amp;</span> <span class="n">j</span> <span class="o">==</span> <span class="n">CLUSTER_SLOTS</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="n">j</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span><span class="line"><span class="cl">                <span class="cm">/* If slot exists in output map, add to it&#39;s list.
+</span></span></span><span class="line"><span class="cl"><span class="cm">                 * else, create a new output map for this slot */</span>
+</span></span><span class="line"><span class="cl">                <span class="k">if</span> <span class="p">(</span><span class="n">start</span> <span class="o">==</span> <span class="n">j</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">addReplyLongLong</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">start</span><span class="p">);</span> <span class="cm">/* only one slot; low==high */</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">addReplyLongLong</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">start</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">addReplyLongLong</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">start</span><span class="p">);</span> <span class="cm">/* low */</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">addReplyLongLong</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">j</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>   <span class="cm">/* high */</span>
+</span></span><span class="line"><span class="cl">                <span class="p">}</span>
+</span></span><span class="line"><span class="cl">                <span class="n">start</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span><span class="line"><span class="cl">                <span class="cm">/* First node reply position is always the master */</span>
+</span></span><span class="line"><span class="cl">                <span class="n">addReplyMultiBulkLen</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="mi">3</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="n">addReplyBulkCString</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">ip</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="n">addReplyLongLong</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">port</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="n">addReplyBulkCBuffer</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">name</span><span class="p">,</span> <span class="n">CLUSTER_NAMELEN</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span><span class="line"><span class="cl">                <span class="cm">/* Remaining nodes in reply are replicas for slot range */</span>
+</span></span><span class="line"><span class="cl">                <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">numslaves</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                    <span class="cm">/*注意：此处遍历了节点下面的备节点信息，用于返回*/</span>
+</span></span><span class="line"><span class="cl">                    <span class="cm">/* This loop is copy/pasted from clusterGenNodeDescription()
+</span></span></span><span class="line"><span class="cl"><span class="cm">                     * with modifications for per-slot node aggregation */</span>
+</span></span><span class="line"><span class="cl">                    <span class="k">if</span> <span class="p">(</span><span class="n">nodeFailed</span><span class="p">(</span><span class="n">node</span><span class="o">-&gt;</span><span class="n">slaves</span><span class="p">[</span><span class="n">i</span><span class="p">]))</span> <span class="k">continue</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">addReplyMultiBulkLen</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="mi">3</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">addReplyBulkCString</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">slaves</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">-&gt;</span><span class="n">ip</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">addReplyLongLong</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">slaves</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">-&gt;</span><span class="n">port</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">addReplyBulkCBuffer</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">node</span><span class="o">-&gt;</span><span class="n">slaves</span><span class="p">[</span><span class="n">i</span><span class="p">]</span><span class="o">-&gt;</span><span class="n">name</span><span class="p">,</span> <span class="n">CLUSTER_NAMELEN</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">nested_elements</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="p">}</span>
+</span></span><span class="line"><span class="cl">                <span class="n">setDeferredMultiBulkLength</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">nested_replylen</span><span class="p">,</span> <span class="n">nested_elements</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="n">num_masters</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="n">dictReleaseIterator</span><span class="p">(</span><span class="n">di</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="n">setDeferredMultiBulkLength</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">slot_replylen</span><span class="p">,</span> <span class="n">num_masters</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span><span class="line"><span class="cl"><span class="cm">/* Return the slot bit from the cluster node structure. */</span>
+</span></span><span class="line"><span class="cl"><span class="cm">/*该函数用于判断指定的slot是否属于当前clusterNodes节点*/</span>
+</span></span><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">clusterNodeGetSlotBit</span><span class="p">(</span><span class="n">clusterNode</span> <span class="o">*</span><span class="n">n</span><span class="p">,</span> <span class="kt">int</span> <span class="n">slot</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="n">bitmapTestBit</span><span class="p">(</span><span class="n">n</span><span class="o">-&gt;</span><span class="n">slots</span><span class="p">,</span><span class="n">slot</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span><span class="line"><span class="cl"><span class="cm">/* Test bit &#39;pos&#39; in a generic bitmap. Return 1 if the bit is set,
+</span></span></span><span class="line"><span class="cl"><span class="cm"> * otherwise 0. */</span>
+</span></span><span class="line"><span class="cl"><span class="cm">/*此处流程用于判断指定的的位置在bitmap上是否为1*/</span>
+</span></span><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">bitmapTestBit</span><span class="p">(</span><span class="kt">unsigned</span> <span class="kt">char</span> <span class="o">*</span><span class="n">bitmap</span><span class="p">,</span> <span class="kt">int</span> <span class="n">pos</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">off_t</span> <span class="n">byte</span> <span class="o">=</span> <span class="n">pos</span><span class="o">/</span><span class="mi">8</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="n">bit</span> <span class="o">=</span> <span class="n">pos</span><span class="o">&amp;</span><span class="mi">7</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="p">(</span><span class="n">bitmap</span><span class="p">[</span><span class="n">byte</span><span class="p">]</span> <span class="o">&amp;</span> <span class="p">(</span><span class="mi">1</span><span class="o">&lt;&lt;</span><span class="n">bit</span><span class="p">))</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="k">typedef</span> <span class="k">struct</span> <span class="n">clusterNode</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="p">...</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/*使用一个长度为CLUSTER_SLOTS/8的char数组对当前分配的slot进行记录*/</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">unsigned</span> <span class="kt">char</span> <span class="n">slots</span><span class="p">[</span><span class="n">CLUSTER_SLOTS</span><span class="o">/</span><span class="mi">8</span><span class="p">];</span> <span class="cm">/* slots handled by this node */</span>
+</span></span><span class="line"><span class="cl">    <span class="p">...</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span> <span class="n">clusterNode</span><span class="p">;</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>Each node (ClusterNode) uses a bitmap (char slots[CLUSTER_SLOTS/8]) to store information about the allocation of slots.</p>
 <p>A brief description of the logic of BitmapTestBit: clusterNode-&gt;slots is an array of length CLUSTER_SLOTS/8. CLUSTER_SLOTS is a fixed value 16384. each bit of the array represents a slot. the subscript of the bitmap array here is 0 to 2047, and the range of slots is 0 to 16383. The slot range is 0 to 16383.</p>
@@ -558,15 +558,15 @@
 </span><span class="lnt">8
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="k">typedef</span> <span class="k">struct</span> <span class="n">clusterState</span> <span class="p">{</span>
-    <span class="p">...</span>
-    <span class="n">dict</span> <span class="o">*</span><span class="n">nodes</span><span class="p">;</span>          <span class="cm">/* Hash table of name -&gt; clusterNode structures */</span>
-    <span class="cm">/*nodes记录的是所有的节点，使用dict记录*/</span>
-    <span class="p">...</span>
-    <span class="n">clusterNode</span> <span class="o">*</span><span class="n">slots</span><span class="p">[</span><span class="n">CLUSTER_SLOTS</span><span class="p">];</span><span class="cm">/*slots记录的是slot数组，内容是node的指针*/</span>
-    <span class="p">...</span>
-<span class="p">}</span> <span class="n">clusterState</span><span class="p">;</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">typedef</span> <span class="k">struct</span> <span class="n">clusterState</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="p">...</span>
+</span></span><span class="line"><span class="cl">    <span class="n">dict</span> <span class="o">*</span><span class="n">nodes</span><span class="p">;</span>          <span class="cm">/* Hash table of name -&gt; clusterNode structures */</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/*nodes记录的是所有的节点，使用dict记录*/</span>
+</span></span><span class="line"><span class="cl">    <span class="p">...</span>
+</span></span><span class="line"><span class="cl">    <span class="n">clusterNode</span> <span class="o">*</span><span class="n">slots</span><span class="p">[</span><span class="n">CLUSTER_SLOTS</span><span class="p">];</span><span class="cm">/*slots记录的是slot数组，内容是node的指针*/</span>
+</span></span><span class="line"><span class="cl">    <span class="p">...</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span> <span class="n">clusterState</span><span class="p">;</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>As described in 2.1, the original logic obtains the topology by traversing the slot information of each node.</p>
 <h4 id="redis-cluster-metadata-analysis-1">Redis Cluster Metadata Analysis</h4>
@@ -585,17 +585,17 @@
 </span><span class="lnt">10
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="cm">/* Format: 1) 1) start slot
-</span><span class="cm"> *            2) end slot
-</span><span class="cm"> *            3) 1) master IP
-</span><span class="cm"> *               2) master port
-</span><span class="cm"> *               3) node ID
-</span><span class="cm"> *            4) 1) replica IP
-</span><span class="cm"> *               2) replica port
-</span><span class="cm"> *               3) node ID
-</span><span class="cm"> *           ... continued until done
-</span><span class="cm"> */</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="cm">/* Format: 1) 1) start slot
+</span></span></span><span class="line"><span class="cl"><span class="cm"> *            2) end slot
+</span></span></span><span class="line"><span class="cl"><span class="cm"> *            3) 1) master IP
+</span></span></span><span class="line"><span class="cl"><span class="cm"> *               2) master port
+</span></span></span><span class="line"><span class="cl"><span class="cm"> *               3) node ID
+</span></span></span><span class="line"><span class="cl"><span class="cm"> *            4) 1) replica IP
+</span></span></span><span class="line"><span class="cl"><span class="cm"> *               2) replica port
+</span></span></span><span class="line"><span class="cl"><span class="cm"> *               3) node ID
+</span></span></span><span class="line"><span class="cl"><span class="cm"> *           ... continued until done
+</span></span></span><span class="line"><span class="cl"><span class="cm"> */</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>Combined with the cluster information stored in server.cluster, I think we can use server.cluster-&gt;slots for traversal here. Because server.cluster-&gt;slots has been updated at every topology change of the cluster, the node pointers are saved.</p>
 <h3 id="optimization-solutions">Optimization Solutions</h3>
@@ -652,45 +652,45 @@
 </span><span class="lnt">38
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="kt">void</span> <span class="nf">clusterReplyMultiBulkSlots</span><span class="p">(</span><span class="n">client</span> <span class="o">*</span> <span class="n">c</span><span class="p">)</span> <span class="p">{</span>
-    <span class="cm">/* Format: 1) 1) start slot
-</span><span class="cm">     *            2) end slot
-</span><span class="cm">     *            3) 1) master IP
-</span><span class="cm">     *               2) master port
-</span><span class="cm">     *               3) node ID
-</span><span class="cm">     *            4) 1) replica IP
-</span><span class="cm">     *               2) replica port
-</span><span class="cm">     *               3) node ID
-</span><span class="cm">     *           ... continued until done
-</span><span class="cm">     */</span>
-    <span class="n">clusterNode</span> <span class="o">*</span><span class="n">n</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
-    <span class="kt">int</span> <span class="n">num_masters</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">start</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
-    <span class="kt">void</span> <span class="o">*</span><span class="n">slot_replylen</span> <span class="o">=</span> <span class="n">addReplyDeferredLen</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
- 
-    <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;=</span> <span class="n">CLUSTER_SLOTS</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
-        <span class="cm">/*对所有slot进行遍历*/</span>
-        <span class="cm">/* Find start node and slot id. */</span>
-        <span class="k">if</span> <span class="p">(</span><span class="n">n</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>
-            <span class="k">if</span> <span class="p">(</span><span class="n">i</span> <span class="o">==</span> <span class="n">CLUSTER_SLOTS</span><span class="p">)</span> <span class="k">break</span><span class="p">;</span>
-            <span class="n">n</span> <span class="o">=</span> <span class="n">server</span><span class="p">.</span><span class="n">cluster</span><span class="o">-&gt;</span><span class="n">slots</span><span class="p">[</span><span class="n">i</span><span class="p">];</span>
-            <span class="n">start</span> <span class="o">=</span> <span class="n">i</span><span class="p">;</span>
-            <span class="k">continue</span><span class="p">;</span>
-        <span class="p">}</span>
- 
-        <span class="cm">/* Add cluster slots info when occur different node with start
-</span><span class="cm">         * or end of slot. */</span>
-        <span class="k">if</span> <span class="p">(</span><span class="n">i</span> <span class="o">==</span> <span class="n">CLUSTER_SLOTS</span> <span class="o">||</span> <span class="n">n</span> <span class="o">!=</span> <span class="n">server</span><span class="p">.</span><span class="n">cluster</span><span class="o">-&gt;</span><span class="n">slots</span><span class="p">[</span><span class="n">i</span><span class="p">])</span> <span class="p">{</span>
-            <span class="cm">/*遍历主节点下面的备节点，添加返回客户端的信息*/</span>
-            <span class="n">addNodeReplyForClusterSlot</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">i</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>
-            <span class="n">num_masters</span><span class="o">++</span><span class="p">;</span>
-            <span class="k">if</span> <span class="p">(</span><span class="n">i</span> <span class="o">==</span> <span class="n">CLUSTER_SLOTS</span><span class="p">)</span> <span class="k">break</span><span class="p">;</span>
-            <span class="n">n</span> <span class="o">=</span> <span class="n">server</span><span class="p">.</span><span class="n">cluster</span><span class="o">-&gt;</span><span class="n">slots</span><span class="p">[</span><span class="n">i</span><span class="p">];</span>
-            <span class="n">start</span> <span class="o">=</span> <span class="n">i</span><span class="p">;</span>
-        <span class="p">}</span>
-    <span class="p">}</span>
-    <span class="n">setDeferredArrayLen</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">slot_replylen</span><span class="p">,</span> <span class="n">num_masters</span><span class="p">);</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">void</span> <span class="nf">clusterReplyMultiBulkSlots</span><span class="p">(</span><span class="n">client</span> <span class="o">*</span> <span class="n">c</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* Format: 1) 1) start slot
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *            2) end slot
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *            3) 1) master IP
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *               2) master port
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *               3) node ID
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *            4) 1) replica IP
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *               2) replica port
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *               3) node ID
+</span></span></span><span class="line"><span class="cl"><span class="cm">     *           ... continued until done
+</span></span></span><span class="line"><span class="cl"><span class="cm">     */</span>
+</span></span><span class="line"><span class="cl">    <span class="n">clusterNode</span> <span class="o">*</span><span class="n">n</span> <span class="o">=</span> <span class="nb">NULL</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="n">num_masters</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span> <span class="n">start</span> <span class="o">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">void</span> <span class="o">*</span><span class="n">slot_replylen</span> <span class="o">=</span> <span class="n">addReplyDeferredLen</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span><span class="line"><span class="cl">    <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;=</span> <span class="n">CLUSTER_SLOTS</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="cm">/*对所有slot进行遍历*/</span>
+</span></span><span class="line"><span class="cl">        <span class="cm">/* Find start node and slot id. */</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">n</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="p">(</span><span class="n">i</span> <span class="o">==</span> <span class="n">CLUSTER_SLOTS</span><span class="p">)</span> <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="n">n</span> <span class="o">=</span> <span class="n">server</span><span class="p">.</span><span class="n">cluster</span><span class="o">-&gt;</span><span class="n">slots</span><span class="p">[</span><span class="n">i</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">            <span class="n">start</span> <span class="o">=</span> <span class="n">i</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="k">continue</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span><span class="line"><span class="cl">        <span class="cm">/* Add cluster slots info when occur different node with start
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * or end of slot. */</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">i</span> <span class="o">==</span> <span class="n">CLUSTER_SLOTS</span> <span class="o">||</span> <span class="n">n</span> <span class="o">!=</span> <span class="n">server</span><span class="p">.</span><span class="n">cluster</span><span class="o">-&gt;</span><span class="n">slots</span><span class="p">[</span><span class="n">i</span><span class="p">])</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="cm">/*遍历主节点下面的备节点，添加返回客户端的信息*/</span>
+</span></span><span class="line"><span class="cl">            <span class="n">addNodeReplyForClusterSlot</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">n</span><span class="p">,</span> <span class="n">start</span><span class="p">,</span> <span class="n">i</span><span class="o">-</span><span class="mi">1</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">            <span class="n">num_masters</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="p">(</span><span class="n">i</span> <span class="o">==</span> <span class="n">CLUSTER_SLOTS</span><span class="p">)</span> <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="n">n</span> <span class="o">=</span> <span class="n">server</span><span class="p">.</span><span class="n">cluster</span><span class="o">-&gt;</span><span class="n">slots</span><span class="p">[</span><span class="n">i</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">            <span class="n">start</span> <span class="o">=</span> <span class="n">i</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="n">setDeferredArrayLen</span><span class="p">(</span><span class="n">c</span><span class="p">,</span> <span class="n">slot_replylen</span><span class="p">,</span> <span class="n">num_masters</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>By traversing server.cluster-&gt;slots, we find the &ldquo;contiguous&rdquo; slot area under a node, and if it is not contiguous, we output the node information of the previous &ldquo;contiguous&rdquo; slot area and its backup nodes, and then continue to find the next &ldquo;contiguous&rdquo; slot area in the output. If the node is not contiguous, the node information of the previous &ldquo;contiguous&rdquo; slot area and its backup node information are output, and then the next &ldquo;contiguous&rdquo; slot area is found and output.</p>
 <h2 id="comparison-of-optimization-results">Comparison of optimization results</h2>
@@ -743,14 +743,14 @@
 </span><span class="lnt">7
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="k">else</span> <span class="nf">if</span> <span class="p">(</span><span class="o">!</span><span class="n">strcasecmp</span><span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">-&gt;</span><span class="n">ptr</span><span class="p">,</span><span class="s">&#34;slots&#34;</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="n">c</span><span class="o">-&gt;</span><span class="n">argc</span> <span class="o">==</span> <span class="mi">2</span><span class="p">)</span> <span class="p">{</span>
-        <span class="cm">/* CLUSTER SLOTS */</span>
-        <span class="kt">long</span> <span class="kt">long</span> <span class="n">now</span> <span class="o">=</span> <span class="n">ustime</span><span class="p">();</span>
-        <span class="n">clusterReplyMultiBulkSlots</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
-        <span class="n">serverLog</span><span class="p">(</span><span class="n">LL_NOTICE</span><span class="p">,</span>
-            <span class="s">&#34;cluster slots cost time:%lld us&#34;</span><span class="p">,</span> <span class="n">ustime</span><span class="p">()</span> <span class="o">-</span> <span class="n">now</span><span class="p">);</span>
-    <span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">else</span> <span class="nf">if</span> <span class="p">(</span><span class="o">!</span><span class="n">strcasecmp</span><span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span><span class="o">-&gt;</span><span class="n">ptr</span><span class="p">,</span><span class="s">&#34;slots&#34;</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="n">c</span><span class="o">-&gt;</span><span class="n">argc</span> <span class="o">==</span> <span class="mi">2</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="cm">/* CLUSTER SLOTS */</span>
+</span></span><span class="line"><span class="cl">        <span class="kt">long</span> <span class="kt">long</span> <span class="n">now</span> <span class="o">=</span> <span class="n">ustime</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">clusterReplyMultiBulkSlots</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">serverLog</span><span class="p">(</span><span class="n">LL_NOTICE</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">            <span class="s">&#34;cluster slots cost time:%lld us&#34;</span><span class="p">,</span> <span class="n">ustime</span><span class="p">()</span> <span class="o">-</span> <span class="n">now</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>Input logs for comparison.</p>
 <p><strong>Original log output:</strong></p>
@@ -759,8 +759,8 @@
 <pre tabindex="0" class="chroma"><code><span class="lnt">1
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">37351:M 06 Mar 2021 16:11:39.313 * cluster slots cost time:2061 us.
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">37351:M 06 Mar 2021 16:11:39.313 * cluster slots cost time:2061 us.
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p><strong>Optimized version log output:</strong></p>
 <div class="highlight"><div class="chroma">
@@ -768,8 +768,8 @@
 <pre tabindex="0" class="chroma"><code><span class="lnt">1
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">35562:M 06 Mar 2021 16:11:27.862 * cluster slots cost time:168 us.
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">35562:M 06 Mar 2021 16:11:27.862 * cluster slots cost time:168 us.
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>The decrease in time consumption is obvious: from 2000+us to 200-us; the time consumption in a cluster of 100 master nodes is reduced to 8.2% of the original; the optimization results are basically as expected.</p>
 <h2 id="summary">Summary</h2>
@@ -782,7 +782,7 @@
 <li>Optimization of clusterReplyMultiBulkSlots resulted in significant performance improvements.</li>
 </ul>
 <p>From the above troubleshooting and optimization process, we can conclude that the current Redis has a performance defect in the CLUSTER SLOT instruction.</p>
-<p>Because of Redis' data slicing mechanism, the key access method in Redis cluster mode is to cache the topological information of the slot. The optimization point can only be started at CLUSTER SLOTS. The number of Redis cluster nodes is generally not so large, and the problem is not obvious.</p>
+<p>Because of Redis&rsquo; data slicing mechanism, the key access method in Redis cluster mode is to cache the topological information of the slot. The optimization point can only be started at CLUSTER SLOTS. The number of Redis cluster nodes is generally not so large, and the problem is not obvious.</p>
 <p>In fact, the logic of Hiredis-vip also has some problems. As mentioned in 2.2.1, Hiredis-vip&rsquo;s slot topology update method is to iterate through all nodes one by one to perform CLUSTER SLOTS, which can have a knock-on effect if the Redis cluster is large and the client size on the business side is large.</p>
 <ol>
 <li>
@@ -875,7 +875,7 @@
 
 
 
-<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
   <script type="text/javascript">
     window.MathJax = {
       tex: {

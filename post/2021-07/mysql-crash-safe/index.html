@@ -39,7 +39,7 @@ Translated with www.DeepL.com/Translator (free version)" /><meta name="keywords"
 
 
 
-<meta name="generator" content="Hugo 0.92.2 with theme even" />
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
 
 
 <link rel="canonical" href="https://www.sobyte.net/post/2021-07/mysql-crash-safe/" />
@@ -200,7 +200,7 @@ Translated with www.DeepL.com/Translator (free version)"/>
       <p>The MySQL master-slave architecture has been widely used, and the stability of the master-slave replication relationship is a constant concern.</p>
 <p>MySQL 5.6 provides a new feature for master-slave replication stability: slave support <code>crash-safe</code>. This feature can solve the problem of <code>relay_log.info</code> bit inaccuracy caused by abnormal power failure in previous versions.</p>
 <p>In this article, we will introduce this feature in terms of principle, parameters, and new issues.</p>
-<p>Translated with <a href="http://www.DeepL.com/Translator">www.DeepL.com/Translator</a> (free version)</p>
+<p>Translated with <a href="https://www.DeepL.com/Translator">www.DeepL.com/Translator</a> (free version)</p>
 <h2 id="1-crash-safe">1. crash-safe</h2>
 <p>Before understanding <code>slave crash-safe</code>, let&rsquo;s analyze the reason why <code>slave crash-unsafe</code> occurs in versions before <code>MySQL 5.6</code>. We know that in a master-slave architecture, <code>slave</code> contains two threads: <code>IO thread</code> and <code>SQL thread</code>. The execution progress (offsets) of both threads are stored in a file.</p>
 <blockquote>
@@ -219,14 +219,14 @@ Translated with www.DeepL.com/Translator (free version)"/>
 </span><span class="lnt">7
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="k">START</span><span class="w"> </span><span class="k">TRANSACTION</span><span class="p">;</span><span class="w">  
-</span><span class="w"> </span><span class="k">Statement</span><span class="w"> </span><span class="mi">1</span><span class="w">
-</span><span class="w">  </span><span class="p">...</span><span class="w">
-</span><span class="w"> </span><span class="k">Statement</span><span class="w"> </span><span class="n">N</span><span class="w">
-</span><span class="w"> </span><span class="k">COMMIT</span><span class="p">;</span><span class="w">
-</span><span class="w">
-</span><span class="w"></span><span class="k">Update</span><span class="w"> </span><span class="n">replication</span><span class="w"> </span><span class="n">info</span><span class="w"> </span><span class="n">files</span><span class="w"> </span><span class="p">(</span><span class="n">master</span><span class="p">.</span><span class="n">info</span><span class="p">,</span><span class="w"> </span><span class="n">relay_log</span><span class="p">.</span><span class="n">info</span><span class="p">)</span><span class="w">  
-</span></code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="line"><span class="cl"><span class="k">START</span><span class="w"> </span><span class="k">TRANSACTION</span><span class="p">;</span><span class="w">  
+</span></span></span><span class="line"><span class="cl"><span class="w"> </span><span class="k">Statement</span><span class="w"> </span><span class="mi">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="p">...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"> </span><span class="k">Statement</span><span class="w"> </span><span class="n">N</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"> </span><span class="k">COMMIT</span><span class="p">;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="k">Update</span><span class="w"> </span><span class="n">replication</span><span class="w"> </span><span class="n">info</span><span class="w"> </span><span class="n">files</span><span class="w"> </span><span class="p">(</span><span class="n">master</span><span class="p">.</span><span class="n">info</span><span class="p">,</span><span class="w"> </span><span class="n">relay_log</span><span class="p">.</span><span class="n">info</span><span class="p">)</span><span class="w">  
+</span></span></span></code></pre></td></tr></table>
 </div>
 </div><p>The execution status information of IO thread is stored in <code>master.info</code> file, and the execution status information of SQL thread is stored in <code>relay-log.info</code> file. However, whenever the system crashes, the stored offsets may be inaccurate (note that these files are not written to disk synchronously after being modified). Because applying binlog and updating loci to file are not atomic operations, but two separate steps. For example, SQL thread has applied relay-log.01 with 4 transactions</p>
 <div class="highlight"><div class="chroma">
@@ -237,11 +237,11 @@ Translated with www.DeepL.com/Translator (free version)"/>
 </span><span class="lnt">4
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="w"> </span><span class="n">trx1</span><span class="p">(</span><span class="n">pos</span><span class="p">:</span><span class="mi">10</span><span class="p">)</span><span class="w">
-</span><span class="w"> </span><span class="n">trx2</span><span class="p">(</span><span class="n">pos</span><span class="p">:</span><span class="mi">20</span><span class="p">)</span><span class="w">
-</span><span class="w"> </span><span class="n">trx3</span><span class="p">(</span><span class="n">pos</span><span class="p">:</span><span class="mi">30</span><span class="p">)</span><span class="w">
-</span><span class="w"> </span><span class="n">trx4</span><span class="p">(</span><span class="n">pos</span><span class="p">:</span><span class="mi">40</span><span class="p">)</span><span class="w"> 
-</span></code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="line"><span class="cl"><span class="w"> </span><span class="n">trx1</span><span class="p">(</span><span class="n">pos</span><span class="p">:</span><span class="mi">10</span><span class="p">)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"> </span><span class="n">trx2</span><span class="p">(</span><span class="n">pos</span><span class="p">:</span><span class="mi">20</span><span class="p">)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"> </span><span class="n">trx3</span><span class="p">(</span><span class="n">pos</span><span class="p">:</span><span class="mi">30</span><span class="p">)</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"> </span><span class="n">trx4</span><span class="p">(</span><span class="n">pos</span><span class="p">:</span><span class="mi">40</span><span class="p">)</span><span class="w"> 
+</span></span></span></code></pre></td></tr></table>
 </div>
 </div><p>But the SQL thread updates the bit (relay-log.01,30) to the <code>relay-log.info</code> file, and when the slave instance restarts the sql thread will repeat the transaction trx4, so you will see the more common replication error 1062, error 1032, and error 1033. error 1032.</p>
 <p>MySQL 5.5 mitigates this problem with two parameters, sync_master_info=1 and sync_replay_log_info=1 to ensure that the two threads of the Slave synchronize the IO thread and the SQL thread&rsquo;s current execution loci to the two files once for each write transaction. information of the current execution bit. Of course, the sync operation is not free, and frequent updates to the disk files consume performance.</p>
@@ -260,13 +260,13 @@ Translated with www.DeepL.com/Translator (free version)"/>
 </span><span class="lnt">6
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="k">START</span><span class="w"> </span><span class="k">TRANSACTION</span><span class="p">;</span><span class="w">  
-</span><span class="w">  </span><span class="k">Statement</span><span class="w"> </span><span class="mi">1</span><span class="w">
-</span><span class="w">  </span><span class="p">...</span><span class="w">
-</span><span class="w">  </span><span class="k">Statement</span><span class="w"> </span><span class="n">N</span><span class="w">
-</span><span class="w">  </span><span class="k">Update</span><span class="w"> </span><span class="n">replication</span><span class="w"> </span><span class="n">info</span><span class="w">
-</span><span class="w"></span><span class="k">COMMIT</span><span class="w"> 
-</span></code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="line"><span class="cl"><span class="k">START</span><span class="w"> </span><span class="k">TRANSACTION</span><span class="p">;</span><span class="w">  
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="k">Statement</span><span class="w"> </span><span class="mi">1</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="p">...</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="k">Statement</span><span class="w"> </span><span class="n">N</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="k">Update</span><span class="w"> </span><span class="n">replication</span><span class="w"> </span><span class="n">info</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="k">COMMIT</span><span class="w"> 
+</span></span></span></code></pre></td></tr></table>
 </div>
 </div><p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2021/07/12/8de3fbd1bec9457695a0147d863e8c4f.png" alt=" "></p>
 <p>The green one represents the actual business transaction, and the blue one is the sql to update the slave_replay_log_info related bit information executed by MySQL, and then merge the two sql in one transaction, using MySQL transaction mechanism and InnoDB table to guarantee atomicity. There is no problem of inconsistency caused by splitting the actions of applying binlog and updating bit information.</p>
@@ -315,10 +315,10 @@ Translated with www.DeepL.com/Translator (free version)"/>
 </span><span class="lnt">3
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">mysql</span><span class="p">.</span><span class="n">slave_master_info</span><span class="w"> </span><span class="n">ENGINE</span><span class="o">=</span><span class="n">InnoDB</span><span class="p">;</span><span class="w">
-</span><span class="w">
-</span><span class="w"></span><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">mysql</span><span class="p">.</span><span class="n">slave_relay_log_info</span><span class="w"> </span><span class="n">ENGINE</span><span class="o">=</span><span class="n">InnoDB</span><span class="p">;</span><span class="w">
-</span></code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-sql" data-lang="sql"><span class="line"><span class="cl"><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">mysql</span><span class="p">.</span><span class="n">slave_master_info</span><span class="w"> </span><span class="n">ENGINE</span><span class="o">=</span><span class="n">InnoDB</span><span class="p">;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="k">ALTER</span><span class="w"> </span><span class="k">TABLE</span><span class="w"> </span><span class="n">mysql</span><span class="p">.</span><span class="n">slave_relay_log_info</span><span class="w"> </span><span class="n">ENGINE</span><span class="o">=</span><span class="n">InnoDB</span><span class="p">;</span><span class="w">
+</span></span></span></code></pre></td></tr></table>
 </div>
 </div><h3 id="25-related-parameters">2.5. Related parameters</h3>
 <ol>
@@ -329,8 +329,8 @@ Translated with www.DeepL.com/Translator (free version)"/>
 <pre tabindex="0" class="chroma"><code><span class="lnt">1
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">master_info_repository =TABLE sync_master_info=0
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback"><span class="line"><span class="cl">master_info_repository =TABLE sync_master_info=0
+</span></span></code></pre></td></tr></table>
 </div>
 </div></li>
 <li>
@@ -340,8 +340,8 @@ Translated with www.DeepL.com/Translator (free version)"/>
 <pre tabindex="0" class="chroma"><code><span class="lnt">1
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback">relay_log_info_repository = TABLE relay_log_recovery = 1
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-fallback" data-lang="fallback"><span class="line"><span class="cl">relay_log_info_repository = TABLE relay_log_recovery = 1
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>These 2 do not do more to introduce, the front will have been very thorough.</p>
 </li>
@@ -435,7 +435,7 @@ Translated with www.DeepL.com/Translator (free version)"/>
 
 
 
-<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
   <script type="text/javascript">
     window.MathJax = {
       tex: {

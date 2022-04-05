@@ -36,7 +36,7 @@
 
 
 
-<meta name="generator" content="Hugo 0.92.2 with theme even" />
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
 
 
 <link rel="canonical" href="https://www.sobyte.net/post/2021-10/golang-from-kernel-to-epoll/" />
@@ -62,7 +62,7 @@
 <meta itemprop="name" content="golang from kernel to epoll">
 <meta itemprop="description" content="Basic implementation of linux networking In the TCP/IP network hierarchy model, the entire protocol stack is divided into physical layer, link layer, network layer, transport layer, and application layer. The physical layer corresponds to the grid card and the grid line, and the application layer corresponds to various applications such as Nginx, FTP, etc. Linux implements the link layer, the grid layer, and the transport layer. In the Linux kernel"><meta itemprop="datePublished" content="2021-10-17T14:41:33+08:00" />
 <meta itemprop="dateModified" content="2021-10-17T14:41:33+08:00" />
-<meta itemprop="wordCount" content="6308">
+<meta itemprop="wordCount" content="6307">
 <meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="golang from kernel to epoll"/>
 <meta name="twitter:description" content="Basic implementation of linux networking In the TCP/IP network hierarchy model, the entire protocol stack is divided into physical layer, link layer, network layer, transport layer, and application layer. The physical layer corresponds to the grid card and the grid line, and the application layer corresponds to various applications such as Nginx, FTP, etc. Linux implements the link layer, the grid layer, and the transport layer. In the Linux kernel"/>
@@ -154,7 +154,7 @@
             <a href="/categories/skills/"> skills </a>
             <a href="/categories/implementation-details/"> implementation-details </a>
             </div>
-          <span class="more-meta"> 6308 words </span>
+          <span class="more-meta"> 6307 words </span>
           <span class="more-meta"> 13 mins read </span>
         
       </div>
@@ -238,8 +238,8 @@
 <pre tabindex="0" class="chroma"><code><span class="lnt">1
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">go: accept –&gt; pollDesc.Init -&gt; poll_runtime_pollOpen –&gt; runtime.netpollopen(epoll_create) -&gt; epollctl(EPOLL_CTL_ADD)
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">go: accept –&gt; pollDesc.Init -&gt; poll_runtime_pollOpen –&gt; runtime.netpollopen(epoll_create) -&gt; epollctl(EPOLL_CTL_ADD)
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>go: netpollblock(gopark),let out cpu-&gt;scheduled back, netpoll(0) writes concurrently to ready state -&gt; other operations &hellip;&hellip;</p>
 <p>epoll thread: epoll_create(ep_ptable_queue_proc, register soft interrupt to ksoftirqd, register method ep_poll_callback to)-&gt;epoll_add-&gt;epoll_wait(ep_poll let out cpu)</p>
@@ -312,74 +312,72 @@
 </span><span class="lnt">61
 </span><span class="lnt">62
 </span><span class="lnt">63
-</span><span class="lnt">64
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="c1">// accept阻塞，等待系统事件（等待有客户端进来）
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">FD</span><span class="p">)</span> <span class="nf">Accept</span><span class="p">()</span> <span class="p">(</span><span class="kt">int</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">Sockaddr</span><span class="p">,</span> <span class="kt">string</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">fd</span><span class="p">.</span><span class="nf">readLock</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">err</span>
-	<span class="p">}</span>
-	<span class="k">defer</span> <span class="nx">fd</span><span class="p">.</span><span class="nf">readUnlock</span><span class="p">()</span>
-
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pd</span><span class="p">.</span><span class="nf">prepareRead</span><span class="p">(</span><span class="nx">fd</span><span class="p">.</span><span class="nx">isFile</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">err</span>
-	<span class="p">}</span>
-	<span class="k">for</span> <span class="p">{</span>
-		<span class="nx">s</span><span class="p">,</span> <span class="nx">rsa</span><span class="p">,</span> <span class="nx">errcall</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">accept</span><span class="p">(</span><span class="nx">fd</span><span class="p">.</span><span class="nx">Sysfd</span><span class="p">)</span>
-		<span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
-			<span class="k">return</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">rsa</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">err</span>
-		<span class="p">}</span>
-		<span class="k">switch</span> <span class="nx">err</span> <span class="p">{</span>
-		<span class="k">case</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">EAGAIN</span><span class="p">:</span>
-			<span class="k">if</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pd</span><span class="p">.</span><span class="nf">pollable</span><span class="p">()</span> <span class="p">{</span>
-				<span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pd</span><span class="p">.</span><span class="nf">waitRead</span><span class="p">(</span><span class="nx">fd</span><span class="p">.</span><span class="nx">isFile</span><span class="p">);</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
-					<span class="k">continue</span>
-				<span class="p">}</span>
-			<span class="p">}</span>
-		<span class="k">case</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">ECONNABORTED</span><span class="p">:</span>
-			<span class="c1">// This means that a socket on the listen
-</span><span class="c1"></span>			<span class="c1">// queue was closed before we Accept()ed it;
-</span><span class="c1"></span>			<span class="c1">// it&#39;s a silly error, so try again.
-</span><span class="c1"></span>			<span class="k">continue</span>
-		<span class="p">}</span>
-		<span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">errcall</span><span class="p">,</span> <span class="nx">err</span>
-	<span class="p">}</span>
-<span class="p">}</span>
-<span class="c1">//accept创建netpoll
-</span><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">netFD</span><span class="p">)</span> <span class="nf">accept</span><span class="p">()</span> <span class="p">(</span><span class="nx">netfd</span> <span class="o">*</span><span class="nx">netFD</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">d</span><span class="p">,</span> <span class="nx">rsa</span><span class="p">,</span> <span class="nx">errcall</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pfd</span><span class="p">.</span><span class="nf">Accept</span><span class="p">()</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="k">if</span> <span class="nx">errcall</span> <span class="o">!=</span> <span class="s">&#34;&#34;</span> <span class="p">{</span>
-			<span class="nx">err</span> <span class="p">=</span> <span class="nf">wrapSyscallError</span><span class="p">(</span><span class="nx">errcall</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
-		<span class="p">}</span>
-		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
-	<span class="p">}</span>
-
-	<span class="k">if</span> <span class="nx">netfd</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">newFD</span><span class="p">(</span><span class="nx">d</span><span class="p">,</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">family</span><span class="p">,</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">sotype</span><span class="p">,</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">net</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
-		<span class="nx">poll</span><span class="p">.</span><span class="nf">CloseFunc</span><span class="p">(</span><span class="nx">d</span><span class="p">)</span>
-		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
-	<span class="p">}</span>
-	<span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">netfd</span><span class="p">.</span><span class="nf">init</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>  <span class="c1">//open 创建 ctl_add
-</span><span class="c1"></span>		<span class="nx">fd</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
-		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
-	<span class="p">}</span>
-	<span class="nx">lsa</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">syscall</span><span class="p">.</span><span class="nf">Getsockname</span><span class="p">(</span><span class="nx">netfd</span><span class="p">.</span><span class="nx">pfd</span><span class="p">.</span><span class="nx">Sysfd</span><span class="p">)</span>
-	<span class="nx">netfd</span><span class="p">.</span><span class="nf">setAddr</span><span class="p">(</span><span class="nx">netfd</span><span class="p">.</span><span class="nf">addrFunc</span><span class="p">()(</span><span class="nx">lsa</span><span class="p">),</span> <span class="nx">netfd</span><span class="p">.</span><span class="nf">addrFunc</span><span class="p">()(</span><span class="nx">rsa</span><span class="p">))</span>
-	<span class="k">return</span> <span class="nx">netfd</span><span class="p">,</span> <span class="kc">nil</span>
-<span class="p">}</span>
-
-<span class="err">###</span> <span class="c1">//syscall包。 最终调用的是linux的accept
-</span><span class="c1"></span><span class="kd">func</span> <span class="nf">accept</span><span class="p">(</span><span class="nx">s</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">rsa</span> <span class="o">*</span><span class="nx">RawSockaddrAny</span><span class="p">,</span> <span class="nx">addrlen</span> <span class="o">*</span><span class="nx">_Socklen</span><span class="p">)</span> <span class="p">(</span><span class="nx">fd</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
-	<span class="nx">r0</span><span class="p">,</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">e1</span> <span class="o">:=</span> <span class="nf">syscall</span><span class="p">(</span><span class="nf">funcPC</span><span class="p">(</span><span class="nx">libc_accept_trampoline</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">s</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">rsa</span><span class="p">)),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">addrlen</span><span class="p">)))</span>
-	<span class="nx">fd</span> <span class="p">=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">r0</span><span class="p">)</span>
-	<span class="k">if</span> <span class="nx">e1</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
-		<span class="nx">err</span> <span class="p">=</span> <span class="nf">errnoErr</span><span class="p">(</span><span class="nx">e1</span><span class="p">)</span>
-	<span class="p">}</span>
-	<span class="k">return</span>
-<span class="p">}</span>
-
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// accept阻塞，等待系统事件（等待有客户端进来）
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">FD</span><span class="p">)</span> <span class="nf">Accept</span><span class="p">()</span> <span class="p">(</span><span class="kt">int</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">Sockaddr</span><span class="p">,</span> <span class="kt">string</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">fd</span><span class="p">.</span><span class="nf">readLock</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">defer</span> <span class="nx">fd</span><span class="p">.</span><span class="nf">readUnlock</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pd</span><span class="p">.</span><span class="nf">prepareRead</span><span class="p">(</span><span class="nx">fd</span><span class="p">.</span><span class="nx">isFile</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">s</span><span class="p">,</span> <span class="nx">rsa</span><span class="p">,</span> <span class="nx">errcall</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">accept</span><span class="p">(</span><span class="nx">fd</span><span class="p">.</span><span class="nx">Sysfd</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">return</span> <span class="nx">s</span><span class="p">,</span> <span class="nx">rsa</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="k">switch</span> <span class="nx">err</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">case</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">EAGAIN</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">			<span class="k">if</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pd</span><span class="p">.</span><span class="nf">pollable</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pd</span><span class="p">.</span><span class="nf">waitRead</span><span class="p">(</span><span class="nx">fd</span><span class="p">.</span><span class="nx">isFile</span><span class="p">);</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">					<span class="k">continue</span>
+</span></span><span class="line"><span class="cl">				<span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="k">case</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">ECONNABORTED</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">			<span class="c1">// This means that a socket on the listen
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>			<span class="c1">// queue was closed before we Accept()ed it;
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>			<span class="c1">// it&#39;s a silly error, so try again.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>			<span class="k">continue</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">errcall</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="c1">//accept创建netpoll
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">fd</span> <span class="o">*</span><span class="nx">netFD</span><span class="p">)</span> <span class="nf">accept</span><span class="p">()</span> <span class="p">(</span><span class="nx">netfd</span> <span class="o">*</span><span class="nx">netFD</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">d</span><span class="p">,</span> <span class="nx">rsa</span><span class="p">,</span> <span class="nx">errcall</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">pfd</span><span class="p">.</span><span class="nf">Accept</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">errcall</span> <span class="o">!=</span> <span class="s">&#34;&#34;</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">err</span> <span class="p">=</span> <span class="nf">wrapSyscallError</span><span class="p">(</span><span class="nx">errcall</span><span class="p">,</span> <span class="nx">err</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">netfd</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">newFD</span><span class="p">(</span><span class="nx">d</span><span class="p">,</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">family</span><span class="p">,</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">sotype</span><span class="p">,</span> <span class="nx">fd</span><span class="p">.</span><span class="nx">net</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">poll</span><span class="p">.</span><span class="nf">CloseFunc</span><span class="p">(</span><span class="nx">d</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nx">netfd</span><span class="p">.</span><span class="nf">init</span><span class="p">();</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>  <span class="c1">//open 创建 ctl_add
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="nx">fd</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">lsa</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">syscall</span><span class="p">.</span><span class="nf">Getsockname</span><span class="p">(</span><span class="nx">netfd</span><span class="p">.</span><span class="nx">pfd</span><span class="p">.</span><span class="nx">Sysfd</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">netfd</span><span class="p">.</span><span class="nf">setAddr</span><span class="p">(</span><span class="nx">netfd</span><span class="p">.</span><span class="nf">addrFunc</span><span class="p">()(</span><span class="nx">lsa</span><span class="p">),</span> <span class="nx">netfd</span><span class="p">.</span><span class="nf">addrFunc</span><span class="p">()(</span><span class="nx">rsa</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="nx">netfd</span><span class="p">,</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="err">###</span> <span class="c1">//syscall包。 最终调用的是linux的accept
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="nf">accept</span><span class="p">(</span><span class="nx">s</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">rsa</span> <span class="o">*</span><span class="nx">RawSockaddrAny</span><span class="p">,</span> <span class="nx">addrlen</span> <span class="o">*</span><span class="nx">_Socklen</span><span class="p">)</span> <span class="p">(</span><span class="nx">fd</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">r0</span><span class="p">,</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">e1</span> <span class="o">:=</span> <span class="nf">syscall</span><span class="p">(</span><span class="nf">funcPC</span><span class="p">(</span><span class="nx">libc_accept_trampoline</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">s</span><span class="p">),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">rsa</span><span class="p">)),</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">addrlen</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">fd</span> <span class="p">=</span> <span class="nb">int</span><span class="p">(</span><span class="nx">r0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">e1</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">err</span> <span class="p">=</span> <span class="nf">errnoErr</span><span class="p">(</span><span class="nx">e1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><h2 id="epoll-source-code">epoll source code</h2>
 <div class="highlight"><div class="chroma">
@@ -394,15 +392,15 @@
 </span><span class="lnt">8
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"> <span class="nx">static</span> <span class="kt">int</span> <span class="nx">__init</span> <span class="nf">eventpoll_init</span><span class="p">(</span><span class="nx">void</span><span class="p">)</span>
-<span class="p">{</span>
-   <span class="nf">mutex_init</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pmutex</span><span class="p">);</span>
-   <span class="nf">ep_poll_safewake_init</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">psw</span><span class="p">);</span>
-   <span class="nx">epi_cache</span> <span class="p">=</span> <span class="nf">kmem_cache_create</span><span class="p">(</span><span class="s">&#34;eventpoll_epi&#34;</span><span class="p">,</span> <span class="nf">sizeof</span><span class="p">(</span><span class="kd">struct</span> <span class="nx">epitem</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">SLAB_HWCACHE_ALIGN</span><span class="p">|</span><span class="nx">EPI_SLAB_DEBUG</span><span class="p">|</span><span class="nx">SLAB_PANIC</span><span class="p">,</span> <span class="nx">NULL</span><span class="p">);</span>
-   <span class="nx">pwq_cache</span> <span class="p">=</span> <span class="nf">kmem_cache_create</span><span class="p">(</span><span class="s">&#34;eventpoll_pwq&#34;</span><span class="p">,</span> <span class="nf">sizeof</span><span class="p">(</span><span class="kd">struct</span> <span class="nx">eppoll_entry</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">EPI_SLAB_DEBUG</span><span class="p">|</span><span class="nx">SLAB_PANIC</span><span class="p">,</span> <span class="nx">NULL</span><span class="p">);</span>
-   <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"> <span class="nx">static</span> <span class="kt">int</span> <span class="nx">__init</span> <span class="nf">eventpoll_init</span><span class="p">(</span><span class="nx">void</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">   <span class="nf">mutex_init</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pmutex</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="nf">ep_poll_safewake_init</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">psw</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">epi_cache</span> <span class="p">=</span> <span class="nf">kmem_cache_create</span><span class="p">(</span><span class="s">&#34;eventpoll_epi&#34;</span><span class="p">,</span> <span class="nf">sizeof</span><span class="p">(</span><span class="kd">struct</span> <span class="nx">epitem</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">SLAB_HWCACHE_ALIGN</span><span class="p">|</span><span class="nx">EPI_SLAB_DEBUG</span><span class="p">|</span><span class="nx">SLAB_PANIC</span><span class="p">,</span> <span class="nx">NULL</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">pwq_cache</span> <span class="p">=</span> <span class="nf">kmem_cache_create</span><span class="p">(</span><span class="s">&#34;eventpoll_pwq&#34;</span><span class="p">,</span> <span class="nf">sizeof</span><span class="p">(</span><span class="kd">struct</span> <span class="nx">eppoll_entry</span><span class="p">),</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">EPI_SLAB_DEBUG</span><span class="p">|</span><span class="nx">SLAB_PANIC</span><span class="p">,</span> <span class="nx">NULL</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><h2 id="basic-data-structure">Basic data structure</h2>
 <p>epoll uses kmem_cache_create (slab allocator) to allocate memory to hold struct epitem and struct eppoll_entry. When an fd is added to the system, an epitem structure is created, which is the basic data structure for the kernel to manage epoll.</p>
@@ -421,18 +419,18 @@
 </span><span class="lnt">11
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">struct</span> <span class="nx">epitem</span> <span class="p">{</span>
-	<span class="kd">struct</span> <span class="nx">rb_node</span>  <span class="nx">rbn</span><span class="p">;</span>        <span class="c1">//用于主结构管理的红黑树
-</span><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">list_head</span>  <span class="nx">rdllink</span><span class="p">;</span>  <span class="c1">//事件就绪队列
-</span><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">epitem</span>  <span class="o">*</span><span class="nx">next</span><span class="p">;</span>       <span class="c1">//用于主结构体中的链表
-</span><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">epoll_filefd</span>  <span class="nx">ffd</span><span class="p">;</span>   <span class="c1">//这个结构体对应的被监听的文件描述符信息
-</span><span class="c1"></span>	<span class="kt">int</span>  <span class="nx">nwait</span><span class="p">;</span>                 <span class="c1">//poll操作中事件的个数
-</span><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">list_head</span>  <span class="nx">pwqlist</span><span class="p">;</span>  <span class="c1">//双向链表，保存着被监视文件的等待队列，功能类似于select/poll中的poll_table
-</span><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">eventpoll</span>  <span class="o">*</span><span class="nx">ep</span><span class="p">;</span>      <span class="c1">//该项属于哪个主结构体（多个epitm从属于一个eventpoll）
-</span><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">list_head</span>  <span class="nx">fllink</span><span class="p">;</span>   <span class="c1">//双向链表，用来链接被监视的文件描述符对应的struct file。因为file里有f_ep_link,用来保存所有监视这个文件的epoll节点
-</span><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">epoll_event</span>  <span class="nx">event</span><span class="p">;</span>  <span class="c1">//注册的感兴趣的事件,也就是用户空间的epoll_event
-</span><span class="c1"></span><span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">struct</span> <span class="nx">epitem</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="kd">struct</span> <span class="nx">rb_node</span>  <span class="nx">rbn</span><span class="p">;</span>        <span class="c1">//用于主结构管理的红黑树
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">list_head</span>  <span class="nx">rdllink</span><span class="p">;</span>  <span class="c1">//事件就绪队列
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">epitem</span>  <span class="o">*</span><span class="nx">next</span><span class="p">;</span>       <span class="c1">//用于主结构体中的链表
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">epoll_filefd</span>  <span class="nx">ffd</span><span class="p">;</span>   <span class="c1">//这个结构体对应的被监听的文件描述符信息
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kt">int</span>  <span class="nx">nwait</span><span class="p">;</span>                 <span class="c1">//poll操作中事件的个数
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">list_head</span>  <span class="nx">pwqlist</span><span class="p">;</span>  <span class="c1">//双向链表，保存着被监视文件的等待队列，功能类似于select/poll中的poll_table
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">eventpoll</span>  <span class="o">*</span><span class="nx">ep</span><span class="p">;</span>      <span class="c1">//该项属于哪个主结构体（多个epitm从属于一个eventpoll）
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">list_head</span>  <span class="nx">fllink</span><span class="p">;</span>   <span class="c1">//双向链表，用来链接被监视的文件描述符对应的struct file。因为file里有f_ep_link,用来保存所有监视这个文件的epoll节点
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">epoll_event</span>  <span class="nx">event</span><span class="p">;</span>  <span class="c1">//注册的感兴趣的事件,也就是用户空间的epoll_event
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>And the main data structure corresponding to each epoll fd (epfd) is</p>
 <div class="highlight"><div class="chroma">
@@ -448,16 +446,16 @@
 </span><span class="lnt">9
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">struct</span> <span class="nx">eventpoll</span> <span class="p">{</span>
-	<span class="nx">spin_lock_t</span>       <span class="nx">lock</span><span class="p">;</span>        <span class="c1">//对本数据结构的访问
-</span><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">mutex</span>      <span class="nx">mtx</span><span class="p">;</span>         <span class="c1">//防止使用时被删除
-</span><span class="c1"></span>	<span class="nx">wait_queue_head_t</span>     <span class="nx">wq</span><span class="p">;</span>      <span class="c1">//sys_epoll_wait() 使用的等待队列
-</span><span class="c1"></span>	<span class="nx">wait_queue_head_t</span>   <span class="nx">poll_wait</span><span class="p">;</span>       <span class="c1">//file-&gt;poll()使用的等待队列
-</span><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">list_head</span>    <span class="nx">rdllist</span><span class="p">;</span>        <span class="c1">//事件满足条件的链表
-</span><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">rb_root</span>      <span class="nx">rbr</span><span class="p">;</span>            <span class="c1">//用于管理所有fd的红黑树（树根）
-</span><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">epitem</span>      <span class="o">*</span><span class="nx">ovflist</span><span class="p">;</span>       <span class="c1">//将事件到达的fd进行链接起来发送至用户空间
-</span><span class="c1"></span><span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">struct</span> <span class="nx">eventpoll</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">spin_lock_t</span>       <span class="nx">lock</span><span class="p">;</span>        <span class="c1">//对本数据结构的访问
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">mutex</span>      <span class="nx">mtx</span><span class="p">;</span>         <span class="c1">//防止使用时被删除
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">wait_queue_head_t</span>     <span class="nx">wq</span><span class="p">;</span>      <span class="c1">//sys_epoll_wait() 使用的等待队列
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">wait_queue_head_t</span>   <span class="nx">poll_wait</span><span class="p">;</span>       <span class="c1">//file-&gt;poll()使用的等待队列
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">list_head</span>    <span class="nx">rdllist</span><span class="p">;</span>        <span class="c1">//事件满足条件的链表
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">rb_root</span>      <span class="nx">rbr</span><span class="p">;</span>            <span class="c1">//用于管理所有fd的红黑树（树根）
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="kd">struct</span> <span class="nx">epitem</span>      <span class="o">*</span><span class="nx">ovflist</span><span class="p">;</span>       <span class="c1">//将事件到达的fd进行链接起来发送至用户空间
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>struct eventpoll is created at epoll_create.</p>
 <div class="highlight"><div class="chroma">
@@ -485,28 +483,28 @@
 </span><span class="lnt">21
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">long</span> <span class="nf">sys_epoll_create</span><span class="p">(</span><span class="kt">int</span> <span class="nx">size</span><span class="p">)</span> <span class="p">{</span>
-
-    <span class="kd">struct</span> <span class="nx">eventpoll</span> <span class="o">*</span><span class="nx">ep</span><span class="p">;</span>
-
-   <span class="c1">// ...
-</span><span class="c1"></span>
-    <span class="nf">ep_alloc</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="p">);</span> <span class="c1">//为ep分配内存并进行初始化
-</span><span class="c1"></span>
-<span class="cm">/* 调用anon_inode_getfd 新建一个file instance，
-</span><span class="cm">
-</span><span class="cm">也就是epoll可以看成一个文件（匿名文件）。
-</span><span class="cm">
-</span><span class="cm">因此我们可以看到epoll_create会返回一个fd。
-</span><span class="cm">
-</span><span class="cm">           epoll所管理的所有的fd都是放在一个大的结构eventpoll(红黑树)中，
-</span><span class="cm">
-</span><span class="cm">将主结构体struct eventpoll *ep放入file-&gt;private项中进行保存（sys_epoll_ctl会取用）*/</span>
-
- <span class="nx">fd</span> <span class="p">=</span> <span class="nf">anon_inode_getfd</span><span class="p">(</span><span class="s">&#34;[eventpoll]&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">eventpoll_fops</span><span class="p">,</span> <span class="nx">ep</span><span class="p">,</span> <span class="nx">O_RDWR</span> <span class="p">|</span> <span class="p">(</span><span class="nx">flags</span> <span class="o">&amp;</span> <span class="nx">O_CLOEXEC</span><span class="p">));</span>
-     <span class="k">return</span> <span class="nx">fd</span><span class="p">;</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="nx">long</span> <span class="nf">sys_epoll_create</span><span class="p">(</span><span class="kt">int</span> <span class="nx">size</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="kd">struct</span> <span class="nx">eventpoll</span> <span class="o">*</span><span class="nx">ep</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">   <span class="c1">// ...
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl">    <span class="nf">ep_alloc</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="p">);</span> <span class="c1">//为ep分配内存并进行初始化
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl"><span class="cm">/* 调用anon_inode_getfd 新建一个file instance，
+</span></span></span><span class="line"><span class="cl"><span class="cm">
+</span></span></span><span class="line"><span class="cl"><span class="cm">也就是epoll可以看成一个文件（匿名文件）。
+</span></span></span><span class="line"><span class="cl"><span class="cm">
+</span></span></span><span class="line"><span class="cl"><span class="cm">因此我们可以看到epoll_create会返回一个fd。
+</span></span></span><span class="line"><span class="cl"><span class="cm">
+</span></span></span><span class="line"><span class="cl"><span class="cm">           epoll所管理的所有的fd都是放在一个大的结构eventpoll(红黑树)中，
+</span></span></span><span class="line"><span class="cl"><span class="cm">
+</span></span></span><span class="line"><span class="cl"><span class="cm">将主结构体struct eventpoll *ep放入file-&gt;private项中进行保存（sys_epoll_ctl会取用）*/</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"> <span class="nx">fd</span> <span class="p">=</span> <span class="nf">anon_inode_getfd</span><span class="p">(</span><span class="s">&#34;[eventpoll]&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">eventpoll_fops</span><span class="p">,</span> <span class="nx">ep</span><span class="p">,</span> <span class="nx">O_RDWR</span> <span class="p">|</span> <span class="p">(</span><span class="nx">flags</span> <span class="o">&amp;</span> <span class="nx">O_CLOEXEC</span><span class="p">));</span>
+</span></span><span class="line"><span class="cl">     <span class="k">return</span> <span class="nx">fd</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>where ep_alloc(struct eventpoll **pep) allocates memory for pep and initializes it. Where the above registered operation eventpoll_fops is defined as follows: <code>static const struct file_operations eventpoll_fops = { .release= ep_eventpoll_release, .poll = ep_eventpoll_ poll, };</code> In this way, a red-black tree is maintained in the kernel with the following approximate structure: clip_image002 Then comes the epoll_ctl function (omitting code such as error checking).</p>
 <div class="highlight"><div class="chroma">
@@ -543,37 +541,37 @@
 </span><span class="lnt">30
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">asmlinkage</span> <span class="nx">long</span> <span class="nf">sys_epoll_ctl</span><span class="p">(</span><span class="kt">int</span> <span class="nx">epfd</span><span class="p">,</span><span class="kt">int</span> <span class="nx">op</span><span class="p">,</span><span class="kt">int</span> <span class="nx">fd</span><span class="p">,</span><span class="kd">struct</span> <span class="nx">epoll_event</span> <span class="nx">__user</span> <span class="o">*</span><span class="nx">event</span><span class="p">)</span> <span class="p">{</span>
-    <span class="kt">int</span> <span class="kt">error</span><span class="p">;</span>
-    <span class="kd">struct</span> <span class="nx">file</span> <span class="o">*</span><span class="nx">file</span><span class="p">,</span><span class="o">*</span><span class="nx">tfile</span><span class="p">;</span>
-    <span class="kd">struct</span> <span class="nx">eventpoll</span> <span class="o">*</span><span class="nx">ep</span><span class="p">;</span>
-    <span class="kd">struct</span> <span class="nx">epoll_event</span> <span class="nx">epds</span><span class="p">;</span>
-    <span class="kt">error</span> <span class="p">=</span> <span class="o">-</span><span class="nx">FAULT</span><span class="p">;</span>
-    <span class="c1">//判断参数的合法性，将 __user *event 复制给 epds。
-</span><span class="c1"></span>    <span class="k">if</span><span class="p">(</span><span class="nf">ep_op_has_event</span><span class="p">(</span><span class="nx">op</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="nf">copy_from_user</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">epds</span><span class="p">,</span><span class="nx">event</span><span class="p">,</span><span class="nf">sizeof</span><span class="p">(</span><span class="kd">struct</span> <span class="nx">epoll_event</span><span class="p">)))</span>
-            <span class="k">goto</span> <span class="nx">error_return</span><span class="p">;</span> <span class="c1">//省略跳转到的代码
-</span><span class="c1"></span>    <span class="nx">file</span>  <span class="p">=</span> <span class="nf">fget</span> <span class="p">(</span><span class="nx">epfd</span><span class="p">);</span> <span class="c1">// epoll fd 对应的文件对象
-</span><span class="c1"></span>    <span class="nx">tfile</span> <span class="p">=</span> <span class="nf">fget</span><span class="p">(</span><span class="nx">fd</span><span class="p">);</span>    <span class="c1">// fd 对应的文件对象
-</span><span class="c1"></span>    <span class="c1">//在create时存入进去的（anon_inode_getfd），现在取用。
-</span><span class="c1"></span>    <span class="nx">ep</span> <span class="p">=</span> <span class="nx">file</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">private</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">data</span><span class="p">;</span>
-    <span class="nf">mutex_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">mtx</span><span class="p">);</span>
-    <span class="c1">//防止重复添加（在ep的红黑树中查找是否已经存在这个fd）
-</span><span class="c1"></span>    <span class="nx">epi</span> <span class="p">=</span> <span class="nf">epi_find</span><span class="p">(</span><span class="nx">ep</span><span class="p">,</span><span class="nx">tfile</span><span class="p">,</span><span class="nx">fd</span><span class="p">);</span>
-    <span class="k">switch</span><span class="p">(</span><span class="nx">op</span><span class="p">)</span>
-    <span class="p">{</span>
-        <span class="k">case</span> <span class="nx">EPOLL_CTL_ADD</span><span class="p">:</span>  <span class="c1">//增加监听一个fd
-</span><span class="c1"></span>            <span class="k">if</span><span class="p">(!</span><span class="nx">epi</span><span class="p">)</span>
-            <span class="p">{</span>
-                <span class="nx">epds</span><span class="p">.</span><span class="nx">events</span> <span class="o">|=</span> <span class="nx">EPOLLERR</span> <span class="p">|</span> <span class="nx">POLLHUP</span><span class="p">;</span>     <span class="c1">//默认包含POLLERR和POLLHUP事件
-</span><span class="c1"></span>                <span class="kt">error</span> <span class="p">=</span> <span class="nf">ep_insert</span><span class="p">(</span><span class="nx">ep</span><span class="p">,</span><span class="o">&amp;</span><span class="nx">epds</span><span class="p">,</span><span class="nx">tfile</span><span class="p">,</span><span class="nx">fd</span><span class="p">);</span>  <span class="c1">//在ep的红黑树中插入这个fd对应的epitm结构体。
-</span><span class="c1"></span>            <span class="p">}</span> <span class="k">else</span>  <span class="c1">//重复添加（在ep的红黑树中查找已经存在这个fd）。
-</span><span class="c1"></span>                <span class="kt">error</span> <span class="p">=</span> <span class="o">-</span><span class="nx">EEXIST</span><span class="p">;</span>
-            <span class="k">break</span><span class="p">;</span>
-        <span class="o">...</span>
-    <span class="p">}</span>
-    <span class="k">return</span> <span class="kt">error</span><span class="p">;</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="nx">asmlinkage</span> <span class="nx">long</span> <span class="nf">sys_epoll_ctl</span><span class="p">(</span><span class="kt">int</span> <span class="nx">epfd</span><span class="p">,</span><span class="kt">int</span> <span class="nx">op</span><span class="p">,</span><span class="kt">int</span> <span class="nx">fd</span><span class="p">,</span><span class="kd">struct</span> <span class="nx">epoll_event</span> <span class="nx">__user</span> <span class="o">*</span><span class="nx">event</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="kt">error</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">struct</span> <span class="nx">file</span> <span class="o">*</span><span class="nx">file</span><span class="p">,</span><span class="o">*</span><span class="nx">tfile</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">struct</span> <span class="nx">eventpoll</span> <span class="o">*</span><span class="nx">ep</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">struct</span> <span class="nx">epoll_event</span> <span class="nx">epds</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">error</span> <span class="p">=</span> <span class="o">-</span><span class="nx">FAULT</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">//判断参数的合法性，将 __user *event 复制给 epds。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span><span class="p">(</span><span class="nf">ep_op_has_event</span><span class="p">(</span><span class="nx">op</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="nf">copy_from_user</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">epds</span><span class="p">,</span><span class="nx">event</span><span class="p">,</span><span class="nf">sizeof</span><span class="p">(</span><span class="kd">struct</span> <span class="nx">epoll_event</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">            <span class="k">goto</span> <span class="nx">error_return</span><span class="p">;</span> <span class="c1">//省略跳转到的代码
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">file</span>  <span class="p">=</span> <span class="nf">fget</span> <span class="p">(</span><span class="nx">epfd</span><span class="p">);</span> <span class="c1">// epoll fd 对应的文件对象
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">tfile</span> <span class="p">=</span> <span class="nf">fget</span><span class="p">(</span><span class="nx">fd</span><span class="p">);</span>    <span class="c1">// fd 对应的文件对象
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">//在create时存入进去的（anon_inode_getfd），现在取用。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">ep</span> <span class="p">=</span> <span class="nx">file</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">private</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">data</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="nf">mutex_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">mtx</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">//防止重复添加（在ep的红黑树中查找是否已经存在这个fd）
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">epi</span> <span class="p">=</span> <span class="nf">epi_find</span><span class="p">(</span><span class="nx">ep</span><span class="p">,</span><span class="nx">tfile</span><span class="p">,</span><span class="nx">fd</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="k">switch</span><span class="p">(</span><span class="nx">op</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">case</span> <span class="nx">EPOLL_CTL_ADD</span><span class="p">:</span>  <span class="c1">//增加监听一个fd
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>            <span class="k">if</span><span class="p">(!</span><span class="nx">epi</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">            <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="nx">epds</span><span class="p">.</span><span class="nx">events</span> <span class="o">|=</span> <span class="nx">EPOLLERR</span> <span class="p">|</span> <span class="nx">POLLHUP</span><span class="p">;</span>     <span class="c1">//默认包含POLLERR和POLLHUP事件
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>                <span class="kt">error</span> <span class="p">=</span> <span class="nf">ep_insert</span><span class="p">(</span><span class="nx">ep</span><span class="p">,</span><span class="o">&amp;</span><span class="nx">epds</span><span class="p">,</span><span class="nx">tfile</span><span class="p">,</span><span class="nx">fd</span><span class="p">);</span>  <span class="c1">//在ep的红黑树中插入这个fd对应的epitm结构体。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>            <span class="p">}</span> <span class="k">else</span>  <span class="c1">//重复添加（在ep的红黑树中查找已经存在这个fd）。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>                <span class="kt">error</span> <span class="p">=</span> <span class="o">-</span><span class="nx">EEXIST</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="o">...</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="kt">error</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><h2 id="ep_insert-is-implemented-as-follows">ep_insert is implemented as follows.</h2>
 <div class="highlight"><div class="chroma">
@@ -646,73 +644,73 @@
 </span><span class="lnt">66
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-c++" data-lang="c++"><span class="k">static</span> <span class="kt">int</span> <span class="nf">ep_insert</span><span class="p">(</span><span class="k">struct</span> <span class="nc">eventpoll</span> <span class="o">*</span><span class="n">ep</span><span class="p">,</span> <span class="k">struct</span> <span class="nc">epoll_event</span> <span class="o">*</span><span class="n">event</span><span class="p">,</span> <span class="k">struct</span> <span class="nc">file</span> <span class="o">*</span><span class="n">tfile</span><span class="p">,</span> <span class="kt">int</span> <span class="n">fd</span><span class="p">)</span>
-<span class="p">{</span>
-   <span class="kt">int</span> <span class="n">error</span> <span class="p">,</span><span class="n">revents</span><span class="p">,</span><span class="n">pwake</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
-   <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">flags</span> <span class="p">;</span>
-   <span class="k">struct</span> <span class="nc">epitem</span> <span class="o">*</span><span class="n">epi</span><span class="p">;</span>
-   <span class="cm">/*
-</span><span class="cm">      struct ep_queue{
-</span><span class="cm">         poll_table pt;
-</span><span class="cm">         struct epitem *epi;
-</span><span class="cm">      }   */</span>
-   <span class="k">struct</span> <span class="nc">ep_pqueue</span> <span class="n">epq</span><span class="p">;</span>
-   <span class="c1">//分配一个epitem结构体来保存每个加入的fd
-</span><span class="c1"></span>   <span class="k">if</span><span class="p">(</span><span class="o">!</span><span class="p">(</span><span class="n">epi</span> <span class="o">=</span> <span class="n">kmem_cache_alloc</span><span class="p">(</span><span class="n">epi_cache</span><span class="p">,</span><span class="n">GFP_KERNEL</span><span class="p">)))</span>
-      <span class="k">goto</span> <span class="n">error_return</span><span class="p">;</span>
-   <span class="c1">//初始化该结构体
-</span><span class="c1"></span>   <span class="n">ep_rb_initnode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">rbn</span><span class="p">);</span>
-   <span class="n">INIT_LIST_HEAD</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">rdllink</span><span class="p">);</span>
-   <span class="n">INIT_LIST_HEAD</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">fllink</span><span class="p">);</span>
-   <span class="n">INIT_LIST_HEAD</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">pwqlist</span><span class="p">);</span>
-   <span class="n">epi</span><span class="o">-&gt;</span><span class="n">ep</span> <span class="o">=</span> <span class="n">ep</span><span class="p">;</span>
-   <span class="n">ep_set_ffd</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">ffd</span><span class="p">,</span><span class="n">tfile</span><span class="p">,</span><span class="n">fd</span><span class="p">);</span>
-   <span class="n">epi</span><span class="o">-&gt;</span><span class="n">event</span> <span class="o">=</span> <span class="o">*</span><span class="n">event</span><span class="p">;</span>
-   <span class="n">epi</span><span class="o">-&gt;</span><span class="n">nwait</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
-   <span class="n">epi</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">EP_UNACTIVE_PTR</span><span class="p">;</span>
-   <span class="n">epq</span><span class="p">.</span><span class="n">epi</span> <span class="o">=</span> <span class="n">epi</span><span class="p">;</span>
-   <span class="c1">//安装poll回调函数
-</span><span class="c1"></span>   <span class="n">init_poll_funcptr</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epq</span><span class="p">.</span><span class="n">pt</span><span class="p">,</span> <span class="n">ep_ptable_queue_proc</span> <span class="p">);</span>
-   <span class="cm">/* 调用poll函数来获取当前事件位，其实是利用它来调用注册函数ep_ptable_queue_proc（poll_wait中调用）。
-</span><span class="cm">       如果fd是套接字，f_op为socket_file_ops，poll函数是
-</span><span class="cm">       sock_poll()。如果是TCP套接字的话，进而会调用
-</span><span class="cm">       到tcp_poll()函数。此处调用poll函数查看当前
-</span><span class="cm">       文件描述符的状态，存储在revents中。
-</span><span class="cm">       在poll的处理函数(tcp_poll())中，会调用sock_poll_wait()，
-</span><span class="cm">       在sock_poll_wait()中会调用到epq.pt.qproc指向的函数，
-</span><span class="cm">       也就是ep_ptable_queue_proc()。  */</span>
-   <span class="n">revents</span> <span class="o">=</span> <span class="n">tfile</span><span class="o">-&gt;</span><span class="n">f_op</span><span class="o">-&gt;</span><span class="n">poll</span><span class="p">(</span><span class="n">tfile</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">epq</span><span class="p">.</span><span class="n">pt</span><span class="p">);</span>
-   <span class="n">spin_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tfile</span><span class="o">-&gt;</span><span class="n">f_ep_lock</span><span class="p">);</span>
-   <span class="n">list_add_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">fllink</span><span class="p">,</span><span class="o">&amp;</span><span class="n">tfile</span><span class="o">-&gt;</span><span class="n">f_ep_lilnks</span><span class="p">);</span>
-   <span class="n">spin_unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tfile</span><span class="o">-&gt;</span><span class="n">f_ep_lock</span><span class="p">);</span>
-   <span class="n">ep_rbtree_insert</span><span class="p">(</span><span class="n">ep</span><span class="p">,</span><span class="n">epi</span><span class="p">);</span> <span class="c1">//将该epi插入到ep的红黑树中
-</span><span class="c1"></span>   <span class="n">spin_lock_irqsave</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">lock</span><span class="p">,</span><span class="n">flags</span><span class="p">);</span>
-<span class="c1">//  revents &amp; event-&gt;events：刚才fop-&gt;poll的返回值中标识的事件有用户event关心的事件发生。
-</span><span class="c1">// !ep_is_linked(&amp;epi-&gt;rdllink)：epi的ready队列中有数据。ep_is_linked用于判断队列是否为空。
-</span><span class="c1"></span><span class="cm">/*  如果要监视的文件状态已经就绪并且还没有加入到就绪队列中,则将当前的
-</span><span class="cm">    epitem加入到就绪队列中.如果有进程正在等待该文件的状态就绪,则
-</span><span class="cm">    唤醒一个等待的进程。  */</span>
-<span class="k">if</span><span class="p">((</span><span class="n">revents</span> <span class="o">&amp;</span> <span class="n">event</span><span class="o">-&gt;</span><span class="n">events</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="o">!</span><span class="n">ep_is_linked</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">rdllink</span><span class="p">))</span> <span class="p">{</span>
-      <span class="n">list_add_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">rdllink</span><span class="p">,</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">rdllist</span><span class="p">);</span> <span class="c1">//将当前epi插入到ep-&gt;ready队列中。
-</span><span class="c1"></span><span class="cm">/* 如果有进程正在等待文件的状态就绪，
-</span><span class="cm">也就是调用epoll_wait睡眠的进程正在等待，
-</span><span class="cm">则唤醒一个等待进程。
-</span><span class="cm">waitqueue_active(q) 等待队列q中有等待的进程返回1，否则返回0。
-</span><span class="cm">*/</span>
-      <span class="k">if</span><span class="p">(</span><span class="n">waitqueue_active</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">wq</span><span class="p">))</span>
-         <span class="n">__wake_up_locked</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">wq</span><span class="p">,</span><span class="n">TAKS_UNINTERRUPTIBLE</span> <span class="o">|</span> <span class="n">TASK_INTERRUPTIBLE</span><span class="p">);</span>
-<span class="cm">/*  如果有进程等待eventpoll文件本身（???）的事件就绪，
-</span><span class="cm">           则增加临时变量pwake的值，pwake的值不为0时，
-</span><span class="cm">           在释放lock后，会唤醒等待进程。 */</span> 
-      <span class="k">if</span><span class="p">(</span><span class="n">waitqueue_active</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">poll_wait</span><span class="p">))</span>
-         <span class="n">pwake</span><span class="o">++</span><span class="p">;</span>
-   <span class="p">}</span>
-   <span class="n">spin_unlock_irqrestore</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">lock</span><span class="p">,</span><span class="n">flags</span><span class="p">);</span>
-<span class="k">if</span><span class="p">(</span><span class="n">pwake</span><span class="p">)</span>
-      <span class="n">ep_poll_safewake</span><span class="p">(</span><span class="o">&amp;</span><span class="n">psw</span><span class="p">,</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">poll_wait</span><span class="p">);</span><span class="c1">//唤醒等待eventpoll文件状态就绪的进程
-</span><span class="c1"></span>   <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-c++" data-lang="c++"><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">int</span> <span class="nf">ep_insert</span><span class="p">(</span><span class="k">struct</span> <span class="nc">eventpoll</span> <span class="o">*</span><span class="n">ep</span><span class="p">,</span> <span class="k">struct</span> <span class="nc">epoll_event</span> <span class="o">*</span><span class="n">event</span><span class="p">,</span> <span class="k">struct</span> <span class="nc">file</span> <span class="o">*</span><span class="n">tfile</span><span class="p">,</span> <span class="kt">int</span> <span class="n">fd</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">   <span class="kt">int</span> <span class="n">error</span> <span class="p">,</span><span class="n">revents</span><span class="p">,</span><span class="n">pwake</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">flags</span> <span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="k">struct</span> <span class="nc">epitem</span> <span class="o">*</span><span class="n">epi</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm">      struct ep_queue{
+</span></span></span><span class="line"><span class="cl"><span class="cm">         poll_table pt;
+</span></span></span><span class="line"><span class="cl"><span class="cm">         struct epitem *epi;
+</span></span></span><span class="line"><span class="cl"><span class="cm">      }   */</span>
+</span></span><span class="line"><span class="cl">   <span class="k">struct</span> <span class="nc">ep_pqueue</span> <span class="n">epq</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="c1">//分配一个epitem结构体来保存每个加入的fd
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="k">if</span><span class="p">(</span><span class="o">!</span><span class="p">(</span><span class="n">epi</span> <span class="o">=</span> <span class="n">kmem_cache_alloc</span><span class="p">(</span><span class="n">epi_cache</span><span class="p">,</span><span class="n">GFP_KERNEL</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">      <span class="k">goto</span> <span class="n">error_return</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="c1">//初始化该结构体
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="n">ep_rb_initnode</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">rbn</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="n">INIT_LIST_HEAD</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">rdllink</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="n">INIT_LIST_HEAD</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">fllink</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="n">INIT_LIST_HEAD</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">pwqlist</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="n">epi</span><span class="o">-&gt;</span><span class="n">ep</span> <span class="o">=</span> <span class="n">ep</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="n">ep_set_ffd</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">ffd</span><span class="p">,</span><span class="n">tfile</span><span class="p">,</span><span class="n">fd</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="n">epi</span><span class="o">-&gt;</span><span class="n">event</span> <span class="o">=</span> <span class="o">*</span><span class="n">event</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="n">epi</span><span class="o">-&gt;</span><span class="n">nwait</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="n">epi</span><span class="o">-&gt;</span><span class="n">next</span> <span class="o">=</span> <span class="n">EP_UNACTIVE_PTR</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="n">epq</span><span class="p">.</span><span class="n">epi</span> <span class="o">=</span> <span class="n">epi</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="c1">//安装poll回调函数
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="n">init_poll_funcptr</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epq</span><span class="p">.</span><span class="n">pt</span><span class="p">,</span> <span class="n">ep_ptable_queue_proc</span> <span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="cm">/* 调用poll函数来获取当前事件位，其实是利用它来调用注册函数ep_ptable_queue_proc（poll_wait中调用）。
+</span></span></span><span class="line"><span class="cl"><span class="cm">       如果fd是套接字，f_op为socket_file_ops，poll函数是
+</span></span></span><span class="line"><span class="cl"><span class="cm">       sock_poll()。如果是TCP套接字的话，进而会调用
+</span></span></span><span class="line"><span class="cl"><span class="cm">       到tcp_poll()函数。此处调用poll函数查看当前
+</span></span></span><span class="line"><span class="cl"><span class="cm">       文件描述符的状态，存储在revents中。
+</span></span></span><span class="line"><span class="cl"><span class="cm">       在poll的处理函数(tcp_poll())中，会调用sock_poll_wait()，
+</span></span></span><span class="line"><span class="cl"><span class="cm">       在sock_poll_wait()中会调用到epq.pt.qproc指向的函数，
+</span></span></span><span class="line"><span class="cl"><span class="cm">       也就是ep_ptable_queue_proc()。  */</span>
+</span></span><span class="line"><span class="cl">   <span class="n">revents</span> <span class="o">=</span> <span class="n">tfile</span><span class="o">-&gt;</span><span class="n">f_op</span><span class="o">-&gt;</span><span class="n">poll</span><span class="p">(</span><span class="n">tfile</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">epq</span><span class="p">.</span><span class="n">pt</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="n">spin_lock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tfile</span><span class="o">-&gt;</span><span class="n">f_ep_lock</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="n">list_add_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">fllink</span><span class="p">,</span><span class="o">&amp;</span><span class="n">tfile</span><span class="o">-&gt;</span><span class="n">f_ep_lilnks</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="n">spin_unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tfile</span><span class="o">-&gt;</span><span class="n">f_ep_lock</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="n">ep_rbtree_insert</span><span class="p">(</span><span class="n">ep</span><span class="p">,</span><span class="n">epi</span><span class="p">);</span> <span class="c1">//将该epi插入到ep的红黑树中
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="n">spin_lock_irqsave</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">lock</span><span class="p">,</span><span class="n">flags</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="c1">//  revents &amp; event-&gt;events：刚才fop-&gt;poll的返回值中标识的事件有用户event关心的事件发生。
+</span></span></span><span class="line"><span class="cl"><span class="c1">// !ep_is_linked(&amp;epi-&gt;rdllink)：epi的ready队列中有数据。ep_is_linked用于判断队列是否为空。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="cm">/*  如果要监视的文件状态已经就绪并且还没有加入到就绪队列中,则将当前的
+</span></span></span><span class="line"><span class="cl"><span class="cm">    epitem加入到就绪队列中.如果有进程正在等待该文件的状态就绪,则
+</span></span></span><span class="line"><span class="cl"><span class="cm">    唤醒一个等待的进程。  */</span>
+</span></span><span class="line"><span class="cl"><span class="k">if</span><span class="p">((</span><span class="n">revents</span> <span class="o">&amp;</span> <span class="n">event</span><span class="o">-&gt;</span><span class="n">events</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="o">!</span><span class="n">ep_is_linked</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">rdllink</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="n">list_add_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="n">epi</span><span class="o">-&gt;</span><span class="n">rdllink</span><span class="p">,</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">rdllist</span><span class="p">);</span> <span class="c1">//将当前epi插入到ep-&gt;ready队列中。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="cm">/* 如果有进程正在等待文件的状态就绪，
+</span></span></span><span class="line"><span class="cl"><span class="cm">也就是调用epoll_wait睡眠的进程正在等待，
+</span></span></span><span class="line"><span class="cl"><span class="cm">则唤醒一个等待进程。
+</span></span></span><span class="line"><span class="cl"><span class="cm">waitqueue_active(q) 等待队列q中有等待的进程返回1，否则返回0。
+</span></span></span><span class="line"><span class="cl"><span class="cm">*/</span>
+</span></span><span class="line"><span class="cl">      <span class="k">if</span><span class="p">(</span><span class="n">waitqueue_active</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">wq</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">         <span class="n">__wake_up_locked</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">wq</span><span class="p">,</span><span class="n">TAKS_UNINTERRUPTIBLE</span> <span class="o">|</span> <span class="n">TASK_INTERRUPTIBLE</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="cm">/*  如果有进程等待eventpoll文件本身（???）的事件就绪，
+</span></span></span><span class="line"><span class="cl"><span class="cm">           则增加临时变量pwake的值，pwake的值不为0时，
+</span></span></span><span class="line"><span class="cl"><span class="cm">           在释放lock后，会唤醒等待进程。 */</span> 
+</span></span><span class="line"><span class="cl">      <span class="k">if</span><span class="p">(</span><span class="n">waitqueue_active</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">poll_wait</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">         <span class="n">pwake</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="p">}</span>
+</span></span><span class="line"><span class="cl">   <span class="n">spin_unlock_irqrestore</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">lock</span><span class="p">,</span><span class="n">flags</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="k">if</span><span class="p">(</span><span class="n">pwake</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="n">ep_poll_safewake</span><span class="p">(</span><span class="o">&amp;</span><span class="n">psw</span><span class="p">,</span><span class="o">&amp;</span><span class="n">ep</span><span class="o">-&gt;</span><span class="n">poll_wait</span><span class="p">);</span><span class="c1">//唤醒等待eventpoll文件状态就绪的进程
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><div class="highlight"><div class="chroma">
 <table class="lntable"><tr><td class="lntd">
@@ -720,9 +718,9 @@
 </span><span class="lnt">2
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text">init_poll_funcptr(&amp;epq.pt, ep_ptable_queue_proc);
-revents = tfile-&gt;f_op-&gt;poll(tfile, &amp;epq.pt);
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-text" data-lang="text"><span class="line"><span class="cl">init_poll_funcptr(&amp;epq.pt, ep_ptable_queue_proc);
+</span></span><span class="line"><span class="cl">revents = tfile-&gt;f_op-&gt;poll(tfile, &amp;epq.pt);
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>These two functions register ep_ptable_queue_proc to qproc in epq.pt. typedef struct poll_table_struct { poll_queue_proc qproc; unsigned long key; }poll_table; Execute f_op- &gt;poll(tfile, &amp;epq.pt), the XXX_poll(tfile, &amp;epq.pt) function executes poll_wait(), and poll_wait() calls the epq.pt.qproc function, i.e., ep_ptable_queue_proc. ep_ptable_queue_ proc function is as follows.</p>
 <div class="highlight"><div class="chroma">
@@ -754,32 +752,32 @@ revents = tfile-&gt;f_op-&gt;poll(tfile, &amp;epq.pt);
 </span><span class="lnt">25
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="cm">/*  在文件操作中的poll函数中调用，将epoll的回调函数加入到目标文件的唤醒队列中。
-</span><span class="cm">    如果监视的文件是套接字，参数whead则是sock结构的sk_sleep成员的地址。  */</span>
-<span class="nx">static</span> <span class="nx">void</span> <span class="nf">ep_ptable_queue_proc</span><span class="p">(</span><span class="kd">struct</span> <span class="nx">file</span> <span class="o">*</span><span class="nx">file</span><span class="p">,</span> <span class="nx">wait_queue_head_t</span> <span class="o">*</span><span class="nx">whead</span><span class="p">,</span> <span class="nx">poll_table</span> <span class="o">*</span><span class="nx">pt</span><span class="p">)</span> <span class="p">{</span>
-<span class="cm">/* struct ep_queue{
-</span><span class="cm">         poll_table pt;
-</span><span class="cm">         struct epitem *epi;
-</span><span class="cm">      } */</span>
-    <span class="kd">struct</span> <span class="nx">epitem</span> <span class="o">*</span><span class="nx">epi</span> <span class="p">=</span> <span class="nf">ep_item_from_epqueue</span><span class="p">(</span><span class="nx">pt</span><span class="p">);</span> <span class="c1">//pt获取struct ep_queue的epi字段。
-</span><span class="c1"></span>    <span class="kd">struct</span> <span class="nx">eppoll_entry</span> <span class="o">*</span><span class="nx">pwq</span><span class="p">;</span>
-    <span class="k">if</span> <span class="p">(</span><span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">nwait</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">pwq</span> <span class="p">=</span> <span class="nf">kmem_cache_alloc</span><span class="p">(</span><span class="nx">pwq_cache</span><span class="p">,</span> <span class="nx">GFP_KERNEL</span><span class="p">)))</span> <span class="p">{</span>
-        <span class="nf">init_waitqueue_func_entry</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pwq</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wait</span><span class="p">,</span> <span class="nx">ep_poll_callback</span><span class="p">);</span>
-        <span class="nx">pwq</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">whead</span> <span class="p">=</span> <span class="nx">whead</span><span class="p">;</span>
-        <span class="nx">pwq</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">base</span> <span class="p">=</span> <span class="nx">epi</span><span class="p">;</span>
-        <span class="nf">add_wait_queue</span><span class="p">(</span><span class="nx">whead</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">pwq</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wait</span><span class="p">);</span>
-        <span class="nf">list_add_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pwq</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">llink</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">pwqlist</span><span class="p">);</span>
-        <span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">nwait</span><span class="o">++</span><span class="p">;</span>
-    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
-        <span class="cm">/* We have to signal that an error occurred */</span>
-        <span class="cm">/*
-</span><span class="cm">         * 如果分配内存失败，则将nwait置为-1，表示
-</span><span class="cm">         * 发生错误，即内存分配失败，或者已发生错误
-</span><span class="cm">         */</span>
-        <span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">nwait</span> <span class="p">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
-    <span class="p">}</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="cm">/*  在文件操作中的poll函数中调用，将epoll的回调函数加入到目标文件的唤醒队列中。
+</span></span></span><span class="line"><span class="cl"><span class="cm">    如果监视的文件是套接字，参数whead则是sock结构的sk_sleep成员的地址。  */</span>
+</span></span><span class="line"><span class="cl"><span class="nx">static</span> <span class="nx">void</span> <span class="nf">ep_ptable_queue_proc</span><span class="p">(</span><span class="kd">struct</span> <span class="nx">file</span> <span class="o">*</span><span class="nx">file</span><span class="p">,</span> <span class="nx">wait_queue_head_t</span> <span class="o">*</span><span class="nx">whead</span><span class="p">,</span> <span class="nx">poll_table</span> <span class="o">*</span><span class="nx">pt</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="cm">/* struct ep_queue{
+</span></span></span><span class="line"><span class="cl"><span class="cm">         poll_table pt;
+</span></span></span><span class="line"><span class="cl"><span class="cm">         struct epitem *epi;
+</span></span></span><span class="line"><span class="cl"><span class="cm">      } */</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">struct</span> <span class="nx">epitem</span> <span class="o">*</span><span class="nx">epi</span> <span class="p">=</span> <span class="nf">ep_item_from_epqueue</span><span class="p">(</span><span class="nx">pt</span><span class="p">);</span> <span class="c1">//pt获取struct ep_queue的epi字段。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="kd">struct</span> <span class="nx">eppoll_entry</span> <span class="o">*</span><span class="nx">pwq</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">(</span><span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">nwait</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">(</span><span class="nx">pwq</span> <span class="p">=</span> <span class="nf">kmem_cache_alloc</span><span class="p">(</span><span class="nx">pwq_cache</span><span class="p">,</span> <span class="nx">GFP_KERNEL</span><span class="p">)))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nf">init_waitqueue_func_entry</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pwq</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wait</span><span class="p">,</span> <span class="nx">ep_poll_callback</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">pwq</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">whead</span> <span class="p">=</span> <span class="nx">whead</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">pwq</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">base</span> <span class="p">=</span> <span class="nx">epi</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="nf">add_wait_queue</span><span class="p">(</span><span class="nx">whead</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">pwq</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wait</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="nf">list_add_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">pwq</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">llink</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">pwqlist</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">nwait</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="cm">/* We have to signal that an error occurred */</span>
+</span></span><span class="line"><span class="cl">        <span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * 如果分配内存失败，则将nwait置为-1，表示
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * 发生错误，即内存分配失败，或者已发生错误
+</span></span></span><span class="line"><span class="cl"><span class="cm">         */</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">nwait</span> <span class="p">=</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><h2 id="ep_ptable_queue_proc">ep_ptable_queue_proc</h2>
 <p>where struct eppoll_entry is defined as follows.</p>
@@ -798,18 +796,18 @@ revents = tfile-&gt;f_op-&gt;poll(tfile, &amp;epq.pt);
 </span><span class="lnt">11
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="kd">struct</span> <span class="nx">eppoll_entry</span> <span class="p">{</span>
-   <span class="kd">struct</span> <span class="nx">list_head</span> <span class="nx">llink</span><span class="p">;</span>
-   <span class="kd">struct</span> <span class="nx">epitem</span> <span class="o">*</span><span class="nx">base</span><span class="p">;</span>
-   <span class="nx">wait_queue_t</span> <span class="nx">wait</span><span class="p">;</span>
-   <span class="nx">wait_queue_head_t</span> <span class="o">*</span><span class="nx">whead</span><span class="p">;</span>
-<span class="p">};</span>
-<span class="nx">ep_ptable_queue_proc</span> <span class="nx">函数完成</span> <span class="nx">epitem</span> <span class="nx">加入到特定文件的wait队列任务</span><span class="err">。</span>
-<span class="nx">ep_ptable_queue_proc有三个参数</span><span class="err">：</span>
-<span class="kd">struct</span> <span class="nx">file</span> <span class="o">*</span><span class="nx">file</span><span class="p">;</span>              <span class="nx">该fd对应的文件对象</span>
-<span class="nx">wait_queue_head_t</span> <span class="o">*</span><span class="nx">whead</span><span class="p">;</span>      <span class="nx">该fd对应的设备等待队列</span><span class="err">（</span><span class="nx">同select中的mydev</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wait_address</span><span class="err">）</span>
-<span class="nx">poll_table</span> <span class="o">*</span><span class="nx">pt</span><span class="p">;</span>                 <span class="nx">f_op</span><span class="o">-</span><span class="p">&gt;</span><span class="nf">poll</span><span class="p">(</span><span class="nx">tfile</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">epq</span><span class="p">.</span><span class="nx">pt</span><span class="p">)</span><span class="nx">中的epq</span><span class="p">.</span><span class="nx">pt</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">struct</span> <span class="nx">eppoll_entry</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">   <span class="kd">struct</span> <span class="nx">list_head</span> <span class="nx">llink</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="kd">struct</span> <span class="nx">epitem</span> <span class="o">*</span><span class="nx">base</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">wait_queue_t</span> <span class="nx">wait</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">wait_queue_head_t</span> <span class="o">*</span><span class="nx">whead</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span><span class="line"><span class="cl"><span class="nx">ep_ptable_queue_proc</span> <span class="nx">函数完成</span> <span class="nx">epitem</span> <span class="nx">加入到特定文件的wait队列任务</span><span class="err">。</span>
+</span></span><span class="line"><span class="cl"><span class="nx">ep_ptable_queue_proc有三个参数</span><span class="err">：</span>
+</span></span><span class="line"><span class="cl"><span class="kd">struct</span> <span class="nx">file</span> <span class="o">*</span><span class="nx">file</span><span class="p">;</span>              <span class="nx">该fd对应的文件对象</span>
+</span></span><span class="line"><span class="cl"><span class="nx">wait_queue_head_t</span> <span class="o">*</span><span class="nx">whead</span><span class="p">;</span>      <span class="nx">该fd对应的设备等待队列</span><span class="err">（</span><span class="nx">同select中的mydev</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wait_address</span><span class="err">）</span>
+</span></span><span class="line"><span class="cl"><span class="nx">poll_table</span> <span class="o">*</span><span class="nx">pt</span><span class="p">;</span>                 <span class="nx">f_op</span><span class="o">-</span><span class="p">&gt;</span><span class="nf">poll</span><span class="p">(</span><span class="nx">tfile</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">epq</span><span class="p">.</span><span class="nx">pt</span><span class="p">)</span><span class="nx">中的epq</span><span class="p">.</span><span class="nx">pt</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>In the ep_ptable_queue_proc function, another very important data structure, eppoll_entry, is introduced. eppoll_entry mainly completes the association between the epitem and the callback (ep_poll_callback) function when the epitem event occurs. First, the whead of eppoll_entry is pointed to the device wait queue of fd (same as wait_address in select), then the base variable of eppoll_entry is initialized to point to epitem, and finally the epoll_entry is mounted to the device wait queue of fd by add_wait_queue. queue. After this action, the epoll_entry has been mounted to the device wait queue of fd.</p>
 <p>Since the ep_ptable_queue_proc function sets the ep_poll_callback callback function for the wait queue. So when the device hardware data arrives, the wakeup function ep_poll_callback will be called when the hardware interrupt handling function will wake up the process waiting on that wait queue</p>
@@ -849,39 +847,39 @@ revents = tfile-&gt;f_op-&gt;poll(tfile, &amp;epq.pt);
 </span><span class="lnt">32
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nx">static</span> <span class="kt">int</span> <span class="nf">ep_poll_callback</span><span class="p">(</span><span class="nx">wait_queue_t</span> <span class="o">*</span><span class="nx">wait</span><span class="p">,</span> <span class="nx">unsigned</span> <span class="nx">mode</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">sync</span><span class="p">,</span> <span class="nx">void</span> <span class="o">*</span><span class="nx">key</span><span class="p">)</span> <span class="p">{</span>
-   <span class="kt">int</span> <span class="nx">pwake</span> <span class="p">=</span> <span class="mi">0</span><span class="p">;</span>
-   <span class="nx">unsigned</span> <span class="nx">long</span> <span class="nx">flags</span><span class="p">;</span>
-   <span class="kd">struct</span> <span class="nx">epitem</span> <span class="o">*</span><span class="nx">epi</span> <span class="p">=</span> <span class="nf">ep_item_from_wait</span><span class="p">(</span><span class="nx">wait</span><span class="p">);</span>
-   <span class="kd">struct</span> <span class="nx">eventpoll</span> <span class="o">*</span><span class="nx">ep</span> <span class="p">=</span> <span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">ep</span><span class="p">;</span>
-   <span class="nf">spin_lock_irqsave</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">flags</span><span class="p">);</span>
-   <span class="c1">//判断注册的感兴趣事件
-</span><span class="c1">//#define EP_PRIVATE_BITS  (EPOLLONESHOT | EPOLLET)
-</span><span class="c1">//有非EPOLLONESHONT或EPOLLET事件
-</span><span class="c1"></span>   <span class="k">if</span> <span class="p">(!(</span><span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">event</span><span class="p">.</span><span class="nx">events</span> <span class="o">&amp;</span> <span class="err">~</span><span class="nx">EP_PRIVATE_BITS</span><span class="p">))</span>
-      <span class="k">goto</span> <span class="nx">out_unlock</span><span class="p">;</span>
-   <span class="k">if</span> <span class="p">(</span><span class="nf">unlikely</span><span class="p">(</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">ovflist</span> <span class="o">!=</span> <span class="nx">EP_UNACTIVE_PTR</span><span class="p">))</span> <span class="p">{</span>
-      <span class="k">if</span> <span class="p">(</span><span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">next</span> <span class="o">==</span> <span class="nx">EP_UNACTIVE_PTR</span><span class="p">)</span> <span class="p">{</span>
-         <span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">next</span> <span class="p">=</span> <span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">ovflist</span><span class="p">;</span>
-         <span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">ovflist</span> <span class="p">=</span> <span class="nx">epi</span><span class="p">;</span>
-      <span class="p">}</span>
-      <span class="k">goto</span> <span class="nx">out_unlock</span><span class="p">;</span>
-   <span class="p">}</span>
-   <span class="k">if</span> <span class="p">(</span><span class="nf">ep_is_linked</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">rdllink</span><span class="p">))</span>
-      <span class="k">goto</span> <span class="nx">is_linked</span><span class="p">;</span>
-    <span class="c1">//***关键***，将该fd加入到epoll监听的就绪链表中
-</span><span class="c1"></span>   <span class="nf">list_add_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">rdllink</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">rdllist</span><span class="p">);</span>
-   <span class="c1">//唤醒调用epoll_wait()函数时睡眠的进程。用户层epoll_wait(...) 超时前返回。
-</span><span class="c1"></span><span class="k">if</span> <span class="p">(</span><span class="nf">waitqueue_active</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wq</span><span class="p">))</span>
-      <span class="nf">__wake_up_locked</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wq</span><span class="p">,</span> <span class="nx">TASK_UNINTERRUPTIBLE</span> <span class="p">|</span> <span class="nx">TASK_INTERRUPTIBLE</span><span class="p">);</span>
-   <span class="k">if</span> <span class="p">(</span><span class="nf">waitqueue_active</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">poll_wait</span><span class="p">))</span>
-      <span class="nx">pwake</span><span class="o">++</span><span class="p">;</span>
-   <span class="nx">out_unlock</span><span class="p">:</span> <span class="nf">spin_unlock_irqrestore</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">flags</span><span class="p">);</span>
-   <span class="k">if</span> <span class="p">(</span><span class="nx">pwake</span><span class="p">)</span>
-      <span class="nf">ep_poll_safewake</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">psw</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">poll_wait</span><span class="p">);</span>
-   <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="nx">static</span> <span class="kt">int</span> <span class="nf">ep_poll_callback</span><span class="p">(</span><span class="nx">wait_queue_t</span> <span class="o">*</span><span class="nx">wait</span><span class="p">,</span> <span class="nx">unsigned</span> <span class="nx">mode</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">sync</span><span class="p">,</span> <span class="nx">void</span> <span class="o">*</span><span class="nx">key</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">   <span class="kt">int</span> <span class="nx">pwake</span> <span class="p">=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">unsigned</span> <span class="nx">long</span> <span class="nx">flags</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="kd">struct</span> <span class="nx">epitem</span> <span class="o">*</span><span class="nx">epi</span> <span class="p">=</span> <span class="nf">ep_item_from_wait</span><span class="p">(</span><span class="nx">wait</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="kd">struct</span> <span class="nx">eventpoll</span> <span class="o">*</span><span class="nx">ep</span> <span class="p">=</span> <span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">ep</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="nf">spin_lock_irqsave</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">flags</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="c1">//判断注册的感兴趣事件
+</span></span></span><span class="line"><span class="cl"><span class="c1">//#define EP_PRIVATE_BITS  (EPOLLONESHOT | EPOLLET)
+</span></span></span><span class="line"><span class="cl"><span class="c1">//有非EPOLLONESHONT或EPOLLET事件
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="k">if</span> <span class="p">(!(</span><span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">event</span><span class="p">.</span><span class="nx">events</span> <span class="o">&amp;</span> <span class="err">~</span><span class="nx">EP_PRIVATE_BITS</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">      <span class="k">goto</span> <span class="nx">out_unlock</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="k">if</span> <span class="p">(</span><span class="nf">unlikely</span><span class="p">(</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">ovflist</span> <span class="o">!=</span> <span class="nx">EP_UNACTIVE_PTR</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="k">if</span> <span class="p">(</span><span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">next</span> <span class="o">==</span> <span class="nx">EP_UNACTIVE_PTR</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">         <span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">next</span> <span class="p">=</span> <span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">ovflist</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">         <span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">ovflist</span> <span class="p">=</span> <span class="nx">epi</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">      <span class="p">}</span>
+</span></span><span class="line"><span class="cl">      <span class="k">goto</span> <span class="nx">out_unlock</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="p">}</span>
+</span></span><span class="line"><span class="cl">   <span class="k">if</span> <span class="p">(</span><span class="nf">ep_is_linked</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">rdllink</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">      <span class="k">goto</span> <span class="nx">is_linked</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">//***关键***，将该fd加入到epoll监听的就绪链表中
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>   <span class="nf">list_add_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">epi</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">rdllink</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">rdllist</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="c1">//唤醒调用epoll_wait()函数时睡眠的进程。用户层epoll_wait(...) 超时前返回。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">if</span> <span class="p">(</span><span class="nf">waitqueue_active</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wq</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">      <span class="nf">__wake_up_locked</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wq</span><span class="p">,</span> <span class="nx">TASK_UNINTERRUPTIBLE</span> <span class="p">|</span> <span class="nx">TASK_INTERRUPTIBLE</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="k">if</span> <span class="p">(</span><span class="nf">waitqueue_active</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">poll_wait</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">      <span class="nx">pwake</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">out_unlock</span><span class="p">:</span> <span class="nf">spin_unlock_irqrestore</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">flags</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="k">if</span> <span class="p">(</span><span class="nx">pwake</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="nf">ep_poll_safewake</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">psw</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">poll_wait</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><p>So the main function of ep_poll_callback function is to add the epitem instance corresponding to the file to the ready queue when the wait event of the monitored file is ready, and when the user calls epoll_wait(), the kernel will report the event in the ready queue to the user.</p>
 <h2 id="the-epoll_wait-implementation-is-as-follows">The epoll_wait implementation is as follows.</h2>
@@ -919,37 +917,37 @@ revents = tfile-&gt;f_op-&gt;poll(tfile, &amp;epq.pt);
 </span><span class="lnt">30
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="nf">SYSCALL_DEFINE4</span><span class="p">(</span><span class="nx">epoll_wait</span><span class="p">,</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">epfd</span><span class="p">,</span> <span class="kd">struct</span> <span class="nx">epoll_event</span> <span class="nx">__user</span> <span class="o">*</span><span class="p">,</span> <span class="nx">events</span><span class="p">,</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">maxevents</span><span class="p">,</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">timeout</span><span class="p">)</span>  <span class="p">{</span>
-   <span class="kt">int</span> <span class="kt">error</span><span class="p">;</span>
-   <span class="kd">struct</span> <span class="nx">file</span> <span class="o">*</span><span class="nx">file</span><span class="p">;</span>
-   <span class="kd">struct</span> <span class="nx">eventpoll</span> <span class="o">*</span><span class="nx">ep</span><span class="p">;</span>
-    <span class="cm">/* 检查maxevents参数。 */</span>
-   <span class="k">if</span> <span class="p">(</span><span class="nx">maxevents</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">maxevents</span> <span class="p">&gt;</span> <span class="nx">EP_MAX_EVENTS</span><span class="p">)</span>
-      <span class="k">return</span> <span class="o">-</span><span class="nx">EINVAL</span><span class="p">;</span>
-    <span class="cm">/* 检查用户空间传入的events指向的内存是否可写。参见__range_not_ok()。 */</span>
-   <span class="k">if</span> <span class="p">(!</span><span class="nf">access_ok</span><span class="p">(</span><span class="nx">VERIFY_WRITE</span><span class="p">,</span> <span class="nx">events</span><span class="p">,</span> <span class="nx">maxevents</span> <span class="o">*</span> <span class="nf">sizeof</span><span class="p">(</span><span class="kd">struct</span> <span class="nx">epoll_event</span><span class="p">)))</span> <span class="p">{</span>
-      <span class="kt">error</span> <span class="p">=</span> <span class="o">-</span><span class="nx">EFAULT</span><span class="p">;</span>
-      <span class="k">goto</span> <span class="nx">error_return</span><span class="p">;</span>
-   <span class="p">}</span>
-    <span class="cm">/* 获取epfd对应的eventpoll文件的file实例，file结构是在epoll_create中创建。 */</span>
-   <span class="kt">error</span> <span class="p">=</span> <span class="o">-</span><span class="nx">EBADF</span><span class="p">;</span>
-   <span class="nx">file</span> <span class="p">=</span> <span class="nf">fget</span><span class="p">(</span><span class="nx">epfd</span><span class="p">);</span>
-   <span class="k">if</span> <span class="p">(!</span><span class="nx">file</span><span class="p">)</span>
-      <span class="k">goto</span> <span class="nx">error_return</span><span class="p">;</span>
-    <span class="cm">/* 通过检查epfd对应的文件操作是不是eventpoll_fops 来判断epfd是否是一个eventpoll文件。如果不是则返回EINVAL错误。 */</span>
-   <span class="kt">error</span> <span class="p">=</span> <span class="o">-</span><span class="nx">EINVAL</span><span class="p">;</span>
-   <span class="k">if</span> <span class="p">(!</span><span class="nf">is_file_epoll</span><span class="p">(</span><span class="nx">file</span><span class="p">))</span>
-      <span class="k">goto</span> <span class="nx">error_fput</span><span class="p">;</span>
-    <span class="cm">/* At this point it is safe to assume that the &#34;private_data&#34; contains  */</span>
-   <span class="nx">ep</span> <span class="p">=</span> <span class="nx">file</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">private_data</span><span class="p">;</span>
-    <span class="cm">/* Time to fish for events ... */</span>
-   <span class="kt">error</span> <span class="p">=</span> <span class="nf">ep_poll</span><span class="p">(</span><span class="nx">ep</span><span class="p">,</span> <span class="nx">events</span><span class="p">,</span> <span class="nx">maxevents</span><span class="p">,</span> <span class="nx">timeout</span><span class="p">);</span>
-    <span class="nx">error_fput</span><span class="p">:</span>
-   <span class="nf">fput</span><span class="p">(</span><span class="nx">file</span><span class="p">);</span>
-<span class="nx">error_return</span><span class="p">:</span>
-   <span class="k">return</span> <span class="kt">error</span><span class="p">;</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="nf">SYSCALL_DEFINE4</span><span class="p">(</span><span class="nx">epoll_wait</span><span class="p">,</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">epfd</span><span class="p">,</span> <span class="kd">struct</span> <span class="nx">epoll_event</span> <span class="nx">__user</span> <span class="o">*</span><span class="p">,</span> <span class="nx">events</span><span class="p">,</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">maxevents</span><span class="p">,</span> <span class="kt">int</span><span class="p">,</span> <span class="nx">timeout</span><span class="p">)</span>  <span class="p">{</span>
+</span></span><span class="line"><span class="cl">   <span class="kt">int</span> <span class="kt">error</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="kd">struct</span> <span class="nx">file</span> <span class="o">*</span><span class="nx">file</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="kd">struct</span> <span class="nx">eventpoll</span> <span class="o">*</span><span class="nx">ep</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* 检查maxevents参数。 */</span>
+</span></span><span class="line"><span class="cl">   <span class="k">if</span> <span class="p">(</span><span class="nx">maxevents</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">maxevents</span> <span class="p">&gt;</span> <span class="nx">EP_MAX_EVENTS</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="k">return</span> <span class="o">-</span><span class="nx">EINVAL</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* 检查用户空间传入的events指向的内存是否可写。参见__range_not_ok()。 */</span>
+</span></span><span class="line"><span class="cl">   <span class="k">if</span> <span class="p">(!</span><span class="nf">access_ok</span><span class="p">(</span><span class="nx">VERIFY_WRITE</span><span class="p">,</span> <span class="nx">events</span><span class="p">,</span> <span class="nx">maxevents</span> <span class="o">*</span> <span class="nf">sizeof</span><span class="p">(</span><span class="kd">struct</span> <span class="nx">epoll_event</span><span class="p">)))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="kt">error</span> <span class="p">=</span> <span class="o">-</span><span class="nx">EFAULT</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">      <span class="k">goto</span> <span class="nx">error_return</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* 获取epfd对应的eventpoll文件的file实例，file结构是在epoll_create中创建。 */</span>
+</span></span><span class="line"><span class="cl">   <span class="kt">error</span> <span class="p">=</span> <span class="o">-</span><span class="nx">EBADF</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">file</span> <span class="p">=</span> <span class="nf">fget</span><span class="p">(</span><span class="nx">epfd</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="k">if</span> <span class="p">(!</span><span class="nx">file</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="k">goto</span> <span class="nx">error_return</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* 通过检查epfd对应的文件操作是不是eventpoll_fops 来判断epfd是否是一个eventpoll文件。如果不是则返回EINVAL错误。 */</span>
+</span></span><span class="line"><span class="cl">   <span class="kt">error</span> <span class="p">=</span> <span class="o">-</span><span class="nx">EINVAL</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="k">if</span> <span class="p">(!</span><span class="nf">is_file_epoll</span><span class="p">(</span><span class="nx">file</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">      <span class="k">goto</span> <span class="nx">error_fput</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* At this point it is safe to assume that the &#34;private_data&#34; contains  */</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">ep</span> <span class="p">=</span> <span class="nx">file</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">private_data</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* Time to fish for events ... */</span>
+</span></span><span class="line"><span class="cl">   <span class="kt">error</span> <span class="p">=</span> <span class="nf">ep_poll</span><span class="p">(</span><span class="nx">ep</span><span class="p">,</span> <span class="nx">events</span><span class="p">,</span> <span class="nx">maxevents</span><span class="p">,</span> <span class="nx">timeout</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">error_fput</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">   <span class="nf">fput</span><span class="p">(</span><span class="nx">file</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="nx">error_return</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">   <span class="k">return</span> <span class="kt">error</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><h2 id="epoll_wait-calls-ep_poll-ep_poll-is-implemented-as-follows">epoll_wait calls ep_poll. ep_poll is implemented as follows.</h2>
 <div class="highlight"><div class="chroma">
@@ -1010,61 +1008,61 @@ revents = tfile-&gt;f_op-&gt;poll(tfile, &amp;epq.pt);
 </span><span class="lnt">54
 </span></code></pre></td>
 <td class="lntd">
-<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"> <span class="nx">static</span> <span class="kt">int</span> <span class="nf">ep_poll</span><span class="p">(</span><span class="kd">struct</span> <span class="nx">eventpoll</span> <span class="o">*</span><span class="nx">ep</span><span class="p">,</span> <span class="kd">struct</span> <span class="nx">epoll_event</span> <span class="nx">__user</span> <span class="o">*</span><span class="nx">events</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">maxevents</span><span class="p">,</span> <span class="nx">long</span> <span class="nx">timeout</span><span class="p">)</span> <span class="p">{</span>
-    <span class="kt">int</span> <span class="nx">res</span><span class="p">,</span> <span class="nx">eavail</span><span class="p">;</span>
-   <span class="nx">unsigned</span> <span class="nx">long</span> <span class="nx">flags</span><span class="p">;</span>
-   <span class="nx">long</span> <span class="nx">jtimeout</span><span class="p">;</span>
-   <span class="nx">wait_queue_t</span> <span class="nx">wait</span><span class="p">;</span>
-    <span class="cm">/* timeout是以毫秒为单位，这里是要转换为jiffies时间。这里加上999(即1000-1)，是为了向上取整。 */</span>
-   <span class="nx">jtimeout</span> <span class="p">=</span> <span class="p">(</span><span class="nx">timeout</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">timeout</span> <span class="o">&gt;=</span> <span class="nx">EP_MAX_MSTIMEO</span><span class="p">)</span> <span class="err">?</span><span class="nx">MAX_SCHEDULE_TIMEOUT</span> <span class="p">:</span> <span class="p">(</span><span class="nx">timeout</span> <span class="o">*</span> <span class="nx">HZ</span> <span class="o">+</span> <span class="mi">999</span><span class="p">)</span> <span class="o">/</span> <span class="mi">1000</span><span class="p">;</span>
- <span class="nx">retry</span><span class="p">:</span>
-   <span class="nf">spin_lock_irqsave</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">flags</span><span class="p">);</span>
-    <span class="nx">res</span> <span class="p">=</span> <span class="mi">0</span><span class="p">;</span>
-   <span class="k">if</span> <span class="p">(</span><span class="nf">list_empty</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">rdllist</span><span class="p">))</span> <span class="p">{</span>
-      <span class="cm">/* 没有事件，所以需要睡眠。当有事件到来时，睡眠会被ep_poll_callback函数唤醒。*/</span>
-      <span class="nf">init_waitqueue_entry</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">wait</span><span class="p">,</span> <span class="nx">current</span><span class="p">);</span> <span class="c1">//将current进程放在wait这个等待队列中。
-</span><span class="c1"></span>      <span class="nx">wait</span><span class="p">.</span><span class="nx">flags</span> <span class="o">|=</span> <span class="nx">WQ_FLAG_EXCLUSIVE</span><span class="p">;</span>
-      <span class="cm">/* 将当前进程加入到eventpoll的等待队列中，等待文件状态就绪或直到超时，或被信号中断。 */</span>
-      <span class="nf">__add_wait_queue</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wq</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">wait</span><span class="p">);</span>
-       <span class="k">for</span> <span class="p">(;;)</span> <span class="p">{</span>
-         <span class="cm">/* 执行ep_poll_callback()唤醒时应当需要将当前进程唤醒，所以当前进程状态应该为“可唤醒”TASK_INTERRUPTIBLE  */</span>
-         <span class="nf">set_current_state</span><span class="p">(</span><span class="nx">TASK_INTERRUPTIBLE</span><span class="p">);</span>
-         <span class="cm">/* 如果就绪队列不为空，也就是说已经有文件的状态就绪或者超时，则退出循环。*/</span>
-         <span class="k">if</span> <span class="p">(!</span><span class="nf">list_empty</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">rdllist</span><span class="p">)</span> <span class="o">||</span> <span class="p">!</span><span class="nx">jtimeout</span><span class="p">)</span>
-            <span class="k">break</span><span class="p">;</span>
-         <span class="cm">/* 如果当前进程接收到信号，则退出循环，返回EINTR错误 */</span>
-         <span class="k">if</span> <span class="p">(</span><span class="nf">signal_pending</span><span class="p">(</span><span class="nx">current</span><span class="p">))</span> <span class="p">{</span>
-            <span class="nx">res</span> <span class="p">=</span> <span class="o">-</span><span class="nx">EINTR</span><span class="p">;</span>
-            <span class="k">break</span><span class="p">;</span>
-         <span class="p">}</span>
-          <span class="nf">spin_unlock_irqrestore</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">flags</span><span class="p">);</span>
-         <span class="cm">/* 主动让出处理器，等待ep_poll_callback()将当前进程唤醒或者超时,返回值是剩余的时间。
-</span><span class="cm">从这里开始当前进程会进入睡眠状态，直到某些文件的状态就绪或者超时。
-</span><span class="cm">当文件状态就绪时，eventpoll的回调函数ep_poll_callback()会唤醒在ep-&gt;wq指向的等待队列中的进程。*/</span>
-         <span class="nx">jtimeout</span> <span class="p">=</span> <span class="nf">schedule_timeout</span><span class="p">(</span><span class="nx">jtimeout</span><span class="p">);</span>
-         <span class="nf">spin_lock_irqsave</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">flags</span><span class="p">);</span>
-      <span class="p">}</span>
-      <span class="nf">__remove_wait_queue</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wq</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">wait</span><span class="p">);</span>
-       <span class="nf">set_current_state</span><span class="p">(</span><span class="nx">TASK_RUNNING</span><span class="p">);</span>
-   <span class="p">}</span>
-    <span class="cm">/* ep-&gt;ovflist链表存储的向用户传递事件时暂存就绪的文件。
-</span><span class="cm">    * 所以不管是就绪队列ep-&gt;rdllist不为空，或者ep-&gt;ovflist不等于
-</span><span class="cm">    * EP_UNACTIVE_PTR，都有可能现在已经有文件的状态就绪。
-</span><span class="cm">    * ep-&gt;ovflist不等于EP_UNACTIVE_PTR有两种情况，一种是NULL，此时
-</span><span class="cm">    * 可能正在向用户传递事件，不一定就有文件状态就绪，
-</span><span class="cm">    * 一种情况时不为NULL，此时可以肯定有文件状态就绪，
-</span><span class="cm">    * 参见ep_send_events()。
-</span><span class="cm">    */</span>
-   <span class="nx">eavail</span> <span class="p">=</span> <span class="p">!</span><span class="nf">list_empty</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">rdllist</span><span class="p">)</span> <span class="o">||</span> <span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">ovflist</span> <span class="o">!=</span> <span class="nx">EP_UNACTIVE_PTR</span><span class="p">;</span>
-    <span class="nf">spin_unlock_irqrestore</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">flags</span><span class="p">);</span>
-    <span class="cm">/* Try to transfer events to user space. In case we get 0 events and there&#39;s still timeout left over, we go trying again in search of more luck. */</span>
-   <span class="cm">/* 如果没有被信号中断，并且有事件就绪，但是没有获取到事件(有可能被其他进程获取到了)，并且没有超时，则跳转到retry标签处，重新等待文件状态就绪。 */</span>
-   <span class="k">if</span> <span class="p">(!</span><span class="nx">res</span> <span class="o">&amp;&amp;</span> <span class="nx">eavail</span> <span class="o">&amp;&amp;</span> <span class="p">!(</span><span class="nx">res</span> <span class="p">=</span> <span class="nf">ep_send_events</span><span class="p">(</span><span class="nx">ep</span><span class="p">,</span> <span class="nx">events</span><span class="p">,</span> <span class="nx">maxevents</span><span class="p">))</span> <span class="o">&amp;&amp;</span> <span class="nx">jtimeout</span><span class="p">)</span>
-      <span class="k">goto</span> <span class="nx">retry</span><span class="p">;</span>
-    <span class="cm">/* 返回获取到的事件的个数或者错误码 */</span>
-   <span class="k">return</span> <span class="nx">res</span><span class="p">;</span>
-<span class="p">}</span>
-</code></pre></td></tr></table>
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"> <span class="nx">static</span> <span class="kt">int</span> <span class="nf">ep_poll</span><span class="p">(</span><span class="kd">struct</span> <span class="nx">eventpoll</span> <span class="o">*</span><span class="nx">ep</span><span class="p">,</span> <span class="kd">struct</span> <span class="nx">epoll_event</span> <span class="nx">__user</span> <span class="o">*</span><span class="nx">events</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">maxevents</span><span class="p">,</span> <span class="nx">long</span> <span class="nx">timeout</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="nx">res</span><span class="p">,</span> <span class="nx">eavail</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">unsigned</span> <span class="nx">long</span> <span class="nx">flags</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">long</span> <span class="nx">jtimeout</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">wait_queue_t</span> <span class="nx">wait</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* timeout是以毫秒为单位，这里是要转换为jiffies时间。这里加上999(即1000-1)，是为了向上取整。 */</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">jtimeout</span> <span class="p">=</span> <span class="p">(</span><span class="nx">timeout</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="o">||</span> <span class="nx">timeout</span> <span class="o">&gt;=</span> <span class="nx">EP_MAX_MSTIMEO</span><span class="p">)</span> <span class="err">?</span><span class="nx">MAX_SCHEDULE_TIMEOUT</span> <span class="p">:</span> <span class="p">(</span><span class="nx">timeout</span> <span class="o">*</span> <span class="nx">HZ</span> <span class="o">+</span> <span class="mi">999</span><span class="p">)</span> <span class="o">/</span> <span class="mi">1000</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">retry</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">   <span class="nf">spin_lock_irqsave</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">flags</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">res</span> <span class="p">=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">   <span class="k">if</span> <span class="p">(</span><span class="nf">list_empty</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">rdllist</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="cm">/* 没有事件，所以需要睡眠。当有事件到来时，睡眠会被ep_poll_callback函数唤醒。*/</span>
+</span></span><span class="line"><span class="cl">      <span class="nf">init_waitqueue_entry</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">wait</span><span class="p">,</span> <span class="nx">current</span><span class="p">);</span> <span class="c1">//将current进程放在wait这个等待队列中。
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>      <span class="nx">wait</span><span class="p">.</span><span class="nx">flags</span> <span class="o">|=</span> <span class="nx">WQ_FLAG_EXCLUSIVE</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">      <span class="cm">/* 将当前进程加入到eventpoll的等待队列中，等待文件状态就绪或直到超时，或被信号中断。 */</span>
+</span></span><span class="line"><span class="cl">      <span class="nf">__add_wait_queue</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wq</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">wait</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">       <span class="k">for</span> <span class="p">(;;)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">         <span class="cm">/* 执行ep_poll_callback()唤醒时应当需要将当前进程唤醒，所以当前进程状态应该为“可唤醒”TASK_INTERRUPTIBLE  */</span>
+</span></span><span class="line"><span class="cl">         <span class="nf">set_current_state</span><span class="p">(</span><span class="nx">TASK_INTERRUPTIBLE</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">         <span class="cm">/* 如果就绪队列不为空，也就是说已经有文件的状态就绪或者超时，则退出循环。*/</span>
+</span></span><span class="line"><span class="cl">         <span class="k">if</span> <span class="p">(!</span><span class="nf">list_empty</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">rdllist</span><span class="p">)</span> <span class="o">||</span> <span class="p">!</span><span class="nx">jtimeout</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">            <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">         <span class="cm">/* 如果当前进程接收到信号，则退出循环，返回EINTR错误 */</span>
+</span></span><span class="line"><span class="cl">         <span class="k">if</span> <span class="p">(</span><span class="nf">signal_pending</span><span class="p">(</span><span class="nx">current</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">res</span> <span class="p">=</span> <span class="o">-</span><span class="nx">EINTR</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">         <span class="p">}</span>
+</span></span><span class="line"><span class="cl">          <span class="nf">spin_unlock_irqrestore</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">flags</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">         <span class="cm">/* 主动让出处理器，等待ep_poll_callback()将当前进程唤醒或者超时,返回值是剩余的时间。
+</span></span></span><span class="line"><span class="cl"><span class="cm">从这里开始当前进程会进入睡眠状态，直到某些文件的状态就绪或者超时。
+</span></span></span><span class="line"><span class="cl"><span class="cm">当文件状态就绪时，eventpoll的回调函数ep_poll_callback()会唤醒在ep-&gt;wq指向的等待队列中的进程。*/</span>
+</span></span><span class="line"><span class="cl">         <span class="nx">jtimeout</span> <span class="p">=</span> <span class="nf">schedule_timeout</span><span class="p">(</span><span class="nx">jtimeout</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">         <span class="nf">spin_lock_irqsave</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">flags</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">      <span class="p">}</span>
+</span></span><span class="line"><span class="cl">      <span class="nf">__remove_wait_queue</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">wq</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">wait</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">       <span class="nf">set_current_state</span><span class="p">(</span><span class="nx">TASK_RUNNING</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">   <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* ep-&gt;ovflist链表存储的向用户传递事件时暂存就绪的文件。
+</span></span></span><span class="line"><span class="cl"><span class="cm">    * 所以不管是就绪队列ep-&gt;rdllist不为空，或者ep-&gt;ovflist不等于
+</span></span></span><span class="line"><span class="cl"><span class="cm">    * EP_UNACTIVE_PTR，都有可能现在已经有文件的状态就绪。
+</span></span></span><span class="line"><span class="cl"><span class="cm">    * ep-&gt;ovflist不等于EP_UNACTIVE_PTR有两种情况，一种是NULL，此时
+</span></span></span><span class="line"><span class="cl"><span class="cm">    * 可能正在向用户传递事件，不一定就有文件状态就绪，
+</span></span></span><span class="line"><span class="cl"><span class="cm">    * 一种情况时不为NULL，此时可以肯定有文件状态就绪，
+</span></span></span><span class="line"><span class="cl"><span class="cm">    * 参见ep_send_events()。
+</span></span></span><span class="line"><span class="cl"><span class="cm">    */</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">eavail</span> <span class="p">=</span> <span class="p">!</span><span class="nf">list_empty</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">rdllist</span><span class="p">)</span> <span class="o">||</span> <span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">ovflist</span> <span class="o">!=</span> <span class="nx">EP_UNACTIVE_PTR</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="nf">spin_unlock_irqrestore</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ep</span><span class="o">-</span><span class="p">&gt;</span><span class="nx">lock</span><span class="p">,</span> <span class="nx">flags</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* Try to transfer events to user space. In case we get 0 events and there&#39;s still timeout left over, we go trying again in search of more luck. */</span>
+</span></span><span class="line"><span class="cl">   <span class="cm">/* 如果没有被信号中断，并且有事件就绪，但是没有获取到事件(有可能被其他进程获取到了)，并且没有超时，则跳转到retry标签处，重新等待文件状态就绪。 */</span>
+</span></span><span class="line"><span class="cl">   <span class="k">if</span> <span class="p">(!</span><span class="nx">res</span> <span class="o">&amp;&amp;</span> <span class="nx">eavail</span> <span class="o">&amp;&amp;</span> <span class="p">!(</span><span class="nx">res</span> <span class="p">=</span> <span class="nf">ep_send_events</span><span class="p">(</span><span class="nx">ep</span><span class="p">,</span> <span class="nx">events</span><span class="p">,</span> <span class="nx">maxevents</span><span class="p">))</span> <span class="o">&amp;&amp;</span> <span class="nx">jtimeout</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">      <span class="k">goto</span> <span class="nx">retry</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* 返回获取到的事件的个数或者错误码 */</span>
+</span></span><span class="line"><span class="cl">   <span class="k">return</span> <span class="nx">res</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
 </div>
 </div><h2 id="trivia">Trivia</h2>
 <h3 id="hybrid-mode">Hybrid mode</h3>
@@ -1155,7 +1153,7 @@ revents = tfile-&gt;f_op-&gt;poll(tfile, &amp;epq.pt);
 
 
 
-<script type="text/javascript" src="/js/main.min.c99b103c33d1539acf3025e1913697534542c4a5aa5af0ccc20475ed2863603b.js"></script>
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
   <script type="text/javascript">
     window.MathJax = {
       tex: {
