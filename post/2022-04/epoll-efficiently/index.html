@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How epoll works efficiently - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Learn the reasons why epoll is more efficient." /><meta name="keywords" content="epoll" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-04/epoll-efficiently/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="How epoll works efficiently" />
+<meta property="og:description" content="Learn the reasons why epoll is more efficient." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-04/epoll-efficiently/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-04-10T22:32:04+08:00" />
+<meta property="article:modified_time" content="2022-04-10T22:32:04+08:00" />
+
+<meta itemprop="name" content="How epoll works efficiently">
+<meta itemprop="description" content="Learn the reasons why epoll is more efficient."><meta itemprop="datePublished" content="2022-04-10T22:32:04+08:00" />
+<meta itemprop="dateModified" content="2022-04-10T22:32:04+08:00" />
+<meta itemprop="wordCount" content="2409">
+<meta itemprop="keywords" content="epoll," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How epoll works efficiently"/>
+<meta name="twitter:description" content="Learn the reasons why epoll is more efficient."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How epoll works efficiently</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-04-10 22:32:04 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2409 words </span>
+          <span class="more-meta"> 5 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#concepts">Concepts</a>
+          <ul>
+            <li><a href="#io">I/O</a></li>
+            <li><a href="#events">Events</a></li>
+            <li><a href="#notification-mechanism">Notification mechanism</a></li>
+          </ul>
+        </li>
+        <li><a href="#epoll-in-laymans-terms">epoll in layman&rsquo;s terms</a>
+          <ul>
+            <li><a href="#1-int-epoll_createint-size">1. int epoll_create(int size)</a></li>
+            <li><a href="#2-int-epoll_ctlint-epfd-int-op-int-fd-struct-epoll_event-event">2. int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event)</a></li>
+            <li><a href="#3-int-epoll_waitint-epfd-struct-epoll_event-events-int-maxevents-int-timeout">3. int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)</a></li>
+          </ul>
+        </li>
+        <li><a href="#the-two-triggering-methods-of-epoll">The two triggering methods of epoll</a>
+          <ul>
+            <li><a href="#1-timing-of-horizontal-trigger">1. Timing of horizontal trigger</a></li>
+            <li><a href="#2-timing-of-edge-trigger">2. Timing of edge trigger</a></li>
+          </ul>
+        </li>
+        <li><a href="#epoll-vs-select-and-poll">Epoll vs. select and poll</a>
+          <ul>
+            <li><a href="#1-user-state-way-to-pass-file-descriptors-into-the-kernel">1. User state way to pass file descriptors into the kernel</a></li>
+            <li><a href="#2-kernel-state-detection-of-file-descriptor-readwrite-status">2. Kernel state detection of file descriptor read/write status</a></li>
+            <li><a href="#3-find-the-ready-file-descriptors-and-pass-them-to-the-user-state">3. Find the ready file descriptors and pass them to the user state</a></li>
+            <li><a href="#4-handling-of-duplicate-listeners">4. Handling of duplicate listeners</a></li>
+          </ul>
+        </li>
+        <li><a href="#the-reasons-why-epoll-is-more-efficient">The reasons why epoll is more efficient</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="concepts">Concepts</h2>
+<p>epoll is an I/O event notification mechanism, which is an implementation of IO multiplexing in the linux kernel.
+IO multiplexing means listening to multiple input and output sources at the same time in a single operation, returning when one or more of them are available, and then performing read and write operations on them.</p>
+<h3 id="io">I/O</h3>
+<p>The input/output objects can be files, sockets, and pipes between processes. In linux systems, these are represented by file descriptors (fd).</p>
+<h3 id="events">Events</h3>
+<ul>
+<li>A readable event is triggered when the kernel read buffer associated with the file descriptor is readable. (readable: the kernel buffer is not empty and there is data to read)</li>
+<li>Writable event, triggered when the kernel write buffer associated with the file descriptor is writable. (writable: kernel buffer is not empty, there is free space to write)</li>
+</ul>
+<h3 id="notification-mechanism">Notification mechanism</h3>
+<p>The notification mechanism, which is when an event occurs, then proactively notifies. The flip side of the notification mechanism is the polling mechanism.</p>
+<h2 id="epoll-in-laymans-terms">epoll in layman&rsquo;s terms</h2>
+<p>Combined with the above three items, epoll is a mechanism that notifies the kernel when the kernel buffer of a file descriptor is not empty by sending a readable signal, and notifies the kernel when the write buffer is full by sending a writable signal</p>
+<p>APIs of epoll</p>
+<p>The core of epoll is three APIs, and the core data structures are: a red-black tree and a linked list.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/04/10/78520e3822684e609e37a5f8e243f4a0.png" alt="epoll api"></p>
+<h3 id="1-int-epoll_createint-size">1. int epoll_create(int size)</h3>
+<p>Function.</p>
+<ul>
+<li>The kernel generates an epoll instance data structure and returns a file descriptor. This particular descriptor is the handle to the epoll instance, and the two interfaces that follow center on it (i.e., the epfd formal parameter).</li>
+</ul>
+<blockquote>
+<p>The  size parameter indicates the maximum value of the file descriptor to be monitored, but has been deprecated in later versions of Linux (also, don&rsquo;t pass 0 for size, it will report an invalid argument error)</p>
+</blockquote>
+<h3 id="2-int-epoll_ctlint-epfd-int-op-int-fd-struct-epoll_event-event">2. int epoll_ctl(int epfd, int op, int fd, struct epoll_event *event)</h3>
+<p>Function.</p>
+<ul>
+<li>Add the descriptor being listened to or remove it from the red-black tree or modify the maximum value of the file descriptor to be monitored for listening events, though this has been deprecated in later versions of Linux (also, do not pass 0 for size, an invalid argument error will be reported)</li>
+</ul>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">typedef</span> <span class="k">union</span> <span class="n">epoll_data</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">void</span> <span class="o">*</span><span class="n">ptr</span><span class="p">;</span> <span class="cm">/* 指向用户自定义数据 */</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="n">fd</span><span class="p">;</span> <span class="cm">/* 注册的文件描述符 */</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">uint32_t</span> <span class="n">u32</span><span class="p">;</span> <span class="cm">/* 32-bit integer */</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">uint64_t</span> <span class="n">u64</span><span class="p">;</span> <span class="cm">/* 64-bit integer */</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span> <span class="n">epoll_data_t</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">struct</span> <span class="n">epoll_event</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">uint32_t</span> <span class="n">events</span><span class="p">;</span> <span class="cm">/* 描述epoll事件 */</span>
+</span></span><span class="line"><span class="cl">    <span class="n">epoll_data_t</span> <span class="n">data</span><span class="p">;</span> <span class="cm">/* 见上面的结构体 */</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>For the set of file descriptors to be monitored, epoll_ctl manages the red-black tree, in which each member consists of the descriptor value and the reference to the file table entry pointed to by the file descriptor to be monitored, etc.</p>
+<p>The op parameter describes the type of operation.</p>
+<ul>
+<li>EPOLL_CTL_ADD: Adds a descriptor to the interest list that needs to be monitored</li>
+<li>EPOLL_CTL_DEL: removes a descriptor from the interest list</li>
+<li>EPOLL_CTL_MOD: modify a descriptor in the interest list</li>
+</ul>
+<p>The struct epoll_event describes the epoll behavior of a file descriptor. When using the epoll_wait function to return a list of descriptors in the ready state, the</p>
+<ul>
+<li>the data field is the only field that gives information about the descriptor, so when calling epoll_ctl to add a descriptor that needs to be monitored, make sure to write information about the descriptor in this field</li>
+<li>events field is a bit mask that describes a set of epoll events, which is interpreted in the epoll_ctl call as: the epoll events expected by the descriptor, which can be multi-selected.</li>
+</ul>
+<p>Commonly used epoll events are described as follows.</p>
+<ul>
+<li>EPOLLIN: descriptor is in readable state</li>
+<li>EPOLLOUT: Descriptor is in writable state</li>
+<li>EPOLLET: set the epoll event notification mode to edge triggered</li>
+<li>EPOLLONESHOT: the first time to notify, no more monitoring afterwards</li>
+<li>EPOLLHUP: the local descriptor generates a hang-up event, the default monitoring event</li>
+<li>EPOLLRDHUP: the opposite descriptor generates a pending event</li>
+<li>EPOLLPRI: triggered by out-of-band data</li>
+<li>EPOLLERR: Triggered when the descriptor generates an error, default detection event</li>
+</ul>
+<h3 id="3-int-epoll_waitint-epfd-struct-epoll_event-events-int-maxevents-int-timeout">3. int epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)</h3>
+<p>Function.</p>
+<ul>
+<li>blocking wait for registered events to occur, return the number of events, and write the triggered events to the events array.</li>
+<li>events: used to record the triggered events, its size should be the same as maxevents</li>
+<li>maxevents: the maximum number of events to be returned</li>
+</ul>
+<p>The file descriptors in the ready state are copied into the ready list, and epoll_wait is used to return the ready list to the user process. events and maxevents arguments describe a user-allocated struct epoll event array, and when the call returns, the kernel copies the ready list to this array and returns it. When the call returns, the kernel copies the ready list into this array and returns the actual number of copies as the return value. Note that if the ready list is longer than maxevents, only the first maxevents members can be copied; conversely, the ready list can be copied completely.
+Also, the events field in the struct epoll event structure is interpreted here as the actual events that occurred on the file descriptor being monitored.
+The parameter timeout describes the upper limit of blocking time in ms in a function call.</p>
+<ul>
+<li>timeout = -1 means that the call will keep blocking until a file descriptor enters the ready state or a signal is caught before returning.</li>
+<li>timeout = 0 is used for non-blocking to detect if a descriptor is in ready state, and the call returns immediately regardless of the result.</li>
+<li>timeout &gt; 0 means the call will last for at most timeout time, and return if a detected object changes to ready state or a signal is captured during that time, otherwise until the timeout.</li>
+</ul>
+<h2 id="the-two-triggering-methods-of-epoll">The two triggering methods of epoll</h2>
+<p>epoll monitors I/O events for multiple file descriptors. epoll supports edge trigger (ET) or level trigger (LT), which waits for I/O events via epoll_wait and blocks the calling thread if no events are currently available.</p>
+<blockquote>
+<p>select and poll only support LT working mode, and the default working mode of epoll is LT mode.</p>
+</blockquote>
+<h3 id="1-timing-of-horizontal-trigger">1. Timing of horizontal trigger</h3>
+<ol>
+<li>for read operation, LT mode returns read ready as long as the buffer is not empty. 2. for write operation, LT mode returns read ready as long as the buffer is not empty.</li>
+<li>For write operations, LT mode returns write ready as long as the buffer is still full.</li>
+</ol>
+<p>When a read/write event occurs on the monitored file descriptor, epoll_wait() notifies the handler to read or write. If you don&rsquo;t read or write all the data at once (e.g., the read/write buffer is too small), then the next time epoll_wait() is called, it will notify you to continue reading or writing on the file descriptor you didn&rsquo;t finish reading or writing on, but of course if you never read or write, it will keep notifying you. If the system has a large number of ready file descriptors that you don&rsquo;t need to read or write, and they return every time, this can greatly reduce the efficiency of the handler retrieving the ready file descriptors it cares about.</p>
+<h3 id="2-timing-of-edge-trigger">2. Timing of edge trigger</h3>
+<ul>
+<li>
+<p>For read operation</p>
+<ol>
+<li>When the buffer changes from unreadable to readable, i.e. when the buffer changes from empty to not empty.</li>
+<li>When new data arrives, i.e. when the buffer becomes full of data to be read.</li>
+<li>when there is data readable in the buffer and the application process performs EPOLL_CTL_MOD to modify the EPOLLIN event for the corresponding descriptor.</li>
+</ol>
+</li>
+<li>
+<p>For write operations</p>
+<ol>
+<li>When the buffer is changed from unwritable to writable.</li>
+<li>When there is old data being sent away, i.e. the buffer becomes less content.</li>
+<li>when there is space in the buffer to be written and the application process performs an EPOLL_CTL_MOD modify EPOLLOUT event on the corresponding descriptor.</li>
+</ol>
+</li>
+</ul>
+<p>When a read-write event occurs on the monitored file descriptor, epoll_wait() notifies the handler to read and write. If it does not read or write all the data this time (e.g., the read/write buffer is too small), then the next time epoll_wait() is called, it will not notify you, i.e., it will only notify you once until a second read/write event occurs on that file descriptor. This mode is more efficient than horizontal triggering, and the system is not flooded with a lot of ready file descriptors that you don&rsquo;t care about.</p>
+<blockquote>
+<p>In ET mode, the buffer goes from unreadable to readable, which wakes up the application process, and does not wake up the application process again if the buffer data becomes low.</p>
+</blockquote>
+<p>Example 1.</p>
+<ol>
+<li>the read buffer is empty at the beginning</li>
+<li>2KB of data is written to the read buffer</li>
+<li>Both horizontal trigger and edge trigger modes will send out a readable signal at this time</li>
+<li>After receiving the signal notification, 1KB of data is read and 1KB of data remains in the read buffer</li>
+<li>Horizontal trigger will notify again, while edge trigger will not notify again</li>
+</ol>
+<p>Example 2: (Take the high and low level of pulse as an example)</p>
+<ul>
+<li>Horizontal trigger: 0 is no data, 1 is data. If there is data in the buffer, it will always be 1, then it will always trigger.</li>
+<li>Edge triggered hair: 0 for no data, 1 for data, triggered as long as the rising edge of 0 changes to 1.</li>
+</ul>
+<blockquote>
+<p>JDK does not implement edge triggering, Netty re-implemented the epoll mechanism, using edge triggering; also like Nginx also uses edge triggering.</p>
+</blockquote>
+<p>The JDK already uses epoll by default in Linux, but JDK epoll uses horizontal triggering, while Netty re-implemented the epoll mechanism, using edge triggering. netty epoll transport exposes more configuration parameters that nio does not, such as TCP_CORK, SO_REUSEADDR and so on; others like Nginx also use edge triggering.</p>
+<h2 id="epoll-vs-select-and-poll">Epoll vs. select and poll</h2>
+<h3 id="1-user-state-way-to-pass-file-descriptors-into-the-kernel">1. User state way to pass file descriptors into the kernel</h3>
+<ul>
+<li>select: Create 3 sets of file descriptors and copy them to the kernel, listening for read, write, and exception actions respectively. This is limited by the number of fd&rsquo;s a single process can open, default is 1024.</li>
+<li>poll: Copy the incoming array of struct pollfd structures to the kernel to listen.</li>
+<li>epoll: executing epoll_create creates a red-black tree in the kernel&rsquo;s high-speed cache area and a readiness linkedlist (which stores the file descriptors that are already ready). Then the epoll_ctl function executed by the user to add file descriptors will add the corresponding nodes to the red-black tree.</li>
+</ul>
+<h3 id="2-kernel-state-detection-of-file-descriptor-readwrite-status">2. Kernel state detection of file descriptor read/write status</h3>
+<ul>
+<li>select: polling, iterating through all fd&rsquo;s, and returning a mask of whether the descriptor is ready for read/write operations, and assigning a value to fd_set based on this mask.</li>
+<li>poll: also polling, querying the status of each fd, adding an item to the waiting queue if it is ready, and continuing to iterate.</li>
+<li>epoll: Uses a callback mechanism. When executing the add operation of epoll_ctl, it not only puts the file descriptor in the red-black tree, but also registers a callback function. The kernel will call the callback function when it detects that a file descriptor is readable/writable, and the callback function will place the file descriptor in the ready linkedlist.</li>
+</ul>
+<h3 id="3-find-the-ready-file-descriptors-and-pass-them-to-the-user-state">3. Find the ready file descriptors and pass them to the user state</h3>
+<ul>
+<li>select: Passes a copy of the previously passed fd_set out to the user state and returns the total number of file descriptors that are ready. The user state does not know which file descriptors are in the ready state and needs to iterate through them.</li>
+<li>poll: Passes a copy of the previously passed in fd array out to the user state and returns the total number of file descriptors that are ready. The user state does not know which file descriptors are in the ready state and needs to be traversed to determine this.</li>
+<li>epoll: epoll_wait simply watches for data in the ready linkedlist and finally returns the linkedlist to the array and the number of ready files. The kernel puts the ready file descriptors in the incoming array, so you can just iterate through them in order. The file descriptors returned here are passed by mmap allowing the kernel and user space to share the same block of memory, reducing unnecessary copies.</li>
+</ul>
+<h3 id="4-handling-of-duplicate-listeners">4. Handling of duplicate listeners</h3>
+<ul>
+<li>select: Pass a copy of the new set of listen file descriptors into the kernel and continue with the above steps.</li>
+<li>poll: pass a copy of the new struct pollfd array into the kernel, and continue with the above steps.</li>
+<li>epoll: no need to reconstruct the red-black tree, just follow the existing one.</li>
+</ul>
+<h2 id="the-reasons-why-epoll-is-more-efficient">The reasons why epoll is more efficient</h2>
+<ol>
+<li>select and poll have basically the same action, except that poll uses a linkedlist for file descriptor storage, while select uses fd labeled bits for storage, so select is limited by the maximum number of connections, while poll is not.</li>
+<li>select, poll, and epoll all return the number of ready file descriptors. But select and poll do not explicitly indicate which file descriptors are ready, while epoll does. The difference is that after the system call returns, the program calling select and poll needs to iterate through the entire listener file descriptors to find out who is ready, while epoll can handle it directly.</li>
+<li>select and poll both need to copy the data structure of the file descriptor into the kernel and then copy it out. The data structure of the file descriptor created by epoll is itself stored in the kernel state, and the system call returns with mmap() file mapped memory to speed up message passing to the kernel space: that is, epoll uses mmap to reduce the copy overhead.</li>
+<li>select and poll use polling to check if the file descriptor is in the ready state, while epoll uses a callback mechanism. The result is that the efficiency of select and poll decreases linearly as the fd increases, while epoll is not affected too much unless there are many active sockets.</li>
+<li>epoll&rsquo;s edge-triggered mode is efficient and the system is not flooded with uncaring ready file descriptors</li>
+</ol>
+<blockquote>
+<p>Although epoll has the best performance, select and poll may perform better than epoll when the number of connections is small and the connections are all very active, after all epoll&rsquo;s notification mechanism requires many function callbacks.</p>
+</blockquote>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/epoll/">epoll</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/2022-04/openelb-lb/">
+            <span class="next-text nav-default">Load balancing with OpenELB for local clusters</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
