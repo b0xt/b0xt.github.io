@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Implementing io_uring based asynchronous random file reading in Rust - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article introduces the basic use of io_uring, and then introduces the implementation of the asynchronous read file library that I wrote." /><meta name="keywords" content="rust, io_uring" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-04/rust-io-uring/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Implementing io_uring based asynchronous random file reading in Rust" />
+<meta property="og:description" content="This article introduces the basic use of io_uring, and then introduces the implementation of the asynchronous read file library that I wrote." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-04/rust-io-uring/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-04-10T09:58:33+08:00" />
+<meta property="article:modified_time" content="2022-04-10T09:58:33+08:00" />
+
+<meta itemprop="name" content="Implementing io_uring based asynchronous random file reading in Rust">
+<meta itemprop="description" content="This article introduces the basic use of io_uring, and then introduces the implementation of the asynchronous read file library that I wrote."><meta itemprop="datePublished" content="2022-04-10T09:58:33+08:00" />
+<meta itemprop="dateModified" content="2022-04-10T09:58:33+08:00" />
+<meta itemprop="wordCount" content="1220">
+<meta itemprop="keywords" content="rust," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Implementing io_uring based asynchronous random file reading in Rust"/>
+<meta name="twitter:description" content="This article introduces the basic use of io_uring, and then introduces the implementation of the asynchronous read file library that I wrote."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Implementing io_uring based asynchronous random file reading in Rust</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-04-10 09:58:33 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1220 words </span>
+          <span class="more-meta"> 6 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#io_uring-introduction">io_uring Introduction</a></li>
+        <li><a href="#random-file-reading-scenarios">Random file reading scenarios</a></li>
+        <li><a href="#basic-usage-of--io_uring">Basic usage of  io_uring</a></li>
+        <li><a href="#implementing-an-asynchronous-read-file-interface-with-io_uring">Implementing an asynchronous read file interface with io_uring</a></li>
+        <li><a href="#benchmark">Benchmark</a></li>
+        <li><a href="#some-possible-improvements">Some possible improvements</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>In a nutshell: In skyzh/uring-positioned-io, I wrapped the underlying <code>io_uring</code> interface provided by Tokio and implemented <code>io_uring</code> based asynchronous random file reading in Rust. You can use it like this.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="line"><span class="cl"><span class="n">ctx</span><span class="p">.</span><span class="n">read</span><span class="p">(</span><span class="n">fid</span><span class="p">,</span><span class="w"> </span><span class="n">offset</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">buf</span><span class="p">).</span><span class="k">await</span><span class="o">?</span><span class="p">;</span><span class="w">
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>This article introduces the basic use of <code>io_uring</code>, then describes the implementation of an asynchronous read file library I wrote, and finally does a benchmark to compare performance with mmap.</p>
+<p><a href="https://github.com/skyzh/uring-positioned-io">Click here to visit the GitHub project</a>.</p>
+<h2 id="io_uring-introduction">io_uring Introduction</h2>
+<p><code>io_uring</code> is an asynchronous I/O interface provided by the Linux kernel. It was introduced in Linux 5.1 in May 2019 and is now used in various projects. For example.</p>
+<ul>
+<li><a href="https://github.com/facebook/rocksdb/pull/5881">RocksDB&rsquo;s MultiRead</a> is currently doing concurrent reads of files via <code>io_uring</code>.</li>
+<li>Tokio <a href="https://github.com/tokio-rs/io-uring">wraps a layer of API</a> for <code>io_uring</code>. With the release of Tokio 1.0, the developers have indicated that true asynchronous file operations will be provided via io_uring in the future (see <a href="https://tokio.rs/blog/2020-12-tokio-1-0">Announcing Tokio 1.0</a>). Currently Tokio&rsquo;s asynchronous file operations are implemented by opening a separate I/O thread to call the synchronous API.</li>
+<li>QEMU 5.0 already uses <code>io_uring</code> (see <a href="https://wiki.qemu.org/ChangeLog/5.0">ChangeLog</a>).</li>
+</ul>
+<p>Most of the current tests on <code>io_uring</code> compare the performance of Direct I/O with Linux AIO. <code>io_uring</code> can typically achieve twice the performance of AIO.</p>
+<h2 id="random-file-reading-scenarios">Random file reading scenarios</h2>
+<p>In database systems, we often need multiple threads to read the contents of a file at any location <code>(&lt;fid&gt;, &lt;offset&gt;, &lt;size&gt;)</code>. The often used <code>read / write</code> API cannot do this (because it has to seek first and needs an exclusive file handle). The following method allows for random reads of files.</p>
+<ul>
+<li>Map the file directly into memory via <code>mmap</code>. Reading a file becomes a direct memory read, and can be done concurrently in multiple threads.</li>
+<li><code>pread</code> can read <code>count</code> bytes starting from a certain location <code>offset</code>, also supporting concurrent reads in multiple threads.</li>
+</ul>
+<p>However, both of these options block the current thread. For example, if a page fault occurs after <code>mmap</code> reads a block of memory, the current thread will block; <code>pread</code> itself is a blocking API. Asynchronous APIs (e.g. Linux AIO / <code>io_uring</code>) can reduce context switching and thus improve throughput in some scenarios.</p>
+<h2 id="basic-usage-of--io_uring">Basic usage of  io_uring</h2>
+<p>The <code>io_uring</code> related syscall can be found at <a href="https://kernel.dk/io_uring.pdf">here</a>. The <a href="https://github.com/axboe/liburing">liburing</a> provides an easier-to-use API. Tokio&rsquo;s <a href="https://github.com/tokio-rs/io-uring">io_uring crate</a> builds on this by providing a <code>io_uring</code> API for the Rust language. language&rsquo;s <code>io_uring</code> API. Here is an example of how to use <code>io_uring</code>.</p>
+<p>To use <code>io_uring</code>, you need to create a ring, and here we use the <code>concurrent</code> API provided by <code>tokio-rs/io-uring</code>, which supports multiple threads using the same ring.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="line"><span class="cl"><span class="k">use</span><span class="w"> </span><span class="n">io_uring</span>::<span class="n">IoUring</span><span class="p">;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="kd">let</span><span class="w"> </span><span class="n">ring</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">IoUring</span>::<span class="n">new</span><span class="p">(</span><span class="mi">256</span><span class="p">)</span><span class="o">?</span><span class="p">;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="kd">let</span><span class="w"> </span><span class="n">ring</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ring</span><span class="p">.</span><span class="n">concurrent</span><span class="p">();</span><span class="w">
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>Each ring corresponds to a commit queue and a completion queue, where the queue is set to hold up to 256 elements.</p>
+<p>The process of I/O operations via <code>io_uring</code> is divided into three steps: adding tasks to the commit queue, submitting tasks to the kernel, and retrieving tasks from the completion queue. Here is an example of the process of reading a file.</p>
+<p>You can construct a read file task with <code>opcode::Read</code>, and add the task to the queue with <code>ring.submit().push(entry)</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="line"><span class="cl"><span class="k">use</span><span class="w"> </span><span class="n">io_uring</span>::<span class="p">{</span><span class="n">opcode</span><span class="p">,</span><span class="w"> </span><span class="n">types</span>::<span class="n">Fixed</span><span class="p">};</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="kd">let</span><span class="w"> </span><span class="n">read_op</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">opcode</span>::<span class="n">Read</span>::<span class="n">new</span><span class="p">(</span><span class="n">Fixed</span><span class="p">(</span><span class="n">fid</span><span class="p">),</span><span class="w"> </span><span class="n">ptr</span><span class="p">,</span><span class="w"> </span><span class="n">len</span><span class="p">).</span><span class="n">offset</span><span class="p">(</span><span class="n">offset</span><span class="p">);</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="kd">let</span><span class="w"> </span><span class="n">entry</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">read_op</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="p">.</span><span class="n">build</span><span class="p">()</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">            </span><span class="p">.</span><span class="n">user_data</span><span class="p">(</span><span class="n">user_data</span><span class="p">);</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="k">unsafe</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">ring</span><span class="p">.</span><span class="n">submission</span><span class="p">().</span><span class="n">push</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span><span class="o">?</span><span class="p">;</span><span class="w"> </span><span class="p">}</span><span class="w">
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>Once the task has been added, commit it to the kernel.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="line"><span class="cl"><span class="fm">assert_eq!</span><span class="p">(</span><span class="n">ring</span><span class="p">.</span><span class="n">submit</span><span class="p">()</span><span class="o">?</span><span class="p">,</span><span class="w"> </span><span class="mi">1</span><span class="p">);</span><span class="w">
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>Final polling for completed tasks.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="line"><span class="cl"><span class="k">loop</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="kd">let</span><span class="w"> </span><span class="nb">Some</span><span class="p">(</span><span class="n">entry</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ring</span><span class="p">.</span><span class="n">completion</span><span class="p">().</span><span class="n">pop</span><span class="p">()</span><span class="w"> </span><span class="p">{</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">        </span><span class="c1">// do something
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="w">    </span><span class="p">}</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w"></span><span class="p">}</span><span class="w">
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>In this way, we implement random reads of files based on <code>io_uring</code>.</p>
+<p><code>io_uring</code> currently has three execution modes: default mode, poll mode and kernel poll mode. If you use kernel poll mode, you do not necessarily need to call the function that commits the task.</p>
+<h2 id="implementing-an-asynchronous-read-file-interface-with-io_uring">Implementing an asynchronous read file interface with io_uring</h2>
+<p>Our goal is to implement an interface like this, wrapping <code>io_uring</code> and exposing only a simple <code>read</code> function to the developer.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rust" data-lang="rust"><span class="line"><span class="cl"><span class="n">ctx</span><span class="p">.</span><span class="n">read</span><span class="p">(</span><span class="n">fid</span><span class="p">,</span><span class="w"> </span><span class="n">offset</span><span class="p">,</span><span class="w"> </span><span class="o">&amp;</span><span class="k">mut</span><span class="w"> </span><span class="n">buf</span><span class="p">).</span><span class="k">await</span><span class="o">?</span><span class="p">;</span><span class="w">
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>After referring to <a href="https://github.com/hmwill/tokio-linux-aio">tokio-linux-aio</a> for asynchronous wrapping of Linux AIO, I used the following method to implement <code>io_uring</code> based asynchronous reads.</p>
+<ul>
+<li>The developer needs to create a <code>UringContext</code> before using <code>io_uring</code>.</li>
+<li>While the <code>UringContext</code> is created, one (or more) <code>UringPollFuture</code> is run in the background to submit and poll for completed tasks. (corresponds to the second and third operations of the read file in the previous section).</li>
+<li>A developer can call the interface for reading a file from <code>ctx</code>, creating a <code>UringReadFuture</code> with <code>ctx.read</code>. After calling <code>ctx.read.await</code>.
+<ol>
+<li><code>UringReadFuture</code> creates an object <code>UringTask</code> that is fixed in memory, and then puts the read file task into a queue, using the address of <code>UringTask</code> as the user data for the read operation. There is a channel inside <code>UringTask</code>.</li>
+<li><code>UringPollFuture</code> submits the task in the background.</li>
+<li><code>UringPollFuture</code> polls for completed tasks in the background.</li>
+<li><code>UringPollFuture</code> fetches the user data, reduces it to a <code>UringTask</code> object, and notifies <code>UringReadFuture</code> through the channel that the I/O operation has completed.</li>
+</ol>
+</li>
+</ul>
+<p>The whole process is shown in the following figure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/04/10/917bcd286b3d48ec972c1cbdf4d7b54b.png" alt="tokio-linux-aio"></p>
+<p>This makes it easy to call <code>io_uring</code> to read the file asynchronously. This also has a side benefit: task commits can be automatically batching. Normally, an I/O operation would generate a syscall, but since we use a single Future to commit and poll tasks, there may be multiple uncommitted tasks in the queue at commit time, and they can all be committed at once. This reduces the overhead of syscall context cutting (and of course increases latency). From the benchmark results, we can see that each commit can pack about 20 read tasks.</p>
+<h2 id="benchmark">Benchmark</h2>
+<p>Compare the performance of wrapped <code>io_uring</code> with that of <code>mmap</code>. The test load is 128 1G files with random read aligned 4K blocks. My computer has 32G of RAM and a 1T NVMe SSD. 6 cases were tested as follows.</p>
+<ul>
+<li>8-thread mmap. (mmap_8)</li>
+<li>32 thread mmap. (mmap_32)</li>
+<li>512-thread mmap. (mmap_512)</li>
+<li>8 threads 8 concurrent <code>io_uring</code>. (uring_8)</li>
+<li>8 threads 32 concurrent <code>io_uring</code>. That is, 8 worker threads, 32 future simultaneous reads.(uring_32)</li>
+<li>8 threads of 512 concurrent <code>io_uring</code>. (uring_512)</li>
+</ul>
+<p>Tested Throughput (op/s) and Latency (ns).</p>
+<table>
+<thead>
+<tr>
+<th>case</th>
+<th>throughput</th>
+<th>p50</th>
+<th>p90</th>
+<th>p999</th>
+<th>p9999</th>
+<th>max</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>uring_8</td>
+<td>104085.77710777053</td>
+<td>83166</td>
+<td>109183</td>
+<td>246416</td>
+<td>3105883</td>
+<td>14973666</td>
+</tr>
+<tr>
+<td>uring_32</td>
+<td>227097.61356918357</td>
+<td>142869</td>
+<td>212730</td>
+<td>1111491</td>
+<td>3321889</td>
+<td>14336132</td>
+</tr>
+<tr>
+<td>uring_512</td>
+<td>212076.5160505447</td>
+<td>1973421</td>
+<td>3521119</td>
+<td>19478348</td>
+<td>25551700</td>
+<td>35433481</td>
+</tr>
+<tr>
+<td>mmap_8</td>
+<td>109697.87025744558</td>
+<td>78971</td>
+<td>107021</td>
+<td>204211</td>
+<td>1787823</td>
+<td>18522047</td>
+</tr>
+<tr>
+<td>mmap_32</td>
+<td>312829.53428971884</td>
+<td>100336</td>
+<td>178914</td>
+<td>419955</td>
+<td>4408214</td>
+<td>55129932</td>
+</tr>
+<tr>
+<td>mmap_512</td>
+<td>235368.9890904751</td>
+<td>2556429</td>
+<td>3265266</td>
+<td>15946744</td>
+<td>50029659</td>
+<td>156095218</td>
+</tr>
+</tbody>
+</table>
+<p>Found that mmap is far superior to <code>io_uring</code>. Well, it&rsquo;s true that this wrapper is not very good, but it&rsquo;s barely usable. Here is a heatmap with one minute latency, each set of data is presented in the order of mmap first and then <code>io_uring</code>.</p>
+<p>mmap_8 / uring_8</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/04/10/f6850a78ecb04f66b49cea6bb918fb5d.png" alt="mmap_8 / uring_8">
+<img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/04/10/a8192254bb0549fd877819ccb6a52479.png" alt="mmap_8 / uring_8"></p>
+<p>mmap_32 / uring_32</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/04/10/b22e2890ae4546ae93cf8b708ae1e3a1.png" alt="mmap_32 / uring_32">
+<img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/04/10/98886ac8bce94c849bfb4c94db319beb.png" alt="mmap_32 / uring_32"></p>
+<p>mmap_512 / uring_512</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/04/10/a5593b23b81c4f6fb664e6f2e670b40c.png" alt="mmap_512 / uring_512">
+<img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/04/10/cac34fcdaa974fdf91681fcead9a495b.png" alt="mmap_512 / uring_512"></p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/04/10/0288870612af45fdaeca97f48d757b18.png" alt="io_uring">
+<img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/04/10/c95ed9958a0d490fa5d8b1d9b8a8bdcf.png" alt="io_uring"></p>
+<h2 id="some-possible-improvements">Some possible improvements</h2>
+<ul>
+<li>It looks like right now <code>io_uring</code> is not performing very well after my wrapping with Tokio. You can later test the overhead introduced by this wrapping of Tokio by comparing the performance of Rust / C on the <code>io_uring</code> nop instruction.</li>
+<li>Test the performance of Direct I/O. Only Buffered I/O has been tested so far.</li>
+<li>Compare to Linux AIO, performance is not worse than Linux AIO.</li>
+<li>Use perf to see where the bottlenecks are now. Currently <code>cargo flamegraph</code> is hooked up and <code>io_uring</code> can&rsquo;t request memory.</li>
+<li>Currently, the user must ensure that <code>&amp;mut buf</code> is valid throughout the read cycle. If Future is aborted, there will be a memory leak. A similar problem with futures-rs can be found at <a href="https://github.com/rust-lang/futures-rs/issues/1278">https://github.com/rust-lang/futures-rs/issues/1278</a> . Tokio&rsquo;s current I/O solves this problem by copying twice (first to the cache, then to the user).</li>
+<li>Maybe wrap write files and other operations along the way as well.</li>
+</ul>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/rust/">rust</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-04/cache-coherence-protocol/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Cache coherence protocol analysis</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-04/io-uring/">
+            <span class="next-text nav-default">Interface and implementation of io_uring</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
