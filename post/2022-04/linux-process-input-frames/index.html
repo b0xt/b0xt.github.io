@@ -1,0 +1,947 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>An analysis of how Linux receives network frames - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Discover how the Linux kernel receives network frames: from the time the NIC finishes receiving the data frames to the time the data frames are passed to layer 3 in the network stack." /><meta name="keywords" content="linux, Process, Socket, Frames" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-04/linux-process-input-frames/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="An analysis of how Linux receives network frames" />
+<meta property="og:description" content="Discover how the Linux kernel receives network frames: from the time the NIC finishes receiving the data frames to the time the data frames are passed to layer 3 in the network stack." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-04/linux-process-input-frames/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-04-15T13:18:32+08:00" />
+<meta property="article:modified_time" content="2022-04-15T13:18:32+08:00" />
+
+<meta itemprop="name" content="An analysis of how Linux receives network frames">
+<meta itemprop="description" content="Discover how the Linux kernel receives network frames: from the time the NIC finishes receiving the data frames to the time the data frames are passed to layer 3 in the network stack."><meta itemprop="datePublished" content="2022-04-15T13:18:32+08:00" />
+<meta itemprop="dateModified" content="2022-04-15T13:18:32+08:00" />
+<meta itemprop="wordCount" content="4631">
+<meta itemprop="keywords" content="linux," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="An analysis of how Linux receives network frames"/>
+<meta name="twitter:description" content="Discover how the Linux kernel receives network frames: from the time the NIC finishes receiving the data frames to the time the data frames are passed to layer 3 in the network stack."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">An analysis of how Linux receives network frames</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-04-15 13:18:32 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 4631 words </span>
+          <span class="more-meta"> 22 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#device-notification-means">Device notification means</a>
+          <ul>
+            <li><a href="#polling">Polling</a></li>
+            <li><a href="#hardware-interrupts">Hardware interrupts</a></li>
+            <li><a href="#combinations-in-practice">Combinations in practice</a></li>
+          </ul>
+        </li>
+        <li><a href="#soft-interrupt-handling-mechanism">Soft interrupt handling mechanism</a>
+          <ul>
+            <li><a href="#second-half-of-the-handler">Second half of the handler</a></li>
+            <li><a href="#soft-interrupts">Soft interrupts</a></li>
+          </ul>
+        </li>
+        <li><a href="#network-frame-reception">Network frame reception</a>
+          <ul>
+            <li><a href="#input-queue">Input queue</a></li>
+            <li><a href="#linux-new-api-napi">Linux New API (NAPI)</a></li>
+            <li><a href="#net_rx_softirq-soft-interrupt-handler">NET_RX_SOFTIRQ Soft Interrupt Handler</a></li>
+            <li><a href="#poll-virtual-functions">Poll Virtual Functions</a></li>
+            <li><a href="#processing-receive-frames">Processing receive frames</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>This article will introduce how the Linux kernel receives network frames from a beginner&rsquo;s perspective: starting with the reception of the data frame by the NIC device and ending with the frame being passed to the third layer of the network stack. This article will focus on the working mechanism of the kernel and will not go into too many driver-level details. The sample code is taken from Linux 2.6.</p>
+<h2 id="device-notification-means">Device notification means</h2>
+<p>After a network device receives data and stores it in the device&rsquo;s receive frame buffer (which may be located in the device&rsquo;s memory or in the receive ring written to the host memory via DMA), it must notify the kernel to process the received data.</p>
+<h3 id="polling">Polling</h3>
+<p>Polling means that the kernel actively checks the device, for example, by periodically reading the device&rsquo;s memory registers to determine if there are new incoming frames to be processed. This approach is inefficient when the device load is high and takes up system resources when the device load is low, so it is rarely used by the operating system alone and can be combined with other mechanisms to achieve better results.</p>
+<h3 id="hardware-interrupts">Hardware interrupts</h3>
+<p>A hardware interrupt signal is generated by the device when an event occurs such as a new data frame is received. The signal is usually sent by the device to the interrupt controller, which forwards it to the CPU, which receives it and is interrupted from its current task to execute an interrupt handler registered by the device driver to handle device events. The interrupt handler adds the data frame to the kernel&rsquo;s input queue and notifies the kernel for further processing. This technique performs well at low loads, as each data frame is responded to in a timely manner, but at higher loads, the CPU is interrupted frequently and this affects the execution of other tasks.</p>
+<p>The processing of the received frame is usually divided into two parts: first the driver-registered interrupt handler copies the frame to the kernel-accessible input queue, and then the kernel processes it, usually by passing it to the handler of the relevant protocol, e.g., IPv4. the first part of the interrupt handler is executed in the interrupt context and can preempt the second part of the execution, which means that the frame copying of the received frame to the input queue queue has a higher priority than the protocol stack program that consumes the data frames.</p>
+<p>The consequences are obvious: the input queue will eventually fill up, but the program that should go out of the queue and process these frames has no chance to execute at a lower priority. As a result, new receive frames cannot be added to the queue because the input queue is full, and old frames will not be processed because there are no CPU resources available. This situation is called receive-livelock.</p>
+<p>Hardware interrupts have the advantage of very low latency between frame reception and processing, but can severely disrupt the execution of other kernel or user programs under high load. Most network drivers will use some optimized version of hardware interrupts.</p>
+<h4 id="handling-multiple-frames-at-once">Handling multiple frames at once</h4>
+<p>Some device drivers use a modified approach where when an interrupt handler is executed, it continuously queues data frames within a specified window time or frame count limit. Since other interrupts are disabled while the interrupt handler is executed, a reasonable execution policy must be set to share CPU resources with other tasks.</p>
+<p>This approach can be further optimized by having the device notify the kernel of pending receive frames only via hardware interrupts, leaving the queuing and processing of the receive frames to other kernel handlers. This is also how Linux&rsquo;s new interface NAPI works.</p>
+<h4 id="timed-interrupts">Timed interrupts</h4>
+<p>In addition to generating interrupts immediately based on events, the device can also send interrupts at fixed intervals when there are received frames. The interrupt handler will check if there are new frames during this interval and process them all at once. If all received frames have been processed and there are no new frames, the device will stop sending interrupts.</p>
+<p>This approach requires the device to implement timing at the hardware level and imposes a fixed processing delay depending on the timing interval, but is effective in reducing CPU usage and avoiding receive live-lock at high loads.</p>
+<h3 id="combinations-in-practice">Combinations in practice</h3>
+<p>Different notification mechanisms have their own suitable working scenarios: pure interrupt models guarantee very low latency at low loads but perform poorly at high loads; timed interrupts may introduce excessive latency and waste CPU time at low loads, but are very helpful at high loads to reduce CPU usage and resolve receive live locks. In practice, network devices often do not rely on a single model, but rather take a combination of solutions.</p>
+<p>Take the interrupt handling function <code>vortex_interrupt</code> (located in /drivers/net/3c59x.c) registered by the Linux 2.6 Vortex device as an example.</p>
+<ol>
+<li>The device will categorize multiple events into one interrupt type (it can even wait for a while before sending an interrupt signal, aggregating multiple interrupts into one signal to send). The interrupt triggers the execution of <code>vortex_interrupt</code> and disables the interrupt on that CPU.</li>
+<li>If the interrupt is triggered by the receive frame event <code>RxComplete</code>, the handler calls other code to process the frames received by the device.</li>
+<li><code>vortex_interrupt</code> continuously reads the device register during execution to check if a new interrupt is signaled. If there is and the interrupt event is <code>RxComplete</code>, the handler will continue processing the received frames until the number of processed frames reaches the preset <code>work_done</code> value. Other types of interrupts will be ignored by the handler.</li>
+</ol>
+<h2 id="soft-interrupt-handling-mechanism">Soft interrupt handling mechanism</h2>
+<p>An interrupt usually triggers the following events.</p>
+<ol>
+<li>The device generates an interrupt and notifies the kernel via hardware.</li>
+<li>If the kernel is not processing another interrupt (i.e., the interrupt is not disabled), it will receive this notification.</li>
+<li>the kernel disables the local CPU interrupt and executes the handler associated with the type of interrupt received. 4. the kernel exits the interrupt handler.</li>
+<li>The kernel exits the interrupt handler and re-enables the local CPU&rsquo;s interrupts.</li>
+</ol>
+<p>When the CPU receives an interrupt notification, it calls the handler corresponding to that interrupt number. During the execution of the handler, the kernel code is in the interrupt context and the interrupt is disabled. This means that while the CPU is handling an interrupt, it neither handles other interrupts nor can it be seized by other processes; CPU resources are exclusively occupied by that interrupt handler. This design decision reduces the possibility of contention conditions, but also introduces a potential performance impact.</p>
+<p>Obviously, interrupt handlers should do their job as fast as possible. Different interrupt events do not require the same amount of processing work. For example, when a key is pressed on the keyboard, the interrupt handler function triggered only needs to record the code of the key, and this event does not occur very often; while when processing a new data frame received by a network device, it needs to allocate memory space for <code>skb</code>, copy the received data, and complete some initialization work such as determining The network protocol to which the data belongs, etc.</p>
+<p>For this reason the operating system introduces the concept of upper and lower halves for interrupt handlers.</p>
+<h3 id="second-half-of-the-handler">Second half of the handler</h3>
+<p>Even though processing actions triggered by interrupts require a lot of CPU time, most actions can usually wait. Interrupts can preempt CPU execution in the first place, as the hardware may lose data if the OS makes it wait too long. This applies both to real-time data and to data stored in fixed-size buffers. If the hardware loses data, there is generally no way to recover it again (not considering sender retransmissions). On the other hand, there is generally nothing to lose when a process in kernel or user space is delayed in execution or preempted (except for systems with extremely high real-time requirements, which need to handle processes and interrupts in a completely different way).</p>
+<p>Given these considerations, modern interrupt handlers are divided into an upper and a lower half. The upper half performs work that must be done before CPU resources can be released, such as saving received data, while the lower half performs work that can be deferred to idle time, such as completing further processing of received data.</p>
+<p>You can think of the second half as a specific function that can be executed asynchronously. When an interrupt is triggered, some of the work is not required to be done immediately, and we can package this work as a lower half handler to be executed later. The first and second half work models can effectively reduce the time the CPU is in interrupt context (i.e., interrupt disabled).</p>
+<ol>
+<li>The device signals the interrupt to the CPU, notifying it of a specific event.</li>
+<li>The CPU executes the upper half of the interrupt-related handler function, disabling subsequent interrupt notifications until the handler finishes its work: a. Store some data in memory for further processing of the interrupt event by the kernel at a later time. b. Set a flag bit to ensure that the kernel is aware of pending interrupts. c. Re-enable interrupt notification for the local CPU before termination.</li>
+<li>At a later point in time, when the kernel has no more urgent tasks to handle, it checks the flag bit set by the top half of the handler and calls the associated bottom half of the handler. After the call it resets this flag bit and moves on to the next round of processing.</li>
+</ol>
+<p>Linux implements several different mechanisms for lower half processing: soft interrupts, microtasks and work queues, which are also applicable to time-delayed tasks in the operating system. Lower half processing mechanisms usually have the following common features.</p>
+<ul>
+<li>Defining different types and establishing associations between the types and specific processing tasks.</li>
+<li>Scheduling the execution of processing tasks.</li>
+<li>Notify the kernel that there are scheduled tasks that need to be executed.</li>
+</ul>
+<p>The next section focuses on the soft interrupt mechanism used to process network data frames.</p>
+<h3 id="soft-interrupts">Soft interrupts</h3>
+<p>There are several common types of soft interrupts, as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">enum</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">HI_SOFTIRQ</span><span class="o">=</span><span class="mi">0</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="n">TIMER_SOFTIRQ</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="n">NET_TX_SOFTIRQ</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="n">NET_RX_SOFTIRQ</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="n">BLOCK_SOFTIRQ</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="n">IRQ_POLL_SOFTIRQ</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="n">TASKLET_SOFTIRQ</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>where <strong>NET_TX_SOFTIRQ</strong> and <strong>NET_RX_SOFTIRQ</strong> are used to handle the reception and transmission of network data.</p>
+<h4 id="scheduling-and-execution-timing">Scheduling and execution timing</h4>
+<p>Each time a network device receives a frame, it sends a hardware interrupt to notify the kernel to call the interrupt handler, which triggers the scheduling of soft interrupts on the local CPU with the following functions.</p>
+<ol>
+<li><code>__raise_softirq_irqoff</code>: sets the bitmap corresponding to the soft interrupt type in a dedicated bitmap structure, and calls the handler associated with the soft interrupt when a subsequent check of the bitmap turns out to be true. A separate bitmap is used for each CPU.</li>
+<li><code>raise_softirq_irqoff</code>: The <code>__raise_softirq_irqoff</code> function is wrapped internally. If this function is not called from an interrupt context and preemption is not disabled, an additional <code>ksoftirqd</code> thread will be scheduled.</li>
+<li><code>raise_softirq</code> : wraps <code>raise_softirq_irqoff</code> internally, but executes with CPU interrupts disabled.</li>
+</ol>
+<p>At a certain point, the kernel checks the bitmap unique to each CPU to determine if there are any scheduled soft interrupts waiting to be executed, and if so, <code>do_softirq</code> will be called to handle the soft interrupts. The kernel handles soft interrupts at the following times.</p>
+<ol>
+<li>
+<p>do_IRQ</p>
+<p>Whenever the kernel receives an IRQ notification for a hardware interrupt, it calls <code>do_IRQ</code> to execute the handler for the interrupt. New soft interrupts may be scheduled in the interrupt handler, so handling soft interrupts at the end of <code>do_IRQ</code> is a natural design and can effectively reduce latency. In addition, the kernel&rsquo;s clocked interrupts guarantee a maximum time interval between the timing of two soft interrupt processing.</p>
+<p>Most architectures call <code>do_softirq</code> in the exit interrupt context step <code>irq_exit()</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">unsigned</span> <span class="kt">int</span> <span class="n">__irq_entry</span> <span class="nf">do_IRQ</span><span class="p">(</span><span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="n">regs</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="p">......</span>
+</span></span><span class="line"><span class="cl"><span class="n">exit_idle</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl"><span class="n">irq_enter</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// handle irq with registered handler
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl"><span class="n">irq_exit</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="n">set_irq_regs</span><span class="p">(</span><span class="n">old_regs</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>In <code>irq_exit()</code>, <code>invoke_softirq()</code> is called if the kernel has exited the interrupt context and there is a pending soft interrupt.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">void</span> <span class="nf">irq_exit</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="n">account_system_vtime</span><span class="p">(</span><span class="n">current</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="n">trace_hardirq_exit</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl"><span class="n">sub_preempt_count</span><span class="p">(</span><span class="n">IRQ_EXIT_OFFSET</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">in_interrupt</span><span class="p">()</span> <span class="o">&amp;&amp;</span> <span class="n">local_softirq_pending</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">    <span class="n">invoke_softirq</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="n">rcu_irq_exit</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="n">preempt_enable_no_resched</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p><code>invoke_softirq</code> is a simple wrapper around <code>do_softirq</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">static</span> <span class="kr">inline</span> <span class="kt">void</span> <span class="nf">invoke_softirq</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">force_irqthreads</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="n">do_softirq</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl"><span class="k">else</span>
+</span></span><span class="line"><span class="cl">    <span class="n">wakeup_softirqd</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div></li>
+<li>
+<p>When returning from interrupts and exception events (including system calls), this part of the processing logic is written directly into the assembly code.</p>
+</li>
+<li>
+<p>When calling <code>local_bh_enable</code> to turn on soft interrupts, the pending soft interrupts are executed.</p>
+</li>
+<li>
+<p>Each processor has a soft interrupt thread, ksoftirqd_CPUn, which also handles soft interrupts when executed.</p>
+</li>
+</ol>
+<p>CPU interrupts are on when soft interrupts are executed, and soft interrupts can be pending by new interrupts. However, if an instance of a soft interrupt is already running or pending on a CPU, the kernel will disable new requests of that soft interrupt type from running on the CPU, which significantly reduces the concurrent locks required for soft interrupts.</p>
+<h4 id="handling-soft-interrupts-do_softirq">Handling soft interrupts <code>do_softirq</code></h4>
+<p>When the time to execute a soft interrupt is reached, the kernel executes the <code>do_softirq</code> function.</p>
+<p><code>do_softirq</code> first saves a copy of the soft interrupt to be executed. When <code>do_softirq</code> is running, the same soft interrupt type may be scheduled more than once: it may be preempted by a hardware interrupt when running a soft interrupt handler, and the cpu&rsquo;s pending soft interrupt bitmap may be reset during the interrupt processing, i.e., the soft interrupt may be rescheduled during the execution of a pending soft interrupt. For this reason, <code>do_softirq</code> first disables the interrupt, saves a copy of the bitmap of the pending soft interrupt to the local variable <code>pending</code>, then resets the corresponding bit in the local CPU&rsquo;s soft interrupt bitmap to 0, and then reopens the interrupt. Finally, based on the copy of <code>pending</code>, each bit is checked to see if it is 1, and if it is, the corresponding handler is called according to the type of soft interrupt.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">do</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">(</span><span class="n">pending</span> <span class="o">&amp;</span> <span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="kt">unsigned</span> <span class="kt">int</span> <span class="n">vec_nr</span> <span class="o">=</span> <span class="n">h</span> <span class="o">-</span> <span class="n">softirq_vec</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="kt">int</span> <span class="n">prev_count</span> <span class="o">=</span> <span class="n">preempt_count</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">kstat_incr_softirqs_this_cpu</span><span class="p">(</span><span class="n">vec_nr</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">trace_softirq_entry</span><span class="p">(</span><span class="n">vec_nr</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">h</span><span class="o">-&gt;</span><span class="n">action</span><span class="p">(</span><span class="n">h</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">trace_softirq_exit</span><span class="p">(</span><span class="n">vec_nr</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">unlikely</span><span class="p">(</span><span class="n">prev_count</span> <span class="o">!=</span> <span class="n">preempt_count</span><span class="p">()))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="n">printk</span><span class="p">(</span><span class="n">KERN_ERR</span> <span class="s">&#34;huh, entered softirq %u %s %p&#34;</span>
+</span></span><span class="line"><span class="cl">                    <span class="s">&#34;with preempt_count %08x,&#34;</span>
+</span></span><span class="line"><span class="cl">                    <span class="s">&#34; exited with %08x?</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">vec_nr</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">softirq_to_name</span><span class="p">[</span><span class="n">vec_nr</span><span class="p">],</span> <span class="n">h</span><span class="o">-&gt;</span><span class="n">action</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                    <span class="n">prev_count</span><span class="p">,</span> <span class="n">preempt_count</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">            <span class="n">preempt_count</span><span class="p">()</span> <span class="o">=</span> <span class="n">prev_count</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">rcu_bh_qs</span><span class="p">(</span><span class="n">cpu</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="n">h</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="n">pending</span> <span class="o">&gt;&gt;=</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span> <span class="k">while</span> <span class="p">(</span><span class="n">pending</span><span class="p">);</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The order of pending soft interrupt calls depends on the position of the flag bits in the bitmap and the direction in which they are scanned (from low to high), and is not executed on a first-in-first-out basis.</p>
+<p>When all handlers are executed, <code>do_ softirq</code> disables the interrupts again and re-checks the CPU&rsquo;s pending interrupt bitmap, and if a new pending soft interrupt is found, a copy is created again and the above process is executed again. This process is repeated at most <strong>MAX_SOFTIRQ_RESTART</strong> times (usually 10) to avoid infinite CPU resource hogging.</p>
+<p>When the processing rounds reach the <strong>MAX_SOFTIRQ_RESTART</strong> threshold, <code>do_ softirq</code> must end its execution, and if there are still unexecuted soft interrupts, the ksoftirqd thread will be woken up to handle them. However, <code>do_ softirq</code> is called so frequently in the kernel that subsequent calls to <code>do_softirq</code> may actually finish processing these soft interrupts before the ksoftirqd thread is scheduled.</p>
+<h4 id="ksoftirqd-kernel-threads">ksoftirqd Kernel Threads</h4>
+<p>Each CPU has a kernel thread ksoftirqd (usually named ksoftirqd_CPUn according to the CPU serial number). When the mechanism described above cannot handle all the soft interrupts, the ksoftirqd thread in the background of that CPU is woken up and takes on the responsibility of handling as many pending soft interrupts as possible after they are scheduled.</p>
+<p>The task function <code>run_ksoftirqd</code> associated with ksoftirqd is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">int</span> <span class="nf">run_ksoftirqd</span><span class="p">(</span><span class="kt">void</span> <span class="o">*</span> <span class="n">__bind_cpu</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">set_current_state</span><span class="p">(</span><span class="n">TASK_INTERRUPTIBLE</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">while</span> <span class="p">(</span><span class="o">!</span><span class="n">kthread_should_stop</span><span class="p">())</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">preempt_disable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">local_softirq_pending</span><span class="p">())</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="n">preempt_enable_no_resched</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">            <span class="n">schedule</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">            <span class="n">preempt_disable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">__set_current_state</span><span class="p">(</span><span class="n">TASK_RUNNING</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">while</span> <span class="p">(</span><span class="n">local_softirq_pending</span><span class="p">())</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="cm">/* Preempt disable stops cpu going offline.
+</span></span></span><span class="line"><span class="cl"><span class="cm">                If already offline, we&#39;ll be on wrong CPU:
+</span></span></span><span class="line"><span class="cl"><span class="cm">                don&#39;t process */</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="p">(</span><span class="n">cpu_is_offline</span><span class="p">((</span><span class="kt">long</span><span class="p">)</span><span class="n">__bind_cpu</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                <span class="k">goto</span> <span class="n">wait_to_die</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="n">local_irq_disable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="p">(</span><span class="n">local_softirq_pending</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">                <span class="n">__do_softirq</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">            <span class="n">local_irq_enable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">            <span class="n">preempt_enable_no_resched</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">            <span class="n">cond_resched</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">            <span class="n">preempt_disable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">            <span class="n">rcu_note_context_switch</span><span class="p">((</span><span class="kt">long</span><span class="p">)</span><span class="n">__bind_cpu</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="n">preempt_enable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">set_current_state</span><span class="p">(</span><span class="n">TASK_INTERRUPTIBLE</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="n">__set_current_state</span><span class="p">(</span><span class="n">TASK_RUNNING</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nl">wait_to_die</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">    <span class="n">preempt_enable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">    <span class="cm">/* Wait for kthread_stop */</span>
+</span></span><span class="line"><span class="cl">    <span class="n">set_current_state</span><span class="p">(</span><span class="n">TASK_INTERRUPTIBLE</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="k">while</span> <span class="p">(</span><span class="o">!</span><span class="n">kthread_should_stop</span><span class="p">())</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">schedule</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">        <span class="n">set_current_state</span><span class="p">(</span><span class="n">TASK_INTERRUPTIBLE</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="n">__set_current_state</span><span class="p">(</span><span class="n">TASK_RUNNING</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>ksoftirqd does basically the same thing as <code>do_softirq</code>, its main logic is to call <code>__do_softirq</code> (this function is also the core logic of <code>do_softirq</code>) continuously through while loop, and it will stop only when the following two conditions are reached.</p>
+<ol>
+<li>when there are no pending soft interrupts, ksoftirqd will call <code>schedule()</code> to trigger scheduling to actively relinquish CPU resources.</li>
+<li>The thread finishes executing the allocated time slice and is asked to give up CPU resources for the next scheduling.</li>
+</ol>
+<p>The scheduling priority of ksoftirqd thread is set to be very low, which can also avoid grabbing too many CPU resources when there are more soft interrupts.</p>
+<h2 id="network-frame-reception">Network frame reception</h2>
+<p>Linux&rsquo;s network system uses the following two main types of soft interrupts.</p>
+<ul>
+<li>NET_RX_SOFTIRQ to handle receiving (inbound) network data</li>
+<li>NET_TX_SOFTIRQ to handle sending (outgoing) network data</li>
+</ul>
+<p>This article focuses mainly on how to receive data.</p>
+<h3 id="input-queue">Input queue</h3>
+<p>Each CPU has an input queue <code>input_pkt_queue</code> for incoming network frames, which is located in the <code>softnet_data</code> structure, but not all NIC device drivers will use this input queue.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">struct</span> <span class="n">softnet_data</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">struct</span> <span class="n">Qdisc</span>        <span class="o">*</span><span class="n">output_queue</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">struct</span> <span class="n">Qdisc</span>        <span class="o">**</span><span class="n">output_queue_tailp</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">struct</span> <span class="n">list_head</span>    <span class="n">poll_list</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">struct</span> <span class="n">sk_buff</span>      <span class="o">*</span><span class="n">completion_queue</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">struct</span> <span class="n">sk_buff_head</span> <span class="n">process_queue</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="cm">/* stats */</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">unsigned</span> <span class="kt">int</span>        <span class="n">processed</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">unsigned</span> <span class="kt">int</span>        <span class="n">time_squeeze</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">unsigned</span> <span class="kt">int</span>        <span class="n">cpu_collision</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">unsigned</span> <span class="kt">int</span>        <span class="n">received_rps</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="kt">unsigned</span>            <span class="n">dropped</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">struct</span> <span class="n">sk_buff_head</span> <span class="n">input_pkt_queue</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">struct</span> <span class="n">napi_struct</span>  <span class="n">backlog</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h3 id="linux-new-api-napi">Linux New API (NAPI)</h3>
+<p>The NIC device uses a hardware interrupt to signal the CPU that it has a new frame to process every time it receives a layer 2 network frame. The CPU receiving the interrupt executes the <code>do_IRQ</code> function, which calls the handler associated with the hardware interrupt number. The handler is usually a function registered by the device driver during initialization. This interrupt handler will be executed in disable interrupt mode, causing the CPU to temporarily stop receiving interrupt signals. The interrupt handler performs some necessary immediate tasks and schedules other tasks for delayed execution in the second half. Specifically the interrupt handler does these things.</p>
+<ol>
+<li>copy the network frame into the <code>sk_buff</code> data structure.</li>
+<li>initialize some <code>sk_buff</code> parameters for use by the upper network stack. In particular, <code>skb-&gt;protocol</code>, which identifies the upper layer&rsquo;s protocol handler.</li>
+<li>update other device-specific parameters.</li>
+<li>notify the kernel of further processing of the received frame by scheduling a soft interrupt <strong>NET_RX_SOFTIRQ</strong>.</li>
+</ol>
+<p>We have described above the polling and interrupt notification mechanisms (including several modified versions), which have different advantages and disadvantages and are suitable for different work scenarios, but Linux introduced in Linux 2.6 a NAPI mechanism that mixes polling and interrupts to notify and process new incoming frames. This article will focus on the NAPI mechanism.</p>
+<p>When the device driver supports NAPI, the device still uses interrupts to notify the kernel when it receives a network frame, but the kernel disables interrupts from the device after it starts processing the interrupt and continues to poll the device&rsquo;s input buffer to fetch the received frame for processing until the buffer is empty, when it ends the handler and re-enables interrupt notification for the device. NAPI combines the advantages of polling and interrupts.</p>
+<ol>
+<li>The idle state allows the kernel to be notified as soon as the device receives a new network frame without wasting resources on polling.</li>
+<li>After the kernel is notified of the pending data in the device buffer, it does not need to waste resources to handle the interrupts, but simply poll to process the data.</li>
+</ol>
+<p>For the kernel, NAPI effectively reduces the number of interrupts to be handled under high load, thus reducing CPU usage, and also reduces contention between devices by polling to access them. The kernel implements NAPI with the following data structures.</p>
+<ol>
+<li><code>poll</code>: virtual function to queue network frames from the device&rsquo;s inbound queue, each device will have a separate inbound queue.</li>
+<li><code>poll_list</code> : A chain of devices that maintain a state in polling. Multiple devices can share the same interrupt signal, so the kernel needs to poll multiple devices. Interrupts from this device will be disabled after being added to the list.</li>
+<li><code>quota</code> and <code>weight</code>: The kernel uses these two values to control the amount of data queued from a device at a time. A smaller quota means that data frames from different devices have a fair chance to be processed, but the kernel spends more time switching before the device and vice versa.</li>
+</ol>
+<p>When the device sends an interrupt signal and it is received, the kernel executes the interrupt handler registered by the device driver. The interrupt handler will call <code>napi_schedule</code> to schedule the execution of the polling program. In <code>napi_schedule</code>, if the device sending the interrupt is not in the CPU&rsquo;s <code>poll_list</code>, the kernel adds it to the <code>poll_list</code> and triggers the scheduling of <strong>NET_RX_SOFTIRQ</strong> soft interrupts via <code>__raise_softirq_irqoff</code>. The main logic is located in <code>____napi_schedule</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="cm">/* Called with irq disabled */</span>
+</span></span><span class="line"><span class="cl"><span class="k">static</span> <span class="kr">inline</span> <span class="kt">void</span> <span class="nf">____napi_schedule</span><span class="p">(</span><span class="k">struct</span> <span class="n">softnet_data</span> <span class="o">*</span><span class="n">sd</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">        <span class="k">struct</span> <span class="n">napi_struct</span> <span class="o">*</span><span class="n">napi</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">list_add_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="n">napi</span><span class="o">-&gt;</span><span class="n">poll_list</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">sd</span><span class="o">-&gt;</span><span class="n">poll_list</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="n">__raise_softirq_irqoff</span><span class="p">(</span><span class="n">NET_RX_SOFTIRQ</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h3 id="net_rx_softirq-soft-interrupt-handler">NET_RX_SOFTIRQ Soft Interrupt Handler</h3>
+<p>The handler for <strong>NET_RX_SOFTIRQ</strong> is <code>net_rx_action</code>. Its code is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span><span class="lnt">83
+</span><span class="lnt">84
+</span><span class="lnt">85
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">void</span> <span class="nf">net_rx_action</span><span class="p">(</span><span class="k">struct</span> <span class="n">softirq_action</span> <span class="o">*</span><span class="n">h</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">struct</span> <span class="n">softnet_data</span> <span class="o">*</span><span class="n">sd</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">__get_cpu_var</span><span class="p">(</span><span class="n">softnet_data</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">time_limit</span> <span class="o">=</span> <span class="n">jiffies</span> <span class="o">+</span> <span class="mi">2</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="n">budget</span> <span class="o">=</span> <span class="n">netdev_budget</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">void</span> <span class="o">*</span><span class="n">have</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">local_irq_disable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">while</span> <span class="p">(</span><span class="o">!</span><span class="n">list_empty</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sd</span><span class="o">-&gt;</span><span class="n">poll_list</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">struct</span> <span class="n">napi_struct</span> <span class="o">*</span><span class="n">n</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="kt">int</span> <span class="n">work</span><span class="p">,</span> <span class="n">weight</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="cm">/* If softirq window is exhuasted then punt.
+</span></span></span><span class="line"><span class="cl"><span class="cm">            * Allow this to run for 2 jiffies since which will allow
+</span></span></span><span class="line"><span class="cl"><span class="cm">            * an average latency of 1.5/HZ.
+</span></span></span><span class="line"><span class="cl"><span class="cm">            */</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">unlikely</span><span class="p">(</span><span class="n">budget</span> <span class="o">&lt;=</span> <span class="mi">0</span> <span class="o">||</span> <span class="n">time_after</span><span class="p">(</span><span class="n">jiffies</span><span class="p">,</span> <span class="n">time_limit</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">            <span class="k">goto</span> <span class="n">softnet_break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">local_irq_enable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="cm">/* Even though interrupts have been re-enabled, this
+</span></span></span><span class="line"><span class="cl"><span class="cm">            * access is safe because interrupts can only add new
+</span></span></span><span class="line"><span class="cl"><span class="cm">            * entries to the tail of this list, and only -&gt;poll()
+</span></span></span><span class="line"><span class="cl"><span class="cm">            * calls can remove this head entry from the list.
+</span></span></span><span class="line"><span class="cl"><span class="cm">            */</span>
+</span></span><span class="line"><span class="cl">        <span class="n">n</span> <span class="o">=</span> <span class="n">list_first_entry</span><span class="p">(</span><span class="o">&amp;</span><span class="n">sd</span><span class="o">-&gt;</span><span class="n">poll_list</span><span class="p">,</span> <span class="k">struct</span> <span class="n">napi_struct</span><span class="p">,</span> <span class="n">poll_list</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">have</span> <span class="o">=</span> <span class="n">netpoll_poll_lock</span><span class="p">(</span><span class="n">n</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">weight</span> <span class="o">=</span> <span class="n">n</span><span class="o">-&gt;</span><span class="n">weight</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="cm">/* This NAPI_STATE_SCHED test is for avoiding a race
+</span></span></span><span class="line"><span class="cl"><span class="cm">            * with netpoll&#39;s poll_napi().  Only the entity which
+</span></span></span><span class="line"><span class="cl"><span class="cm">            * obtains the lock and sees NAPI_STATE_SCHED set will
+</span></span></span><span class="line"><span class="cl"><span class="cm">            * actually make the -&gt;poll() call.  Therefore we avoid
+</span></span></span><span class="line"><span class="cl"><span class="cm">            * accidentally calling -&gt;poll() when NAPI is not scheduled.
+</span></span></span><span class="line"><span class="cl"><span class="cm">            */</span>
+</span></span><span class="line"><span class="cl">        <span class="n">work</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">test_bit</span><span class="p">(</span><span class="n">NAPI_STATE_SCHED</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">n</span><span class="o">-&gt;</span><span class="n">state</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="n">work</span> <span class="o">=</span> <span class="n">n</span><span class="o">-&gt;</span><span class="n">poll</span><span class="p">(</span><span class="n">n</span><span class="p">,</span> <span class="n">weight</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">            <span class="n">trace_napi_poll</span><span class="p">(</span><span class="n">n</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">WARN_ON_ONCE</span><span class="p">(</span><span class="n">work</span> <span class="o">&gt;</span> <span class="n">weight</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">budget</span> <span class="o">-=</span> <span class="n">work</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">local_irq_disable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="cm">/* Drivers must not modify the NAPI state if they
+</span></span></span><span class="line"><span class="cl"><span class="cm">            * consume the entire weight.  In such cases this code
+</span></span></span><span class="line"><span class="cl"><span class="cm">            * still &#34;owns&#34; the NAPI instance and therefore can
+</span></span></span><span class="line"><span class="cl"><span class="cm">            * move the instance around on the list at-will.
+</span></span></span><span class="line"><span class="cl"><span class="cm">            */</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">unlikely</span><span class="p">(</span><span class="n">work</span> <span class="o">==</span> <span class="n">weight</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="p">(</span><span class="n">unlikely</span><span class="p">(</span><span class="n">napi_disable_pending</span><span class="p">(</span><span class="n">n</span><span class="p">)))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="n">local_irq_enable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">                <span class="n">napi_complete</span><span class="p">(</span><span class="n">n</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="n">local_irq_disable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">            <span class="p">}</span> <span class="k">else</span>
+</span></span><span class="line"><span class="cl">                <span class="n">list_move_tail</span><span class="p">(</span><span class="o">&amp;</span><span class="n">n</span><span class="o">-&gt;</span><span class="n">poll_list</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">sd</span><span class="o">-&gt;</span><span class="n">poll_list</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">netpoll_poll_unlock</span><span class="p">(</span><span class="n">have</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="nl">out</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">    <span class="n">net_rps_action_and_irq_enable</span><span class="p">(</span><span class="n">sd</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="cp">#ifdef CONFIG_NET_DMA
+</span></span></span><span class="line"><span class="cl"><span class="cp"></span>    <span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm">        * There may not be any more sk_buffs coming right now, so push
+</span></span></span><span class="line"><span class="cl"><span class="cm">        * any pending DMA copies to hardware
+</span></span></span><span class="line"><span class="cl"><span class="cm">        */</span>
+</span></span><span class="line"><span class="cl">    <span class="n">dma_issue_pending_all</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl"><span class="cp">#endif
+</span></span></span><span class="line"><span class="cl"><span class="cp"></span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nl">softnet_break</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">    <span class="n">sd</span><span class="o">-&gt;</span><span class="n">time_squeeze</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="n">__raise_softirq_irqoff</span><span class="p">(</span><span class="n">NET_RX_SOFTIRQ</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="k">goto</span> <span class="n">out</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>When <code>net_rx_action</code> is scheduled for execution.</p>
+<ol>
+<li>the device in the <code>poll_list</code> chain is traversed from the beginning, and the device&rsquo;s <code>poll</code> virtual function is called to process the data frames in the inbound queue.</li>
+<li>When the number of frames processed by the poll call reaches the maximum threshold, the device is moved to the end of the <code>poll_list</code> and moved to the next device in the <code>poll_list</code>, even if the device&rsquo;s inbound queue has not been emptied.</li>
+<li>If the device&rsquo;s inbound queue is emptied, call <code>netif_rx_complete</code> to move the device out of the <code>poll_list</code> and turn on interrupt notification for that device.</li>
+<li>Continue the process until <code>poll_list</code> is emptied, or <code>net_rx_action</code> has executed enough time slices (so as not to take up too many CPU resources), in which case <code>net_rx_action</code> will reschedule itself for the next execution before exiting.</li>
+</ol>
+<h3 id="poll-virtual-functions">Poll Virtual Functions</h3>
+<p>During device driver initialization, the device points <code>dev-&gt;poll</code> to a custom function provided by the driver, so different drivers will use different poll functions. We will introduce the default poll function <code>process_backlog</code> provided by Linux, which works in a similar way to most driver poll functions, with the main difference that <code>process_backlog</code> works without disabling interrupts, and since non-NAPI devices use a shared input queue, stacking out of the input queue Since non-NAPI devices use a shared input queue, they need to temporarily disable interrupts to implement locking when exiting data frames from the input queue, whereas NAPI devices use a separate inbound queue, and devices that join the <code>poll_list</code> have their interrupts disabled separately, so there is no need to consider locking during polling.</p>
+<p>When <code>process_backlog</code> is executed, it first calculates the quota of the device, and then enters the following loop.</p>
+<ol>
+<li>disable interrupts, stack data frames from the input queue associated with the CPU, and re-enable interrupts.</li>
+<li>If the input queue is empty at the time of stacking, the device is moved out of the <code>poll_list</code> and execution ends.</li>
+<li>If the input queue is not empty, call <code>netif_receive_skb(skb)</code> to process the out-stacked data frames, which we will describe in the next section.</li>
+<li>Check the following conditions, and if they are not met jump to step 1 to continue the loop.
+<ol>
+<li>If the number of data frames out of the stack reaches the quota value of the device, end the execution.</li>
+<li>If enough CPU time slice has been executed, end execution.</li>
+</ol>
+</li>
+</ol>
+<h3 id="processing-receive-frames">Processing receive frames</h3>
+<p><code>netif_receive_skb</code> is a tool function used by the poll virtual function to process receive frames, in short it does the following for data frames in order.</p>
+<ol>
+<li>handle the bond function of the data frame. Linux can aggregate a group of devices into a bond device, where the data frame is changed from the receiving device <code>skb-&gt;dev</code> to the master device in the bond before it enters layer 3 processing.</li>
+<li>pass a copy of the data frame to the registered sniffers of each protocol.</li>
+<li>handle some functions that need to be done at layer 2, including bridging. If the data frame does not need to be bridged, continue down the line.</li>
+<li>Pass a copy of the data frame to the registered Layer 3 protocol handler corresponding to <code>skb-&gt;protocol</code>. The data frame then enters the upper layer of the kernel network stack.</li>
+</ol>
+<p>If the corresponding protocol handler is not found or is not consumed by a function such as bridging, the data frame is discarded by the kernel.</p>
+<p>Typically, the three layer protocol handlers process the data frames as follows.</p>
+<ul>
+<li>Pass them to protocols higher up in the network stack such as TCP, UDP, ICMP and finally to the application process.</li>
+<li>They are discarded in data frame processing frameworks such as netfilter.</li>
+<li>If the destination of the data frame is not the local host, it will be forwarded to another machine.</li>
+</ul>
+<p>This concludes the discussion of how Linux receives network frames.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/linux/">linux</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-04/understanding-netfilter-and-iptables/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">In-depth understanding of netfilter and iptables</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-04/github-action-sky-high-bill/">
+            <span class="next-text nav-default">GitHub Actions Service Billed Users $127 Million</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
