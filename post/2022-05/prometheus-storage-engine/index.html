@@ -1,0 +1,964 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Prometheus Storage Engine Analysis - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article focuses on the details of the storage format of Prometheus V2 version and how the query locates the data that matches the conditions." /><meta name="keywords" content="Prometheus" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-05/prometheus-storage-engine/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Prometheus Storage Engine Analysis" />
+<meta property="og:description" content="This article focuses on the details of the storage format of Prometheus V2 version and how the query locates the data that matches the conditions." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-05/prometheus-storage-engine/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-05-08T10:43:43+08:00" />
+<meta property="article:modified_time" content="2022-05-08T10:43:43+08:00" />
+
+<meta itemprop="name" content="Prometheus Storage Engine Analysis">
+<meta itemprop="description" content="This article focuses on the details of the storage format of Prometheus V2 version and how the query locates the data that matches the conditions."><meta itemprop="datePublished" content="2022-05-08T10:43:43+08:00" />
+<meta itemprop="dateModified" content="2022-05-08T10:43:43+08:00" />
+<meta itemprop="wordCount" content="3880">
+<meta itemprop="keywords" content="prometheus," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Prometheus Storage Engine Analysis"/>
+<meta name="twitter:description" content="This article focuses on the details of the storage format of Prometheus V2 version and how the query locates the data that matches the conditions."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Prometheus Storage Engine Analysis</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-05-08 10:43:43 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 3880 words </span>
+          <span class="more-meta"> 8 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#background-knowledge">Background knowledge</a>
+          <ul>
+            <li><a href="#timing-characteristics">Timing characteristics</a></li>
+            <li><a href="#data-patterns">Data Patterns</a></li>
+            <li><a href="#inverted-index">Inverted index</a></li>
+          </ul>
+        </li>
+        <li><a href="#disk-storage-format">Disk storage format</a>
+          <ul>
+            <li><a href="#data-format">Data format</a></li>
+            <li><a href="#index-format">Index format</a></li>
+            <li><a href="#usage">Usage</a></li>
+          </ul>
+        </li>
+        <li><a href="#memory-structures">Memory Structures</a>
+          <ul>
+            <li><a href="#head">Head</a></li>
+            <li><a href="#usage-1">Usage</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Prometheus is one of the most popular monitoring platforms in the cloud-native era as a temporal database. Although its overall architecture has not changed much, the underlying storage engine has evolved over several versions. This article focuses on the details of the storage format of Prometheus V2 version (which is mainly used now) and how queries locate the eligible data, aiming to have a deeper understanding of the storage engine of Prometheus through the analysis in this article.</p>
+<blockquote>
+<p>Note: This article does not cover the query parsing and function evaluation process. The code analysis is based on version <a href="https://github.com/prometheus/prometheus/tree/v2.25.2">v2.25.2</a>.</p>
+</blockquote>
+<h2 id="background-knowledge">Background knowledge</h2>
+<h3 id="timing-characteristics">Timing characteristics</h3>
+<p>The characteristics of chronological data can be summarized in one sentence: write vertically (latest data) and check horizontally.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/08/79570f045a7244c1b000931b5a212d7b.png" alt="time series"></p>
+<p>Another characteristic for cloud-native scenarios is the short data lifecycle, where a single container expansion or contraction can cause the timeline to double in size. Understanding these two characteristics, let&rsquo;s take a look at how Prometheus stores data to cater to the above patterns.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">├── 01BKGV7JC0RY8A6MACW02A2PJD  // block 的 ULID
+</span></span><span class="line"><span class="cl">│   ├── chunks
+</span></span><span class="line"><span class="cl">│   │   └── 000001
+</span></span><span class="line"><span class="cl">│   ├── tombstones
+</span></span><span class="line"><span class="cl">│   ├── index
+</span></span><span class="line"><span class="cl">│   └── meta.json
+</span></span><span class="line"><span class="cl">├── chunks_head
+</span></span><span class="line"><span class="cl">│   └── 000001
+</span></span><span class="line"><span class="cl">└── wal
+</span></span><span class="line"><span class="cl">    ├── 000000002
+</span></span><span class="line"><span class="cl">    └── checkpoint.00000001
+</span></span><span class="line"><span class="cl">        └── 00000000
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>As you can see, the data directory has the following main parts.</p>
+<ul>
+<li>block, all data within a time period (default 2 hours), read-only, named with <a href="https://github.com/oklog/ulid">ULID</a>. Each block contains mainly.
+<ul>
+<li>chunks, fixed size (max 128M) chunks file</li>
+<li>index index file, which mainly contains information about the inverted index</li>
+<li>meta.json meta-information, mainly including minTime/maxTime of the block, which is convenient for filtering when querying</li>
+</ul>
+</li>
+<li>chunks_head, the chunks file corresponding to the block currently being written, read-only, up to 120 data points, time span up to 2 hours.</li>
+<li>wal, Prometheus uses batching to asynchronously swipe the disk, so WAL is needed to ensure data reliability</li>
+</ul>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/08/30e1771ce22345d583fbcbe1a1ff1806.png" alt="Block Distribution"></p>
+<p>With the above directory structure, it is easy to see the design idea of Prometheus.</p>
+<ul>
+<li>The problem of short data life cycle is solved by slicing data by time</li>
+<li>The scenario of writing only the latest data by saving batches in memory</li>
+</ul>
+<h3 id="data-patterns">Data Patterns</h3>
+<p>The schema supported by Prometheus is relatively simple, supporting only single-value schema, as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">cpu_usage{core=&#34;1&#34;, ip=&#34;130.25.175.171&#34;} 14.04 1618137750
+</span></span><span class="line"><span class="cl">metric     labels                        value timesample
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h3 id="inverted-index">Inverted index</h3>
+<p>Index is the main means to support multi-dimensional search, the index structure in the time sequence is similar to the search engine, it is an inverted index, you can refer to the following figure</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/08/f5f051d17c81476fb4462e33240672d6.png" alt="Working diagram of inverted index"></p>
+<p>In a query, we will find the corresponding postings lists (i.e. timeline collection) for the labels involved, and then do the collection operation according to the filter type, and finally check the corresponding data according to the timeline derived from the operation result.</p>
+<h2 id="disk-storage-format">Disk storage format</h2>
+<h3 id="data-format">Data format</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">┌──────────────────────────────┐
+</span></span><span class="line"><span class="cl">│  magic(0x0130BC91) &lt;4 byte&gt;  │
+</span></span><span class="line"><span class="cl">├──────────────────────────────┤
+</span></span><span class="line"><span class="cl">│    version(1) &lt;1 byte&gt;       │
+</span></span><span class="line"><span class="cl">├──────────────────────────────┤
+</span></span><span class="line"><span class="cl">│    padding(0) &lt;3 byte&gt;       │
+</span></span><span class="line"><span class="cl">├──────────────────────────────┤
+</span></span><span class="line"><span class="cl">│ ┌──────────────────────────┐ │
+</span></span><span class="line"><span class="cl">│ │         Chunk 1          │ │
+</span></span><span class="line"><span class="cl">│ ├──────────────────────────┤ │
+</span></span><span class="line"><span class="cl">│ │          ...             │ │
+</span></span><span class="line"><span class="cl">│ ├──────────────────────────┤ │
+</span></span><span class="line"><span class="cl">│ │         Chunk N          │ │
+</span></span><span class="line"><span class="cl">│ └──────────────────────────┘ │
+</span></span><span class="line"><span class="cl">└──────────────────────────────┘
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"># 单个 chunk 内的结构
+</span></span><span class="line"><span class="cl">┌─────────────────────┬───────────────────────┬───────────────────────┬───────────────────┬───────────────┬──────────────┬────────────────┐
+</span></span><span class="line"><span class="cl">| series ref &lt;8 byte&gt; | mint &lt;8 byte, uint64&gt; | maxt &lt;8 byte, uint64&gt; | encoding &lt;1 byte&gt; | len &lt;uvarint&gt; | data &lt;bytes&gt; │ CRC32 &lt;4 byte&gt; │
+</span></span><span class="line"><span class="cl">└─────────────────────┴───────────────────────┴───────────────────────┴───────────────────┴───────────────┴──────────────┴────────────────┘
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>A chunk is the smallest organizational unit of data on disk, and the following two points need to be clarified:</p>
+<ol>
+<li>the default time span of a single chunk is 2 hours, Prometheus will have a merge operation in the background to merge blocks with adjacent times together</li>
+<li>series ref is a unique marker for the timeline, consisting of 8 bytes, the first 4 represent the file id, the last 4 represent the offset in the file, which needs to be combined with the index structure later to achieve data positioning</li>
+</ol>
+<h3 id="index-format">Index format</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">┌────────────────────────────┬─────────────────────┐
+</span></span><span class="line"><span class="cl">│ magic(0xBAAAD700) &lt;4b&gt;     │ version(1) &lt;1 byte&gt; │
+</span></span><span class="line"><span class="cl">├────────────────────────────┴─────────────────────┤
+</span></span><span class="line"><span class="cl">│ ┌──────────────────────────────────────────────┐ │
+</span></span><span class="line"><span class="cl">│ │                 Symbol Table                 │ │
+</span></span><span class="line"><span class="cl">│ ├──────────────────────────────────────────────┤ │
+</span></span><span class="line"><span class="cl">│ │                    Series                    │ │
+</span></span><span class="line"><span class="cl">│ ├──────────────────────────────────────────────┤ │
+</span></span><span class="line"><span class="cl">│ │                 Label Index 1                │ │
+</span></span><span class="line"><span class="cl">│ ├──────────────────────────────────────────────┤ │
+</span></span><span class="line"><span class="cl">│ │                      ...                     │ │
+</span></span><span class="line"><span class="cl">│ ├──────────────────────────────────────────────┤ │
+</span></span><span class="line"><span class="cl">│ │                 Label Index N                │ │
+</span></span><span class="line"><span class="cl">│ ├──────────────────────────────────────────────┤ │
+</span></span><span class="line"><span class="cl">│ │                   Postings 1                 │ │
+</span></span><span class="line"><span class="cl">│ ├──────────────────────────────────────────────┤ │
+</span></span><span class="line"><span class="cl">│ │                      ...                     │ │
+</span></span><span class="line"><span class="cl">│ ├──────────────────────────────────────────────┤ │
+</span></span><span class="line"><span class="cl">│ │                   Postings N                 │ │
+</span></span><span class="line"><span class="cl">│ ├──────────────────────────────────────────────┤ │
+</span></span><span class="line"><span class="cl">│ │               Label Offset Table             │ │
+</span></span><span class="line"><span class="cl">│ ├──────────────────────────────────────────────┤ │
+</span></span><span class="line"><span class="cl">│ │             Postings Offset Table            │ │
+</span></span><span class="line"><span class="cl">│ ├──────────────────────────────────────────────┤ │
+</span></span><span class="line"><span class="cl">│ │                      TOC                     │ │
+</span></span><span class="line"><span class="cl">│ └──────────────────────────────────────────────┘ │
+</span></span><span class="line"><span class="cl">└──────────────────────────────────────────────────┘
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>In an index file, the most important parts are the following (from bottom to top).</p>
+<ol>
+<li>TOC stores the offset of the other parts</li>
+<li>Postings Offset Table, used to store the inverted index, Key is the label name/value sequence, Value is the offset of Postings in the file.</li>
+<li>Postings N, which stores the specific timeline sequence</li>
+<li>Series, which stores the current timeline, corresponding to the chunk file information</li>
+<li>Label Offset Table and Label Index are not used in the query, so we will not talk about them here.</li>
+</ol>
+<p>The specific encoding format of each part can be found in the official document <a href="https://github.com/prometheus/prometheus/blob/main/tsdb/docs/format/index.md">Index Disk Format</a>, which focuses on how a query finds The following is a description of how a query finds the eligible data.</p>
+<ul>
+<li>
+<p>First, in the Posting Offset Table, find the location of the Postings corresponding to the label</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/08/e73c8ae273134f628ab2e77fde217de6.png" alt="The mapping process of offset table to postings"></p>
+</li>
+<li>
+<p>Then, according to the series information in Postings, we find the corresponding chunk location, i.e., the series ref above.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/08/e3fc1843f49e4c2482bd948adf6937fb.png" alt="The mapping process of series to chunks data files."></p>
+</li>
+</ul>
+<h3 id="usage">Usage</h3>
+<p>Prometheus goes to load data meta-information into memory when it starts. There are two main parts.</p>
+<ul>
+<li>
+<p>meta information about the block, most notably mint/maxt, which is used to determine if a query needs to see the current block file, and later to open the chunks file as mmap</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// open all blocks
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="nx">bDirs</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">blockDirs</span><span class="p">(</span><span class="nx">dir</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">bDir</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">bDirs</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="nx">meta</span><span class="p">,</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nf">readMetaFile</span><span class="p">(</span><span class="nx">bDir</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="c1">// See if we already have the block in memory or open it otherwise.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="nx">block</span><span class="p">,</span> <span class="nx">open</span> <span class="o">:=</span> <span class="nf">getBlock</span><span class="p">(</span><span class="nx">loaded</span><span class="p">,</span> <span class="nx">meta</span><span class="p">.</span><span class="nx">ULID</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="k">if</span> <span class="p">!</span><span class="nx">open</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">block</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">OpenBlock</span><span class="p">(</span><span class="nx">l</span><span class="p">,</span> <span class="nx">bDir</span><span class="p">,</span> <span class="nx">chunkPool</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">corrupted</span><span class="p">[</span><span class="nx">meta</span><span class="p">.</span><span class="nx">ULID</span><span class="p">]</span> <span class="p">=</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">        <span class="k">continue</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="nx">blocks</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">blocks</span><span class="p">,</span> <span class="nx">block</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="c1">// open chunk files
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">fn</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">files</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="nx">f</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">fileutil</span><span class="p">.</span><span class="nf">OpenMmapFile</span><span class="p">(</span><span class="nx">fn</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">tsdb_errors</span><span class="p">.</span><span class="nf">NewMulti</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">errors</span><span class="p">.</span><span class="nf">Wrap</span><span class="p">(</span><span class="nx">err</span><span class="p">,</span> <span class="s">&#34;mmap files&#34;</span><span class="p">),</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">tsdb_errors</span><span class="p">.</span><span class="nf">CloseAll</span><span class="p">(</span><span class="nx">cs</span><span class="p">),</span>
+</span></span><span class="line"><span class="cl">    <span class="p">).</span><span class="nf">Err</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="nx">cs</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">cs</span><span class="p">,</span> <span class="nx">f</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="nx">bs</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">bs</span><span class="p">,</span> <span class="nf">realByteSlice</span><span class="p">(</span><span class="nx">f</span><span class="p">.</span><span class="nf">Bytes</span><span class="p">()))</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div></li>
+<li>
+<p>The indexing information corresponding to the block is mainly inverted indexing. Since the postings corresponding to a single label can be very large, Prometheus does not load the full number of postings, but every 32, to reduce memory pressure. And make sure that the first and last one must be loaded, and use a similar way to jump table for posting location when querying.</p>
+<ul>
+<li>
+<p>The following code is the logic to read in the postings when the DB is started.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// For the postings offset table we keep every label name but only every nth
+</span></span></span><span class="line"><span class="cl"><span class="c1">// label value (plus the first and last one), to save memory.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="nf">ReadOffsetTable</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">b</span><span class="p">,</span> <span class="nx">r</span><span class="p">.</span><span class="nx">toc</span><span class="p">.</span><span class="nx">PostingsTable</span><span class="p">,</span> <span class="kd">func</span><span class="p">(</span><span class="nx">key</span> <span class="p">[]</span><span class="kt">string</span><span class="p">,</span> <span class="nx">_</span> <span class="kt">uint64</span><span class="p">,</span> <span class="nx">off</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">postings</span><span class="p">[</span><span class="nx">key</span><span class="p">[</span><span class="mi">0</span><span class="p">]];</span> <span class="p">!</span><span class="nx">ok</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// Next label name.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">r</span><span class="p">.</span><span class="nx">postings</span><span class="p">[</span><span class="nx">key</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="p">=</span> <span class="p">[]</span><span class="nx">postingOffset</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">lastKey</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// Always include last value for each label name.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="nx">r</span><span class="p">.</span><span class="nx">postings</span><span class="p">[</span><span class="nx">lastKey</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">postings</span><span class="p">[</span><span class="nx">lastKey</span><span class="p">[</span><span class="mi">0</span><span class="p">]],</span> <span class="nx">postingOffset</span><span class="p">{</span><span class="nx">value</span><span class="p">:</span> <span class="nx">lastKey</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="nx">off</span><span class="p">:</span> <span class="nx">lastOff</span><span class="p">})</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">lastKey</span> <span class="p">=</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">valueCount</span> <span class="p">=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="k">if</span> <span class="nx">valueCount</span><span class="o">%</span><span class="mi">32</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">r</span><span class="p">.</span><span class="nx">postings</span><span class="p">[</span><span class="nx">key</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">postings</span><span class="p">[</span><span class="nx">key</span><span class="p">[</span><span class="mi">0</span><span class="p">]],</span> <span class="nx">postingOffset</span><span class="p">{</span><span class="nx">value</span><span class="p">:</span> <span class="nx">key</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="nx">off</span><span class="p">:</span> <span class="nx">off</span><span class="p">})</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">lastKey</span> <span class="p">=</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">lastKey</span> <span class="p">=</span> <span class="nx">key</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">lastOff</span> <span class="p">=</span> <span class="nx">off</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="nx">valueCount</span><span class="o">++</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">if</span> <span class="nx">lastKey</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="nx">r</span><span class="p">.</span><span class="nx">postings</span><span class="p">[</span><span class="nx">lastKey</span><span class="p">[</span><span class="mi">0</span><span class="p">]]</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">postings</span><span class="p">[</span><span class="nx">lastKey</span><span class="p">[</span><span class="mi">0</span><span class="p">]],</span> <span class="nx">postingOffset</span><span class="p">{</span><span class="nx">value</span><span class="p">:</span> <span class="nx">lastKey</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="nx">off</span><span class="p">:</span> <span class="nx">lastOff</span><span class="p">})</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div></li>
+<li>
+<p>The following code is the logic for querying postings based on label, the full [Postings method] of index can be seen (<a href="https://github.com/prometheus/prometheus/blob/bda05a23ada314a0b9806a362da39b7a1a4e04c3/tsdb/index/index.go#L1555">https://github.com/prometheus/prometheus/blob/bda05a23ada314a0b9806a362da39b7a1a4e04c3/tsdb/index/index.go#L1555</a>).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="nx">e</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">postings</span><span class="p">[</span><span class="nx">name</span><span class="p">]</span> <span class="c1">// name 为 label key
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">if</span> <span class="p">!</span><span class="nx">ok</span> <span class="o">||</span> <span class="nb">len</span><span class="p">(</span><span class="nx">values</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span> <span class="c1">// values 为当前需要查询的 label values
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">return</span> <span class="nf">EmptyPostings</span><span class="p">(),</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nx">res</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="nx">Postings</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="nb">len</span><span class="p">(</span><span class="nx">values</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"><span class="nx">skip</span> <span class="o">:=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl"><span class="nx">valueIndex</span> <span class="o">:=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl"><span class="k">for</span> <span class="nx">valueIndex</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">values</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="nx">values</span><span class="p">[</span><span class="nx">valueIndex</span><span class="p">]</span> <span class="p">&lt;</span> <span class="nx">e</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nx">value</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="c1">// Discard values before the start.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="nx">valueIndex</span><span class="o">++</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="k">for</span> <span class="nx">valueIndex</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">values</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="nx">value</span> <span class="o">:=</span> <span class="nx">values</span><span class="p">[</span><span class="nx">valueIndex</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// 用二分查找，找到当前 value 在 postings 中的位置
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="nx">i</span> <span class="o">:=</span> <span class="nx">sort</span><span class="p">.</span><span class="nf">Search</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">e</span><span class="p">),</span> <span class="kd">func</span><span class="p">(</span><span class="nx">i</span> <span class="kt">int</span><span class="p">)</span> <span class="kt">bool</span> <span class="p">{</span> <span class="k">return</span> <span class="nx">e</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">value</span> <span class="o">&gt;=</span> <span class="nx">value</span> <span class="p">})</span>
+</span></span><span class="line"><span class="cl"><span class="k">if</span> <span class="nx">i</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="nx">e</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// We&#39;re past the end.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">break</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="k">if</span> <span class="nx">i</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="nx">e</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">value</span> <span class="o">!=</span> <span class="nx">value</span> <span class="p">{</span>  <span class="c1">// postings 中没有该 value，需要用前面一个来在文件中搜索
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// Need to look from previous entry.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">i</span><span class="o">--</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="c1">// Don&#39;t Crc32 the entire postings offset table, this is very slow
+</span></span></span><span class="line"><span class="cl"><span class="c1">// so hope any issues were caught at startup.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="nx">d</span> <span class="o">:=</span> <span class="nx">encoding</span><span class="p">.</span><span class="nf">NewDecbufAt</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">b</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">toc</span><span class="p">.</span><span class="nx">PostingsTable</span><span class="p">),</span> <span class="kc">nil</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="nx">d</span><span class="p">.</span><span class="nf">Skip</span><span class="p">(</span><span class="nx">e</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">off</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Iterate on the offset table.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">var</span> <span class="nx">postingsOff</span> <span class="kt">uint64</span> <span class="c1">// The offset into the postings table.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">for</span> <span class="nx">d</span><span class="p">.</span><span class="nf">Err</span><span class="p">()</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// ... skip 逻辑省略
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">v</span> <span class="o">:=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">UvarintBytes</span><span class="p">()</span>       <span class="c1">// Label value.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">postingsOff</span> <span class="p">=</span> <span class="nx">d</span><span class="p">.</span><span class="nf">Uvarint64</span><span class="p">()</span> <span class="c1">// Offset.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">for</span> <span class="nb">string</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span> <span class="o">&gt;=</span> <span class="nx">value</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nb">string</span><span class="p">(</span><span class="nx">v</span><span class="p">)</span> <span class="o">==</span> <span class="nx">value</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="c1">// Read from the postings table.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>            <span class="nx">d2</span> <span class="o">:=</span> <span class="nx">encoding</span><span class="p">.</span><span class="nf">NewDecbufAt</span><span class="p">(</span><span class="nx">r</span><span class="p">.</span><span class="nx">b</span><span class="p">,</span> <span class="nb">int</span><span class="p">(</span><span class="nx">postingsOff</span><span class="p">),</span> <span class="nx">castagnoliTable</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">_</span><span class="p">,</span> <span class="nx">p</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">r</span><span class="p">.</span><span class="nx">dec</span><span class="p">.</span><span class="nf">Postings</span><span class="p">(</span><span class="nx">d2</span><span class="p">.</span><span class="nf">Get</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">res</span> <span class="p">=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">res</span><span class="p">,</span> <span class="nx">p</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">valueIndex</span><span class="o">++</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nx">valueIndex</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="nx">values</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">break</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">value</span> <span class="p">=</span> <span class="nx">values</span><span class="p">[</span><span class="nx">valueIndex</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">i</span><span class="o">+</span><span class="mi">1</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="nx">e</span><span class="p">)</span> <span class="o">||</span> <span class="nx">value</span> <span class="o">&gt;=</span> <span class="nx">e</span><span class="p">[</span><span class="nx">i</span><span class="o">+</span><span class="mi">1</span><span class="p">].</span><span class="nx">value</span> <span class="o">||</span> <span class="nx">valueIndex</span> <span class="o">==</span> <span class="nb">len</span><span class="p">(</span><span class="nx">values</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// Need to go to a later postings offset entry, if there is one.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="k">break</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div></li>
+</ul>
+</li>
+</ul>
+<h2 id="memory-structures">Memory Structures</h2>
+<p>Blocks are divided into two main categories in the Prometheus implementation.</p>
+<ul>
+<li>
+<p>The one currently being written, called head. when more than 2 hours or more than 120 points have elapsed, head writes the chunk to local disk and uses mmap to map it to memory, where it is stored in mmappedChunk below.</p>
+</li>
+<li>
+<p>History is read-only, stored in an array</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">DB</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">blocks</span> <span class="p">[]</span><span class="o">*</span><span class="nx">Block</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">head</span> <span class="o">*</span><span class="nx">Head</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// ... 忽略其他字段
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Block 内的主要字段是 IndexReader，其内部主要是 postings，即倒排索引
+</span></span></span><span class="line"><span class="cl"><span class="c1">// Map of LabelName to a list of some LabelValues&#39;s position in the offset table.
+</span></span></span><span class="line"><span class="cl"><span class="c1">// The first and last values for each name are always present.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="nx">postings</span> <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">][]</span><span class="nx">postingOffset</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">postingOffset</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">value</span> <span class="kt">string</span> <span class="c1">// label value
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">off</span>   <span class="kt">int</span>    <span class="c1">// posting 在对于文件中的 offset
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>As described in the disk structure above, the postingOffset is not loaded in full, but every 32nd.</p>
+</li>
+</ul>
+<h3 id="head">Head</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">Head</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">postings</span> <span class="o">*</span><span class="nx">index</span><span class="p">.</span><span class="nx">MemPostings</span> <span class="c1">// Postings lists for terms.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// All series addressable by their ID or hash.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">series</span> <span class="o">*</span><span class="nx">stripeSeries</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// ... 忽略其他字段
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">MemPostings</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">mtx</span>     <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">m</span>       <span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">]</span><span class="kd">map</span><span class="p">[</span><span class="kt">string</span><span class="p">][]</span><span class="kt">uint64</span>  <span class="c1">// label key -&gt; label value -&gt; posting lists
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">ordered</span> <span class="kt">bool</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><ul>
+<li>
+<p>MemPostings are index structures in Head, unlike Block&rsquo;s postingOffset, posting is loaded in full, after all, Head holds smaller data and puts less pressure on memory.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">stripeSeries</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">size</span>                    <span class="kt">int</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">series</span>                  <span class="p">[]</span><span class="kd">map</span><span class="p">[</span><span class="kt">uint64</span><span class="p">]</span><span class="o">*</span><span class="nx">memSeries</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">hashes</span>                  <span class="p">[]</span><span class="nx">seriesHashmap</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">locks</span>                   <span class="p">[]</span><span class="nx">stripeLock</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">seriesLifecycleCallback</span> <span class="nx">SeriesLifecycleCallback</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">memSeries</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">sync</span><span class="p">.</span><span class="nx">RWMutex</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">mmappedChunks</span> <span class="p">[]</span><span class="o">*</span><span class="nx">mmappedChunk</span> <span class="c1">// 只读
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">headChunk</span>     <span class="o">*</span><span class="nx">memChunk</span> <span class="c1">// 读写
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="o">......</span> <span class="c1">// 省略其他字段
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">mmappedChunk</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// 数据文件在磁盘上的位置，即上文中的 series ref
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">ref</span>              <span class="kt">uint64</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">numSamples</span>       <span class="kt">uint16</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">minTime</span><span class="p">,</span> <span class="nx">maxTime</span> <span class="kt">int64</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div></li>
+<li>
+<p><a href="https://github.com/prometheus/prometheus/blob/bda05a23ada314a0b9806a362da39b7a1a4e04c3/tsdb/head.go#L1861">stripeSeries</a> is the core structure of the comparison The key of the series field is the timeline, which is generated by <a href="https://gitee.com/mirrors/prometheus/blob/bda05a23ada314a0b9806a362da39b7a1a4e04c3/tsdb/head.go#L1771">self-incrementing</a>. The value is memSeries, which has chunks for storing specific data, and uses segmented locking to reduce lock competition.</p>
+</li>
+</ul>
+<h3 id="usage-1">Usage</h3>
+<p>For a query, the approximate steps involved are</p>
+<ol>
+<li>find out the timeline involved according to the label, and then perform a set operation to find the timeline that matches the requirements according to the filter type</li>
+<li>according to the timeline information and time range information, go to the block to query the data that meet the conditions</li>
+</ol>
+<p>In the first step it is mainly done in the <a href="https://github.com/prometheus/prometheus/blob/bda05a23ada314a0b9806a362da39b7a1a4e04c3/tsdb/querier.go#L221">PostingsForMatchers</a> function, there are several optimization points.</p>
+<ul>
+<li>
+<p>For the filter that takes the inverse ( <code>! =</code> <code>! ~</code>), convert it to the equal form, so that the timeline corresponding to the equal form will often be less than the effect of the inverse, and finally, when merging, subtract the inverse timeline. See: <a href="https://github.com/prometheus-junkyard/tsdb/pull/572">Be smarter in how we look at matchers. #572</a></p>
+</li>
+<li>
+<p>When merging the timelines of different labels, we take advantage of the ordered nature of the timelines and use a mergesort-like approach to <a href="https://github.com/prometheus-junkyard/tsdb/pull/616">inert merge</a>, roughly as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">intersectPostings</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="nx">arr</span> <span class="p">[]</span><span class="nx">Postings</span> <span class="c1">// 需要合并的时间线数组
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="nx">cur</span> <span class="kt">uint64</span> <span class="c1">// 当前的时间线
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">it</span> <span class="o">*</span><span class="nx">intersectPostings</span><span class="p">)</span> <span class="nf">doNext</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="nx">Loop</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl"><span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">p</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">it</span><span class="p">.</span><span class="nx">arr</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">!</span><span class="nx">p</span><span class="p">.</span><span class="nf">Seek</span><span class="p">(</span><span class="nx">it</span><span class="p">.</span><span class="nx">cur</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="kc">false</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nf">At</span><span class="p">()</span> <span class="p">&gt;</span> <span class="nx">it</span><span class="p">.</span><span class="nx">cur</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">it</span><span class="p">.</span><span class="nx">cur</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">At</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">            <span class="k">continue</span> <span class="nx">Loop</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="kc">true</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">it</span> <span class="o">*</span><span class="nx">intersectPostings</span><span class="p">)</span> <span class="nf">Next</span><span class="p">()</span> <span class="kt">bool</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">p</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">it</span><span class="p">.</span><span class="nx">arr</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">!</span><span class="nx">p</span><span class="p">.</span><span class="nf">Next</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="kc">false</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">p</span><span class="p">.</span><span class="nf">At</span><span class="p">()</span> <span class="p">&gt;</span> <span class="nx">it</span><span class="p">.</span><span class="nx">cur</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">it</span><span class="p">.</span><span class="nx">cur</span> <span class="p">=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">At</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="k">return</span> <span class="nx">it</span><span class="p">.</span><span class="nf">doNext</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div></li>
+</ul>
+<p>After finding out the chunk file and offset information in the first step, the second step of fetching data is relatively simple, just use mmap to read data directly, which indirectly uses the OS page cache to do caching, and does not need to implement data structures such as Buffer Pool itself.</p>
+<h2 id="summary">Summary</h2>
+<p>The above analysis has generally analyzed the storage structure and query process of Prometheus, but there are some details that have not been introduced, such as the use of dictionary compression in order to save memory usage, but this does not prevent the reader from understanding the principle.</p>
+<p>In addition, Prometheus default 2 hours a Block is not friendly to large time range queries, so the background will compaction of regular chunk files, the merged file size is <code>min(31d, retention_time * 0.1)</code>, related details will be introduced separately later when there is a chance.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/prometheus/">prometheus</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-05/emacs/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Emacs Getting Started Guide: Why &amp; How</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-05/design-a-thread-pool/">
+            <span class="next-text nav-default">How to design a thread pool in C&#43;&#43;</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
