@@ -1,0 +1,855 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Celery/Kombu MongoDB connection exception investigation log - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Explore the issue where putting a MongoDB node&#39;s storage network ifdown can cause JobCenter to hang." /><meta name="keywords" content="Celery/Kombu, Mongodb, JobCenter hang" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-05/kombu-mongodb-exception/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Celery/Kombu MongoDB connection exception investigation log" />
+<meta property="og:description" content="Explore the issue where putting a MongoDB node&#39;s storage network ifdown can cause JobCenter to hang." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-05/kombu-mongodb-exception/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-05-10T10:16:12+08:00" />
+<meta property="article:modified_time" content="2022-05-10T10:16:12+08:00" />
+
+<meta itemprop="name" content="Celery/Kombu MongoDB connection exception investigation log">
+<meta itemprop="description" content="Explore the issue where putting a MongoDB node&#39;s storage network ifdown can cause JobCenter to hang."><meta itemprop="datePublished" content="2022-05-10T10:16:12+08:00" />
+<meta itemprop="dateModified" content="2022-05-10T10:16:12+08:00" />
+<meta itemprop="wordCount" content="1900">
+<meta itemprop="keywords" content="kombu,Mongodb," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Celery/Kombu MongoDB connection exception investigation log"/>
+<meta name="twitter:description" content="Explore the issue where putting a MongoDB node&#39;s storage network ifdown can cause JobCenter to hang."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Celery/Kombu MongoDB connection exception investigation log</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-05-10 10:16:12 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1900 words </span>
+          <span class="more-meta"> 9 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#background">Background</a></li>
+        <li><a href="#survey">Survey</a>
+          <ul>
+            <li><a href="#celery">Celery</a></li>
+            <li><a href="#kombu">Kombu</a></li>
+            <li><a href="#celery-and-kombu-parameter-passing">Celery and Kombu parameter passing</a></li>
+          </ul>
+        </li>
+        <li><a href="#celery-change-background">Celery change background</a></li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="background">Background</h2>
+<p>The product component JobCenter uses Celery to implement an asynchronous task center, running both job-center-worker (celery worker) and job-center-scheduler (celery beat) processes, using MongoDB as the Backend to store messages, etc. (Celery has officially stated that it no longer maintains support for MongoDB). MongoDB is configured with ReplicaSet to ensure high availability.</p>
+<p>Recently, we encountered the problem of <a href="(https://github.com/celery/kombu/issues/1504#event-6304977800)">no free channel ids</a> in Celery/Kombu. After troubleshooting, the issue was solved in this <a href="https://github.com/celery/kombu/commit/1c2b9723851db3caa913b8da19d6ccad447f3568">PR</a>. After considering the workload and maintainability of cherry-pick, we finally upgraded the celery and kombu components in the product from 3.x to 4.x.</p>
+<p>A test colleague recently found that <code>ifdown</code> of the storage network of a MongoDB node causes JobCenter to hang when conducting reliability tests.</p>
+<h2 id="survey">Survey</h2>
+<h3 id="celery">Celery</h3>
+<p>First try to reproduce the problem, first try ifdown Primary node storage network, the phenomenon is reproduced; try ifdown Secondary node storage network, can not be reproduced; try to stop MongoDB service instead of ifdown, Primary or Secondary can not be reproduced.
+Tried to stop MongoDB service instead of ifdown, neither Primary nor Secondary could be reproduced. It is presumed to be related to MongoDB connection processing.</p>
+<p>Observe the logs of the phenomenon recovery, when the storage network is abnormal, there is no output in the logs. After the storage network is back to normal, we can see that Celery logs an exception when trying to connect to the Broker (MongoDB) and tries to reconnect.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">[2022-05-07 10:13:01,362: WARNING/MainProcess] consumer: Connection to broker lost. Trying to re-establish the connection...
+</span></span><span class="line"><span class="cl">Traceback (most recent call last):
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/celery/worker/consumer/consumer.py&#34;, line 318, in start
+</span></span><span class="line"><span class="cl">    blueprint.start(self)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/celery/bootsteps.py&#34;, line 119, in start
+</span></span><span class="line"><span class="cl">    step.start(parent)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/celery/worker/consumer/consumer.py&#34;, line 596, in start
+</span></span><span class="line"><span class="cl">    c.loop(*c.loop_args())
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/celery/worker/loops.py&#34;, line 121, in synloop
+</span></span><span class="line"><span class="cl">    connection.drain_events(timeout=2.0)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/kombu/connection.py&#34;, line 315, in drain_events
+</span></span><span class="line"><span class="cl">    return self.transport.drain_events(self.connection, **kwargs)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/kombu/transport/virtual/base.py&#34;, line 963, in drain_events
+</span></span><span class="line"><span class="cl">    get(self._deliver, timeout=timeout)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/kombu/utils/scheduling.py&#34;, line 56, in get
+</span></span><span class="line"><span class="cl">    return self.fun(resource, callback, **kwargs)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/kombu/transport/virtual/base.py&#34;, line 1001, in _drain_channel
+</span></span><span class="line"><span class="cl">    return channel.drain_events(callback=callback, timeout=timeout)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/kombu/transport/virtual/base.py&#34;, line 745, in drain_events
+</span></span><span class="line"><span class="cl">    return self._poll(self.cycle, callback, timeout=timeout)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/kombu/transport/virtual/base.py&#34;, line 402, in _poll
+</span></span><span class="line"><span class="cl">    return cycle.get(callback)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/kombu/utils/scheduling.py&#34;, line 56, in get
+</span></span><span class="line"><span class="cl">    return self.fun(resource, callback, **kwargs)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/kombu/transport/virtual/base.py&#34;, line 405, in _get_and_deliver
+</span></span><span class="line"><span class="cl">    message = self._get(queue)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib/python2.7/site-packages/kombu/transport/mongodb.py&#34;, line 141, in _get
+</span></span><span class="line"><span class="cl">    remove=True,
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib64/python2.7/site-packages/pymongo/collection.py&#34;, line 2315, in find_and_modify
+</span></span><span class="line"><span class="cl">    allowable_errors=[_NO_OBJ_ERROR])
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib64/python2.7/site-packages/pymongo/collection.py&#34;, line 205, in _command
+</span></span><span class="line"><span class="cl">    read_concern=read_concern)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib64/python2.7/site-packages/pymongo/pool.py&#34;, line 218, in command
+</span></span><span class="line"><span class="cl">    self._raise_connection_failure(error)
+</span></span><span class="line"><span class="cl">  File &#34;/usr/lib64/python2.7/site-packages/pymongo/pool.py&#34;, line 346, in _raise_connection_failure
+</span></span><span class="line"><span class="cl">    raise error
+</span></span><span class="line"><span class="cl">AutoReconnect: connection closed
+</span></span><span class="line"><span class="cl">[2022-05-07 10:13:01,363: WARNING/MainProcess] Restoring 1 unacknowledged message(s)
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The corresponding Celery code is in worker/consumer/consumer.py, and Blueprint is the Celery startup portal. You can see that exception handling is done in the <code>blueprint.start(self)</code> stage, triggering reconnection for <code>self.connection_errors</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-py" data-lang="py"><span class="line"><span class="cl"><span class="n">CONNECTION_RETRY</span> <span class="o">=</span> <span class="s2">&#34;&#34;&#34;</span><span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="s2">consumer: Connection to broker lost. </span><span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="s2">Trying to re-establish the connection...</span><span class="se">\
+</span></span></span><span class="line"><span class="cl"><span class="se"></span><span class="s2">&#34;&#34;&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="o">...</span>
+</span></span><span class="line"><span class="cl"><span class="k">def</span> <span class="nf">start</span><span class="p">(</span><span class="bp">self</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">    <span class="n">blueprint</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">blueprint</span>
+</span></span><span class="line"><span class="cl">    <span class="k">while</span> <span class="n">blueprint</span><span class="o">.</span><span class="n">state</span> <span class="o">!=</span> <span class="n">CLOSE</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">        <span class="n">maybe_shutdown</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">restart_count</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">            <span class="k">try</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">                <span class="bp">self</span><span class="o">.</span><span class="n">_restart_state</span><span class="o">.</span><span class="n">step</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">            <span class="k">except</span> <span class="n">RestartFreqExceeded</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">                <span class="n">crit</span><span class="p">(</span><span class="s1">&#39;Frequent restarts detected: </span><span class="si">%r</span><span class="s1">&#39;</span><span class="p">,</span> <span class="n">exc</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                <span class="n">sleep</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="bp">self</span><span class="o">.</span><span class="n">restart_count</span> <span class="o">+=</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">        <span class="k">try</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">            <span class="n">blueprint</span><span class="o">.</span><span class="n">start</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="k">except</span> <span class="bp">self</span><span class="o">.</span><span class="n">connection_errors</span> <span class="k">as</span> <span class="n">exc</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">            <span class="c1"># If we&#39;re not retrying connections, no need to catch</span>
+</span></span><span class="line"><span class="cl">            <span class="c1"># connection errors</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="ow">not</span> <span class="bp">self</span><span class="o">.</span><span class="n">app</span><span class="o">.</span><span class="n">conf</span><span class="o">.</span><span class="n">broker_connection_retry</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">                <span class="k">raise</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="nb">isinstance</span><span class="p">(</span><span class="n">exc</span><span class="p">,</span> <span class="ne">OSError</span><span class="p">)</span> <span class="ow">and</span> <span class="n">exc</span><span class="o">.</span><span class="n">errno</span> <span class="o">==</span> <span class="n">errno</span><span class="o">.</span><span class="n">EMFILE</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">                <span class="k">raise</span>  <span class="c1"># Too many open files</span>
+</span></span><span class="line"><span class="cl">            <span class="n">maybe_shutdown</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="n">blueprint</span><span class="o">.</span><span class="n">state</span> <span class="o">!=</span> <span class="n">CLOSE</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">                <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">connection</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">                    <span class="bp">self</span><span class="o">.</span><span class="n">on_connection_error_after_connected</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                <span class="k">else</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">                    <span class="bp">self</span><span class="o">.</span><span class="n">on_connection_error_before_connected</span><span class="p">(</span><span class="n">exc</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                <span class="bp">self</span><span class="o">.</span><span class="n">on_close</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">                <span class="n">blueprint</span><span class="o">.</span><span class="n">restart</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">def</span> <span class="nf">on_connection_error_before_connected</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">    <span class="n">error</span><span class="p">(</span><span class="n">CONNECTION_ERROR</span><span class="p">,</span> <span class="bp">self</span><span class="o">.</span><span class="n">conninfo</span><span class="o">.</span><span class="n">as_uri</span><span class="p">(),</span> <span class="n">exc</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">          <span class="s1">&#39;Trying to reconnect...&#39;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">def</span> <span class="nf">on_connection_error_after_connected</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">exc</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">    <span class="n">warn</span><span class="p">(</span><span class="n">CONNECTION_RETRY</span><span class="p">,</span> <span class="n">exc_info</span><span class="o">=</span><span class="kc">True</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="k">try</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">        <span class="bp">self</span><span class="o">.</span><span class="n">connection</span><span class="o">.</span><span class="n">collect</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">    <span class="k">except</span> <span class="ne">Exception</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">        <span class="k">pass</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p><code>self.connection_errors</code> corresponds to what is actually defined by Transport in Kombu, which can be viewed in <code>kombu/kombu/transport/mongodb.py</code>. In the current version, it is defined as <code>pymongo.errors.ConnectionFailure</code>. The common network connection exceptions <code>AutoReconnect</code> or <code>NetworkTimeout</code> in pymongo are inherited from <code>ConnectionFailure</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-py" data-lang="py"><span class="line"><span class="cl"><span class="k">class</span> <span class="nc">Transport</span><span class="p">(</span><span class="n">virtual</span><span class="o">.</span><span class="n">Transport</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Channel</span> <span class="o">=</span> <span class="n">Channel</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">can_parse_url</span> <span class="o">=</span> <span class="kc">True</span>
+</span></span><span class="line"><span class="cl">    <span class="n">polling_interval</span> <span class="o">=</span> <span class="mi">1</span>
+</span></span><span class="line"><span class="cl">    <span class="n">default_port</span> <span class="o">=</span> <span class="n">DEFAULT_PORT</span>
+</span></span><span class="line"><span class="cl">    <span class="n">connection_errors</span> <span class="o">=</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl">        <span class="n">virtual</span><span class="o">.</span><span class="n">Transport</span><span class="o">.</span><span class="n">connection_errors</span> <span class="o">+</span> <span class="p">(</span><span class="n">errors</span><span class="o">.</span><span class="n">ConnectionFailure</span><span class="p">,</span> <span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">)</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>As of now, Celery can correctly handle exceptions reported by kombu, but when storing network exceptions, Kombu does not throw exceptions, so the problem investigation shifts from Celery to Kombu.</p>
+<h3 id="kombu">Kombu</h3>
+<p>Look at MongoDB Transport&rsquo;s handling of the connection creation part. The code execution path is: <code>client</code> -&gt; <code>_create_client</code> -&gt; <code>_open</code> -&gt; <code>_parse_uri</code>, where <code>_open</code> is the actual connection creation process and the parameters used for the connection are returned in <code>_parse_uri</code>. <code>_parse_uri</code> eventually calls <code>pymongo.uri_parser.parse_uri</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-py" data-lang="py"><span class="line"><span class="cl"><span class="k">def</span> <span class="nf">_open</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="s1">&#39;mongodb://&#39;</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">    <span class="n">hostname</span><span class="p">,</span> <span class="n">dbname</span><span class="p">,</span> <span class="n">options</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_parse_uri</span><span class="p">(</span><span class="n">scheme</span><span class="o">=</span><span class="n">scheme</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">conf</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">_prepare_client_options</span><span class="p">(</span><span class="n">options</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="n">conf</span><span class="p">[</span><span class="s1">&#39;host&#39;</span><span class="p">]</span> <span class="o">=</span> <span class="n">hostname</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">env</span> <span class="o">=</span> <span class="n">_detect_environment</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="n">env</span> <span class="o">==</span> <span class="s1">&#39;gevent&#39;</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">        <span class="kn">from</span> <span class="nn">gevent</span> <span class="kn">import</span> <span class="n">monkey</span>
+</span></span><span class="line"><span class="cl">        <span class="n">monkey</span><span class="o">.</span><span class="n">patch_all</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">    <span class="k">elif</span> <span class="n">env</span> <span class="o">==</span> <span class="s1">&#39;eventlet&#39;</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">        <span class="kn">from</span> <span class="nn">eventlet</span> <span class="kn">import</span> <span class="n">monkey_patch</span>
+</span></span><span class="line"><span class="cl">        <span class="n">monkey_patch</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">mongoconn</span> <span class="o">=</span> <span class="n">MongoClient</span><span class="p">(</span><span class="o">**</span><span class="n">conf</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="n">database</span> <span class="o">=</span> <span class="n">mongoconn</span><span class="p">[</span><span class="n">dbname</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">version_str</span> <span class="o">=</span> <span class="n">mongoconn</span><span class="o">.</span><span class="n">server_info</span><span class="p">()[</span><span class="s1">&#39;version&#39;</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">    <span class="n">version</span> <span class="o">=</span> <span class="nb">tuple</span><span class="p">(</span><span class="nb">map</span><span class="p">(</span><span class="nb">int</span><span class="p">,</span> <span class="n">version_str</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;.&#39;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="n">version</span> <span class="o">&lt;</span> <span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="mi">3</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">        <span class="k">raise</span> <span class="n">VersionMismatch</span><span class="p">(</span><span class="n">E_SERVER_VERSION</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">version_str</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="k">elif</span> <span class="bp">self</span><span class="o">.</span><span class="n">ttl</span> <span class="ow">and</span> <span class="n">version</span> <span class="o">&lt;</span> <span class="p">(</span><span class="mi">2</span><span class="p">,</span> <span class="mi">2</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">        <span class="k">raise</span> <span class="n">VersionMismatch</span><span class="p">(</span><span class="n">E_NO_TTL_INDEXES</span><span class="o">.</span><span class="n">format</span><span class="p">(</span><span class="n">version_str</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="n">database</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">def</span> <span class="nf">_parse_uri</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="s1">&#39;mongodb://&#39;</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">    <span class="c1"># See mongodb uri documentation:</span>
+</span></span><span class="line"><span class="cl">    <span class="c1"># http://docs.mongodb.org/manual/reference/connection-string/</span>
+</span></span><span class="line"><span class="cl">    <span class="n">client</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">connection</span><span class="o">.</span><span class="n">client</span>
+</span></span><span class="line"><span class="cl">    <span class="n">hostname</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">hostname</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="ow">not</span> <span class="n">hostname</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">scheme</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">        <span class="n">hostname</span> <span class="o">=</span> <span class="n">scheme</span> <span class="o">+</span> <span class="n">hostname</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="ow">not</span> <span class="n">hostname</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">scheme</span><span class="p">):]:</span>
+</span></span><span class="line"><span class="cl">        <span class="n">hostname</span> <span class="o">+=</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_hostname</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="n">client</span><span class="o">.</span><span class="n">userid</span> <span class="ow">and</span> <span class="s1">&#39;@&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">hostname</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">        <span class="n">head</span><span class="p">,</span> <span class="n">tail</span> <span class="o">=</span> <span class="n">hostname</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;://&#39;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="n">credentials</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">userid</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="n">client</span><span class="o">.</span><span class="n">password</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">            <span class="n">credentials</span> <span class="o">+=</span> <span class="s1">&#39;:&#39;</span> <span class="o">+</span> <span class="n">client</span><span class="o">.</span><span class="n">password</span>
+</span></span><span class="line"><span class="cl">        <span class="n">hostname</span> <span class="o">=</span> <span class="n">head</span> <span class="o">+</span> <span class="s1">&#39;://&#39;</span> <span class="o">+</span> <span class="n">credentials</span> <span class="o">+</span> <span class="s1">&#39;@&#39;</span> <span class="o">+</span> <span class="n">tail</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">port</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">port</span> <span class="k">if</span> <span class="n">client</span><span class="o">.</span><span class="n">port</span> <span class="k">else</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_port</span>
+</span></span><span class="line"><span class="cl">    <span class="n">parsed</span> <span class="o">=</span> <span class="n">uri_parser</span><span class="o">.</span><span class="n">parse_uri</span><span class="p">(</span><span class="n">hostname</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="n">dbname</span> <span class="o">=</span> <span class="n">parsed</span><span class="p">[</span><span class="s1">&#39;database&#39;</span><span class="p">]</span> <span class="ow">or</span> <span class="n">client</span><span class="o">.</span><span class="n">virtual_host</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="n">dbname</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">        <span class="n">dbname</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">default_database</span>
+</span></span><span class="line"><span class="cl">    <span class="n">options</span> <span class="o">=</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="s1">&#39;auto_start_request&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">        <span class="s1">&#39;ssl&#39;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">ssl</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">        <span class="s1">&#39;connectTimeoutMS&#39;</span><span class="p">:</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="bp">self</span><span class="o">.</span><span class="n">connect_timeout</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                             <span class="k">if</span> <span class="bp">self</span><span class="o">.</span><span class="n">connect_timeout</span> <span class="k">else</span> <span class="kc">None</span><span class="p">),</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="n">options</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">parsed</span><span class="p">[</span><span class="s1">&#39;options&#39;</span><span class="p">])</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="n">hostname</span><span class="p">,</span> <span class="n">dbname</span><span class="p">,</span> <span class="n">options</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Suppose our connection parameters are <code>mongodb://192.168.1.1:27017,192.168.1.2:27017/yiran</code>, then the result parsed by <code>pymongo.uri_parser.parse_uri</code> will be: <code>{'username': None, 'nodelist ': [('192.168.1.1', 27017), ('192.168.1.2', 27017)], 'database': 'yiran', 'collection': None, 'password': None, 'options': {}}</code>.</p>
+<p>socketTimeoutMS In our environment, there are no options specified in the MongoDB URI, so <code>pymongo.uri_parser.parse_uri</code> results in <code>options</code> that are empty. The <code>options</code> used for the final connection are the options defined in <code>_parse_uri</code>, where the class variable <code>connect_timeout</code> is defined as None in Channel, so Kombu does not set <code>socketTimeoutMS</code> for the final MongoDB connection, and if it does not set <code>socketTimeoutMS</code>, the default is None and waits forever. When there is an exception in the network, the intuitive phenomenon will be hang.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-py" data-lang="py"><span class="line"><span class="cl"><span class="k">class</span> <span class="nc">Channel</span><span class="p">(</span><span class="n">virtual</span><span class="o">.</span><span class="n">Channel</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;&#34;&#34;MongoDB Channel.&#34;&#34;&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">supports_fanout</span> <span class="o">=</span> <span class="kc">True</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="c1"># Mutable container. Shared by all class instances</span>
+</span></span><span class="line"><span class="cl">    <span class="n">_fanout_queues</span> <span class="o">=</span> <span class="p">{}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="c1"># Options</span>
+</span></span><span class="line"><span class="cl">    <span class="n">ssl</span> <span class="o">=</span> <span class="kc">False</span>
+</span></span><span class="line"><span class="cl">    <span class="n">ttl</span> <span class="o">=</span> <span class="kc">False</span>
+</span></span><span class="line"><span class="cl">    <span class="n">connect_timeout</span> <span class="o">=</span> <span class="kc">None</span>
+</span></span><span class="line"><span class="cl">    <span class="n">capped_queue_size</span> <span class="o">=</span> <span class="mi">100000</span>
+</span></span><span class="line"><span class="cl">    <span class="n">calc_queue_size</span> <span class="o">=</span> <span class="kc">True</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h3 id="celery-and-kombu-parameter-passing">Celery and Kombu parameter passing</h3>
+<p>Now that we have observed that the connection parameters are not as expected, why did the previous 3.x version have no problem? Switching to the 3.x branch to see the corresponding code, we can see that the general logic is similar, regarding the handling of options, there is a line in 3.x: <code>options.update(client.transport_options)</code>, where the client is assigned at the beginning of the function, corresponding to <code>self. connection.client</code>, and <code>self.connection</code> is the parameter passed in by the Transport construct.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-py" data-lang="py"><span class="line"><span class="cl"><span class="k">def</span> <span class="nf">_parse_uri</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">scheme</span><span class="o">=</span><span class="s1">&#39;mongodb://&#39;</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">    <span class="c1"># See mongodb uri documentation:</span>
+</span></span><span class="line"><span class="cl">    <span class="c1"># http://docs.mongodb.org/manual/reference/connection-string/</span>
+</span></span><span class="line"><span class="cl">    <span class="n">client</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">connection</span><span class="o">.</span><span class="n">client</span>
+</span></span><span class="line"><span class="cl">    <span class="n">hostname</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">hostname</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="ow">not</span> <span class="n">hostname</span><span class="o">.</span><span class="n">startswith</span><span class="p">(</span><span class="n">scheme</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">        <span class="n">hostname</span> <span class="o">=</span> <span class="n">scheme</span> <span class="o">+</span> <span class="n">hostname</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="ow">not</span> <span class="n">hostname</span><span class="p">[</span><span class="nb">len</span><span class="p">(</span><span class="n">scheme</span><span class="p">):]:</span>
+</span></span><span class="line"><span class="cl">        <span class="n">hostname</span> <span class="o">+=</span> <span class="n">DEFAULT_HOST</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="n">client</span><span class="o">.</span><span class="n">userid</span> <span class="ow">and</span> <span class="s1">&#39;@&#39;</span> <span class="ow">not</span> <span class="ow">in</span> <span class="n">hostname</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">        <span class="n">head</span><span class="p">,</span> <span class="n">tail</span> <span class="o">=</span> <span class="n">hostname</span><span class="o">.</span><span class="n">split</span><span class="p">(</span><span class="s1">&#39;://&#39;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">credentials</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">userid</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="n">client</span><span class="o">.</span><span class="n">password</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">            <span class="n">credentials</span> <span class="o">+=</span> <span class="s1">&#39;:&#39;</span> <span class="o">+</span> <span class="n">client</span><span class="o">.</span><span class="n">password</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">hostname</span> <span class="o">=</span> <span class="n">head</span> <span class="o">+</span> <span class="s1">&#39;://&#39;</span> <span class="o">+</span> <span class="n">credentials</span> <span class="o">+</span> <span class="s1">&#39;@&#39;</span> <span class="o">+</span> <span class="n">tail</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">port</span> <span class="o">=</span> <span class="n">client</span><span class="o">.</span><span class="n">port</span> <span class="k">if</span> <span class="n">client</span><span class="o">.</span><span class="n">port</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span> <span class="k">else</span> <span class="n">DEFAULT_PORT</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">parsed</span> <span class="o">=</span> <span class="n">uri_parser</span><span class="o">.</span><span class="n">parse_uri</span><span class="p">(</span><span class="n">hostname</span><span class="p">,</span> <span class="n">port</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">dbname</span> <span class="o">=</span> <span class="n">parsed</span><span class="p">[</span><span class="s1">&#39;database&#39;</span><span class="p">]</span> <span class="ow">or</span> <span class="n">client</span><span class="o">.</span><span class="n">virtual_host</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="n">dbname</span> <span class="ow">in</span> <span class="p">(</span><span class="s1">&#39;/&#39;</span><span class="p">,</span> <span class="kc">None</span><span class="p">):</span>
+</span></span><span class="line"><span class="cl">        <span class="n">dbname</span> <span class="o">=</span> <span class="s1">&#39;kombu_default&#39;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">options</span> <span class="o">=</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="s1">&#39;auto_start_request&#39;</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">        <span class="s1">&#39;ssl&#39;</span><span class="p">:</span> <span class="n">client</span><span class="o">.</span><span class="n">ssl</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">        <span class="s1">&#39;connectTimeoutMS&#39;</span><span class="p">:</span> <span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="n">client</span><span class="o">.</span><span class="n">connect_timeout</span> <span class="o">*</span> <span class="mi">1000</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                             <span class="k">if</span> <span class="n">client</span><span class="o">.</span><span class="n">connect_timeout</span> <span class="k">else</span> <span class="kc">None</span><span class="p">),</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="n">options</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">client</span><span class="o">.</span><span class="n">transport_options</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="n">options</span><span class="o">.</span><span class="n">update</span><span class="p">(</span><span class="n">parsed</span><span class="p">[</span><span class="s1">&#39;options&#39;</span><span class="p">])</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="n">hostname</span><span class="p">,</span> <span class="n">dbname</span><span class="p">,</span> <span class="n">options</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p><code>connection</code> corresponds to <code>Connection</code> in Kombu, which hides Transport from the outside, and Celery establishes the connection during the initialization phase, calling the path <code>celery/app/base.py:Celery._connection</code> -&gt; <code>celery/ app/amqp.py:AMQP.Connection</code> -&gt; <code>kombu/connection.py:Connection</code> . The transfer parameter <code>transport_options</code> is the parameter configured in the Celery app declaration, and the specific configurable parameters can be found in the documentation: <a href="https://docs.celeryq.dev/en/stable/userguide/configuration.html">https://docs.celeryq.dev/en/stable/userguide/configuration.html</a>.</p>
+<p>In our scenario, the following parameters are declared.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-py" data-lang="py"><span class="line"><span class="cl"><span class="n">BROKER_TRANSPORT_OPTIONS</span> <span class="o">=</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;connect&#34;</span><span class="p">:</span> <span class="kc">False</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;maxPoolSize&#34;</span><span class="p">:</span> <span class="mi">5</span> <span class="k">if</span> <span class="s2">&#34;worker&#34;</span> <span class="ow">in</span> <span class="n">process_cmdline</span> <span class="k">else</span> <span class="mi">2</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;socketTimeoutMS&#34;</span><span class="p">:</span> <span class="mi">5000</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;connectTimeoutMS&#34;</span><span class="p">:</span> <span class="mi">5000</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;serverSelectionTimeoutMS&#34;</span><span class="p">:</span> <span class="mi">5000</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="s2">&#34;w&#34;</span><span class="p">:</span> <span class="mi">0</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>When Kombu uses MongoDB Transport, it will eventually create MongoDB connections with these parameters, so the phenomenon described in this question will not occur.</p>
+<h2 id="celery-change-background">Celery change background</h2>
+<p>@rmihael reported an issue: <a href="https://github.com/celery/celery/issues/1047">Celery events are not removed from MongoDB broker #1047</a>, indicating that after using Celery Flower (Celery monitoring component), the events in <code>messages</code> are not removed, resulting in a large amount of MongoDB storage space. The issue discusses the eventual decision to use MongoDB TTL to resolve this issue.</p>
+<p>In the Kombu 4.x development cycle, @daevaorn committed <a href="https://github.com/celery/kombu/pull/537">MongoDB TTL support and refactorings #537</a> to support MongoDB TTL, which contains a PR with The PR contains a number of TTL-unrelated commits and includes some refactoring, with the following commits.</p>
+<ul>
+<li>Complete unit tests suit for MongoDB transport</li>
+<li>Optional TTL support for MongoDB transport. AMQP TTL headers: x-messa…</li>
+<li>Rearrange methods at MongoDB channel class</li>
+<li>Another MongoDB transport clean up and refactor. Use of transport opt…</li>
+<li>Opt-out for queue size calculation</li>
+<li>Use natural sort for more FIFO semantic</li>
+<li>Fix docstrings</li>
+</ul>
+<p><code>Optional TTL support for MongoDB transport.</code> is the most critical change, ignore the TTL changes and focus on the changes to establish MongoDB connections. In the <code>Channel</code> class, some new class variables have been added to identify the current configuration, in <code>_parse_uri</code>, SSL,connectTImeoutMS has been replaced with <code>self</code> from <code>client</code>, and <code>options.update(client.transport_ options)</code> has been removed. options)<code>. The removal of</code>options.update(client.transport_options)` is the key to this problem.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-diff" data-lang="diff"><span class="line"><span class="cl"> class Channel(virtual.Channel):
+</span></span><span class="line"><span class="cl">     _client = None
+</span></span><span class="line"><span class="cl">     supports_fanout = True
+</span></span><span class="line"><span class="cl"><span class="gi">+
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    # Mutable containers. Shared by all class instances
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span>     _fanout_queues = {}
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="gi">+    # Options
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    connect_timeout = None
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    ssl = False
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    capped_queue_size = 100000
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    ttl = False
+</span></span></span><span class="line"><span class="cl"><span class="gi">+
+</span></span></span><span class="line"><span class="cl"><span class="gi">+    from_transport_options = (
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        virtual.Channel.from_transport_options
+</span></span></span><span class="line"><span class="cl"><span class="gi">+        + (&#39;connect_timeout&#39;, &#39;ssl&#39;, &#39;ttl&#39;, &#39;capped_queue_size&#39;))
+</span></span></span><span class="line"><span class="cl"><span class="gi">+
+</span></span></span><span class="line"><span class="cl"><span class="gi">+
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span>     def __init__(self, *vargs, **kwargs):
+</span></span><span class="line"><span class="cl">         super(Channel, self).__init__(*vargs, **kwargs)
+</span></span><span class="line"><span class="cl">         ...
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">         ...
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    def _parse_uri(self, scheme=&#39;mongodb://&#39;):
+</span></span><span class="line"><span class="cl">        ...
+</span></span><span class="line"><span class="cl">         options = {
+</span></span><span class="line"><span class="cl">             &#39;auto_start_request&#39;: True,
+</span></span><span class="line"><span class="cl"><span class="gd">-            &#39;ssl&#39;: client.ssl,
+</span></span></span><span class="line"><span class="cl"><span class="gd">-            &#39;connectTimeoutMS&#39;: (int(client.connect_timeout * 1000)
+</span></span></span><span class="line"><span class="cl"><span class="gd">-                                 if client.connect_timeout else None),
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span><span class="gi">+            &#39;ssl&#39;: self.ssl,
+</span></span></span><span class="line"><span class="cl"><span class="gi">+            &#39;connectTimeoutMS&#39;: (int(self.connect_timeout * 1000)
+</span></span></span><span class="line"><span class="cl"><span class="gi">+                                 if self.connect_timeout else None),
+</span></span></span><span class="line"><span class="cl"><span class="gi"></span>         }
+</span></span><span class="line"><span class="cl"><span class="gd">-        options.update(client.transport_options)
+</span></span></span><span class="line"><span class="cl"><span class="gd"></span>         options.update(parsed[&#39;options&#39;])
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h2 id="summary">Summary</h2>
+<p>Celery Kombu code management feels a bit unclear and it is very difficult to compare on multiple branches. Full set testing is necessary when upgrading major versions of necessary components.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/kombu/">kombu</a>
+          <a href="/tags/mongodb/">Mongodb</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/2022-05/goscript-wasm/">
+            <span class="next-text nav-default">Goscript: Rust implementation of the Go language specification</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
