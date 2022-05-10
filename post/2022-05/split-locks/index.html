@@ -1,0 +1,1601 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>In-depth analysis of split locks, i&#43;&#43; can lead to disaster - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Split lock is a memory bus lock supported by the CPU to support atomic memory accesses across cache lines." /><meta name="keywords" content="Split Locks" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-05/split-locks/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="In-depth analysis of split locks, i&#43;&#43; can lead to disaster" />
+<meta property="og:description" content="Split lock is a memory bus lock supported by the CPU to support atomic memory accesses across cache lines." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-05/split-locks/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-05-10T13:19:33+08:00" />
+<meta property="article:modified_time" content="2022-05-10T13:19:33+08:00" />
+
+<meta itemprop="name" content="In-depth analysis of split locks, i&#43;&#43; can lead to disaster">
+<meta itemprop="description" content="Split lock is a memory bus lock supported by the CPU to support atomic memory accesses across cache lines."><meta itemprop="datePublished" content="2022-05-10T13:19:33+08:00" />
+<meta itemprop="dateModified" content="2022-05-10T13:19:33+08:00" />
+<meta itemprop="wordCount" content="5915">
+<meta itemprop="keywords" content="cpu," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="In-depth analysis of split locks, i&#43;&#43; can lead to disaster"/>
+<meta name="twitter:description" content="Split lock is a memory bus lock supported by the CPU to support atomic memory accesses across cache lines."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">In-depth analysis of split locks, i&#43;&#43; can lead to disaster</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-05-10 13:19:33 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 5915 words </span>
+          <span class="more-meta"> 12 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#1-split-lock-background">1. Split lock background</a>
+          <ul>
+            <li><a href="#11-starting-with-i">1.1 Starting with i++</a></li>
+            <li><a href="#12-bus-lock">1.2 Bus lock</a></li>
+            <li><a href="#13-cache-locking">1.3 Cache locking</a></li>
+            <li><a href="#14-split-lock">1.4 Split lock</a></li>
+          </ul>
+        </li>
+        <li><a href="#2-avoid-split-lock">2. Avoid Split lock</a>
+          <ul>
+            <li><a href="#21-compiler-optimizations">2.1 Compiler optimizations</a></li>
+            <li><a href="#22-precautions">2.2 Precautions</a></li>
+          </ul>
+        </li>
+        <li><a href="#3-split-lock-detection-and-handling">3. Split lock detection and handling</a>
+          <ul>
+            <li><a href="#31-usage-scenarios">3.1 Usage scenarios</a></li>
+            <li><a href="#32-hardware-detection-support">3.2 Hardware detection support</a></li>
+            <li><a href="#33-kernel-processing-support">3.3 Kernel processing support</a></li>
+          </ul>
+        </li>
+        <li><a href="#4-detection-and-handling-of-virtualized-environments">4. Detection and handling of virtualized environments</a>
+          <ul>
+            <li><a href="#41-processing-flow-of-virtualized-environment">4.1 Processing flow of virtualized environment</a></li>
+            <li><a href="#42-hardware-support">4.2 Hardware support</a></li>
+            <li><a href="#43-kvm-support">4.3 KVM Support</a></li>
+            <li><a href="#44-qemu-support">4.4 QEMU support</a></li>
+            <li><a href="#45-libvirt-support">4.5 Libvirt Support</a></li>
+          </ul>
+        </li>
+        <li><a href="#5-summary">5. Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Split lock is a memory bus lock supported by the CPU to support atomic memory accesses across a cache line.</p>
+<p>Some processors like ARM and RISC-V do not allow unaligned memory accesses and do not generate atomic accesses across cache lines, so split lock is not generated, while X86 supports it.</p>
+<p>Split lock is convenient for developers because there is no need to consider unaligned memory access, but it also comes at a cost: an instruction that generates split lock will occupy the memory bus exclusively for about 1000 clock cycles, compared to less than 10 clock cycles for a normal ADD instruction, and locking the memory bus so that other CPUs cannot access memory can seriously affect system performance.</p>
+<p>Therefore, the detection and handling of split lock is very important. Nowadays, CPUs support the detection capability, and will directly panic if detected in the kernel state, and will try to actively sleep in the user state to reduce the frequency of split lock generation, or kill the user state process, thus alleviating the contention for the memory bus.</p>
+<p>With the introduction of virtualization, it will try to handle this on the host side, and KVM will notify the vCPU threads in QEMU to actively sleep to reduce the frequency of split lock generation, or even kill the virtual machine. The above conclusions are only as of 2022/4/19 (same below), the community still has different views on split lock handling in the past 2 years, and the handling has changed many times, so the following analysis only discusses the current situation.</p>
+<h2 id="1-split-lock-background">1. Split lock background</h2>
+<h3 id="11-starting-with-i">1.1 Starting with i++</h3>
+<p>Let&rsquo;s assume the simplest computing model, a CPU (single core, no Hyper-threading enabled, no Cache), and a block of memory. A C program is running on it executing <code>i++</code>, which corresponds to the assembly code <code>add 1, i</code>.</p>
+<p>Analyzing the semantics of the <code>add</code> instruction here, two operands are required, the source operand SRC and the destination operand DEST, to achieve the function <code>DEST = DEST + SRC</code>. Here SRC is the immediate number 1 and DEST is the memory address of i. The CPU needs to first read the content of i in memory, then add 1, and finally write the result to the memory address where i is located. In total, two serial memory operations are generated.</p>
+<p>If the computational architecture is more complex, with 2 CPU cores CoreA and CoreB, the above <code>i++</code> code has to consider the data consistency problem.</p>
+<h4 id="111-concurrent-write-problem">1.1.1 Concurrent Write Problem</h4>
+<p>What if CoreA is writing to i&rsquo;s memory address while CoreB is writing to i&rsquo;s memory address at the same time?</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/908245df77a04d6ea49e6182505e692d.png" alt="Concurrent Write Problem"></p>
+<p>Writing the same memory address concurrently is actually quite simple, and the CPU guarantees the atomicity of the underlying memory operations from hardware.</p>
+<p>The specific operations are.</p>
+<ul>
+<li>Read/write 1 byte</li>
+<li>Read/write 16 bit aligned 2 byte</li>
+<li>Read/write 32 bit aligned 4 byte</li>
+<li>Read/write 64 bit aligned 8 byte</li>
+</ul>
+<h4 id="112-write-overwrite-problem">1.1.2 Write Overwrite Problem</h4>
+<p>What if CoreB writes data to i&rsquo;s memory address during the time after CoreA reads i from memory and before it writes to i&rsquo;s memory address?</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/d0e783d1a3084d3992c1f7df3fcede9c.png" alt="Write Overwrite Problem"></p>
+<p>This situation causes the data written by CoreB to be overwritten by the data written by CoreA later, so that the written data of CoreB is lost and CoreA does not know that the written data has been updated after it has been read.</p>
+<p>Why does this problem occur? Because the ADD instruction is not an atomic operation and will generate two memory operations.</p>
+<p>So how do we solve this problem? Since the ADD instruction is not atomic in hardware, add a lock in software to implement atomic operations so that CoreB&rsquo;s memory operations cannot be executed until CoreA&rsquo;s memory operations are complete.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/97de26cc51d84bcda82fac90bcaa06f0.png" alt="Write Overwrite Problem"></p>
+<p>The corresponding method is to declare the instruction prefix <code>LOCK</code> and the assembly code becomes <code>lock add 1, i</code>.</p>
+<h3 id="12-bus-lock">1.2 Bus lock</h3>
+<p>When the <code>LOCK</code> instruction prefix is declared, the accompanying instruction becomes an atomic instruction. The principle is to lock the system bus during the execution of the accompanying instruction, prohibiting other processors from performing memory operations and making them exclusive to achieve atomic operations.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/daccb502f3b349539078c894871dd812.png" alt="Bus lock"></p>
+<p>Here are a few examples.</p>
+<h4 id="121-atomic-accumulation-in-qemu">1.2.1 Atomic Accumulation in QEMU</h4>
+<p>The function qatomic_inc(ptr) in QEMU adds 1 to the memory data pointed to by the argument ptr.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="cp">#define qatomic_inc(ptr)        ((void) __sync_fetch_and_add(ptr, 1))
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>The principle is to call the GCC built-in <code>__sync_fetch_and_add</code> function. Let&rsquo;s write a C program by hand and see the assembly implementation of <code>__sync_fetch_and_add</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="o">*</span><span class="n">p</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">i</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">while</span><span class="p">(</span><span class="mi">1</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">__sync_fetch_and_add</span><span class="p">(</span><span class="n">p</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">// add.s
+</span></span><span class="line"><span class="cl">        .file   &#34;add.c&#34;
+</span></span><span class="line"><span class="cl">        .text
+</span></span><span class="line"><span class="cl">        .globl  main
+</span></span><span class="line"><span class="cl">        .type   main, @function
+</span></span><span class="line"><span class="cl">main:
+</span></span><span class="line"><span class="cl">.LFB0:
+</span></span><span class="line"><span class="cl">        .cfi_startproc
+</span></span><span class="line"><span class="cl">        pushq   %rbp
+</span></span><span class="line"><span class="cl">        .cfi_def_cfa_offset 16
+</span></span><span class="line"><span class="cl">        .cfi_offset 6, -16
+</span></span><span class="line"><span class="cl">        movq    %rsp, %rbp
+</span></span><span class="line"><span class="cl">        .cfi_def_cfa_register 6
+</span></span><span class="line"><span class="cl">        movl    $1, -12(%rbp)
+</span></span><span class="line"><span class="cl">        leaq    -12(%rbp), %rax
+</span></span><span class="line"><span class="cl">        movq    %rax, -8(%rbp)
+</span></span><span class="line"><span class="cl">.L2:
+</span></span><span class="line"><span class="cl">        movq    -8(%rbp), %rax
+</span></span><span class="line"><span class="cl">        lock addl       $1, (%rax)
+</span></span><span class="line"><span class="cl">        jmp     .L2
+</span></span><span class="line"><span class="cl">        .cfi_endproc
+</span></span><span class="line"><span class="cl">.LFE0:
+</span></span><span class="line"><span class="cl">        .size   main, .-main
+</span></span><span class="line"><span class="cl">        .ident  &#34;GCC: (Debian 6.3.0-18+deb9u1) 6.3.0 20170516&#34;
+</span></span><span class="line"><span class="cl">        .section        .note.GNU-stack,&#34;&#34;,@progbits
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>You can see that the assembly implementation of <code>__sync_fetch_and_add</code> declares the lock instruction prefix before the add instruction.</p>
+<h4 id="122-atomic-accumulation-in-the-kernel">1.2.2 Atomic accumulation in the Kernel</h4>
+<p>The atomic_inc function in the Kernel adds 1 to the memory data pointed to by the argument v.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">static</span> <span class="n">__always_inline</span> <span class="kt">void</span>
+</span></span><span class="line"><span class="cl"><span class="nf">atomic_inc</span><span class="p">(</span><span class="n">atomic_t</span> <span class="o">*</span><span class="n">v</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">instrument_atomic_read_write</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="o">*</span><span class="n">v</span><span class="p">));</span>
+</span></span><span class="line"><span class="cl">        <span class="n">arch_atomic_inc</span><span class="p">(</span><span class="n">v</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">static</span> <span class="n">__always_inline</span> <span class="kt">void</span> <span class="nf">arch_atomic_inc</span><span class="p">(</span><span class="n">atomic_t</span> <span class="o">*</span><span class="n">v</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">asm</span> <span class="k">volatile</span><span class="p">(</span><span class="n">LOCK_PREFIX</span> <span class="s">&#34;incl %0&#34;</span>
+</span></span><span class="line"><span class="cl">                     <span class="o">:</span> <span class="s">&#34;+m&#34;</span> <span class="p">(</span><span class="n">v</span><span class="o">-&gt;</span><span class="n">counter</span><span class="p">)</span> <span class="o">::</span> <span class="s">&#34;memory&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="cp">#define LOCK_PREFIX LOCK_PREFIX_HERE &#34;\n\tlock; &#34;
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>As you can see, the same lock instruction prefix is declared.</p>
+<h4 id="123-cas-compare-and-swap">1.2.3 CAS (Compare And Swap)</h4>
+<p>The CAS interface in programming languages provides developers with atomic operations to implement lock-free mechanisms.</p>
+<h5 id="golangs-cas">Golang&rsquo;s CAS</h5>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// bool Cas(int32 *val, int32 old, int32 new)
+</span></span></span><span class="line"><span class="cl"><span class="c1">// Atomically:
+</span></span></span><span class="line"><span class="cl"><span class="c1">//        if(*val == old){
+</span></span></span><span class="line"><span class="cl"><span class="c1">//                *val = new;
+</span></span></span><span class="line"><span class="cl"><span class="c1">//                return 1;
+</span></span></span><span class="line"><span class="cl"><span class="c1">//        } else
+</span></span></span><span class="line"><span class="cl"><span class="c1">//                return 0;
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="nx">TEXT</span> <span class="err">·</span><span class="nf">Cas</span><span class="p">(</span><span class="nx">SB</span><span class="p">),</span><span class="nx">NOSPLIT</span><span class="p">,</span><span class="err">$</span><span class="mi">0</span><span class="o">-</span><span class="mi">17</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">MOVQ</span>        <span class="nx">ptr</span><span class="o">+</span><span class="mi">0</span><span class="p">(</span><span class="nx">FP</span><span class="p">),</span> <span class="nx">BX</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">MOVL</span>        <span class="nx">old</span><span class="o">+</span><span class="mi">8</span><span class="p">(</span><span class="nx">FP</span><span class="p">),</span> <span class="nx">AX</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">MOVL</span>        <span class="nx">new</span><span class="o">+</span><span class="mi">12</span><span class="p">(</span><span class="nx">FP</span><span class="p">),</span> <span class="nx">CX</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">LOCK</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">CMPXCHGL</span>        <span class="nx">CX</span><span class="p">,</span> <span class="mi">0</span><span class="p">(</span><span class="nx">BX</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">SETEQ</span>        <span class="nx">ret</span><span class="o">+</span><span class="mi">16</span><span class="p">(</span><span class="nx">FP</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">RET</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h5 id="javas-cas">Java&rsquo;s CAS</h5>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-java" data-lang="java"><span class="line"><span class="cl"><span class="n">inline</span> <span class="n">jlong</span>    <span class="n">Atomic</span><span class="o">::</span><span class="n">cmpxchg</span>    <span class="o">(</span><span class="n">jlong</span>    <span class="n">exchange_value</span><span class="o">,</span> <span class="kd">volatile</span> <span class="n">jlong</span><span class="o">*</span>    <span class="n">dest</span><span class="o">,</span> <span class="n">jlong</span>    <span class="n">compare_value</span><span class="o">)</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">bool</span> <span class="n">mp</span> <span class="o">=</span> <span class="n">os</span><span class="o">::</span><span class="n">is_MP</span><span class="o">();</span>
+</span></span><span class="line"><span class="cl">  <span class="n">__asm__</span> <span class="nf">__volatile__</span> <span class="o">(</span><span class="n">LOCK_IF_MP</span><span class="o">(%</span><span class="n">4</span><span class="o">)</span> <span class="s">&#34;cmpxchgq %1,(%3)&#34;</span>
+</span></span><span class="line"><span class="cl">                        <span class="o">:</span> <span class="s">&#34;=a&#34;</span> <span class="o">(</span><span class="n">exchange_value</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl">                        <span class="o">:</span> <span class="s">&#34;r&#34;</span> <span class="o">(</span><span class="n">exchange_value</span><span class="o">),</span> <span class="s">&#34;a&#34;</span> <span class="o">(</span><span class="n">compare_value</span><span class="o">),</span> <span class="s">&#34;r&#34;</span> <span class="o">(</span><span class="n">dest</span><span class="o">),</span> <span class="s">&#34;r&#34;</span> <span class="o">(</span><span class="n">mp</span><span class="o">)</span>
+</span></span><span class="line"><span class="cl">                        <span class="o">:</span> <span class="s">&#34;cc&#34;</span><span class="o">,</span> <span class="s">&#34;memory&#34;</span><span class="o">);</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="n">exchange_value</span><span class="o">;</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Adding a lock prefix to an instruction on MP machine
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="err">#</span><span class="n">define</span> <span class="nf">LOCK_IF_MP</span><span class="o">(</span><span class="n">mp</span><span class="o">)</span> <span class="s">&#34;cmp $0, &#34;</span> <span class="err">#</span><span class="n">mp</span> <span class="s">&#34;; je 1f; lock; 1: &#34;</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>As you can see, CAS is also implemented using the lock instruction prefix, so how is the lock instruction prefix implemented specifically?</p>
+<h4 id="124-the-lock-signal">1.2.4 The LOCK# Signal</h4>
+<p>Specifically, when a LOCK prefix instruction is declared in front of an instruction in the code, the processor generates the LOCK# signal during the instruction run so that other processors cannot access the memory through the bus.</p>
+<p>Let&rsquo;s try to understand the principle of the LOCK# signal by looking at the pinout diagram of the 8086 CPU.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/e6895686f9e64d16922b8972f2e8a1d3.png" alt="8086 CPU"></p>
+<p>The 8086 CPU has a LOCK pin (pin 29 in the diagram) that is active low. When the LOCK instruction prefix is declared, the LOCK pin level is pulled low for assert operation, and other devices cannot gain control of the system bus at this time. When the execution of the instruction modified by the LOCK instruction is completed, the LOCK pin level is pulled high for de-assert.</p>
+<p>So the whole process is clear. When you want to achieve atomic operation by non-atomic instructions (e.g. add), you need to declare the lock instruction prefix before the instruction when programming, and the lock instruction prefix will be recognized by the processor at runtime and generate the LOCK# signal to make it exclusive to the memory bus, while other processors cannot access the memory through the memory bus, thus achieving atomic operation. So it also solves the above write overwrite problem.</p>
+<p>This looks good, but it introduces a new problem.</p>
+<h4 id="125-performance-degradation-caused-by-bus-locks">1.2.5 Performance degradation caused by bus locks</h4>
+<p>Nowadays there are more and more cores in the processor, what if each core generates LOCK# signals frequently to monopolize the memory bus, so that the rest of the cores cannot access the memory, resulting in a significant performance degradation?</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/a47baee9c6514f8aa06651733d06b9ef.png" alt="Performance degradation caused by bus locks"></p>
+<h3 id="13-cache-locking">1.3 Cache locking</h3>
+<p>INTEL introduced the cache locking mechanism on post-P6 processors in order to optimize the performance problems caused by bus locks: the cache coherency protocol guarantees atomicity and consistency of multiple accesses to memory addresses across cache lines by multiple CPU cores without locking the memory bus.</p>
+<h4 id="131-mesi-protocol">1.3.1 MESI Protocol</h4>
+<p>Let&rsquo;s start with a brief introduction to the cache coherency protocol with the common MESI, which is divided into four states:</p>
+<ol>
+<li><strong>Modified (M)</strong> The cache line is dirty and has a different value than the main memory. If another CPU core wants to read this data from main memory, the cache line must be written back to main memory and the state becomes shared (S).</li>
+<li><strong>Exclusive (E)</strong> The cache line is only in the current cache, but is clean - the cache data is the same as the main memory data. When another cache reads it, the state changes to shared; when the current data is written, the state changes to modified.</li>
+<li><strong>Shared (S)</strong> The cache line is also present in other caches and is clean. Cache lines can be discarded at any time.</li>
+<li><strong>Invalid (I)</strong> The cache line is invalid.</li>
+</ol>
+<p>The MESI protocol state machine is as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/2849cbd1f43e4dfcba08acd43fc31442.png" alt="MESI protocol state machine"></p>
+<p>The transition of the state machine is based on two cases.</p>
+<ol>
+<li>
+<p>the CPU generates a request for a cache</p>
+<ul>
+<li>a. PrRd: CPU requests to read a cache block</li>
+<li>b. PrWr: CPU requests to write a cache block</li>
+</ul>
+</li>
+<li>
+<p>The bus generates requests to the cache</p>
+<ul>
+<li>a. BusRd: A snooper request indicates that another processor is requesting to read a cache block</li>
+<li>b. BusRdX: A snooper request indicates that another processor is requesting to write a cache block that the processor does not own</li>
+<li>c. BusUpgr: The snooper request indicates that another processor is requesting to write a cache block owned by that processor</li>
+<li>d. Flush: The snooper request indicates that the entire cache is requested to be written back to main memory</li>
+<li>e. FlushOpt: The snooper request indicates that the entire cache block is sent to the bus to be sent to another processor (cache-to-cache copy)</li>
+</ul>
+</li>
+</ol>
+<p>Simply put, through the MESI protocol, each CPU not only knows its own read and write operations to the cache, but also performs bus sniffing (snooping) to know the read and write operations of other CPUs to the cache, so in addition to its own modifications to the cache, it will also change the state of the cache according to the modifications of other CPUs to the cache.</p>
+<h4 id="132-cache-locking-principle">1.3.2 Cache Locking Principle</h4>
+<p>Cache locking relies on the cache coherency protocol to ensure atomicity of memory accesses, because the cache coherency protocol prevents memory addresses cached by multiple CPUs from being modified by multiple CPUs at the same time.</p>
+<p>Here is an example of how cache locking achieves atomicity of memory reads and writes based on the MESI protocol.</p>
+<p>Let&rsquo;s assume that there are two CPU Cores, CoreA and CoreB, for the analysis.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/b3b8c64ecb814d6c9e2e42fcb0c5b0d5.png" alt="Cache Locking Principle"></p>
+<p>Note the last operation step 4, after CoreB modifies the data in cache, when CoreA wants to modify it again, it will be sniffed by CoreB, and CoreA will modify it only after CoreB&rsquo;s data is synchronized to main memory and CoreA.</p>
+<p>We can see that the data modified by CoreB is not lost and is synchronized to CoreA and main memory. And the above operation is implemented without locking the memory bus, only CoreA&rsquo;s modification is blocked for a while, which is manageable compared to locking the whole memory bus.</p>
+<p>The above is a relatively simple case, where the writes to both CPU Cores are serial. What if CoreA and CoreB send write requests at the same time after operation step 2? Will the cache of both Cores enter the M state?</p>
+<p>The answer is no. The MESI protocol ensures that the above scenario of simultaneous M does not happen. According to the MESI protocol, a Core&rsquo;s PrWr operation can only be freely executed when its cache is in state M or E. If it is in state S, the other Core&rsquo;s cache must first be set to state I. This is done through a bus broadcast called Request For Ownership (RFO), which is a bus transaction. If two Cores broadcast RFO to the bus at the same time and both want to invalidate each other&rsquo;s cache, the bus will arbitrate and the final result will be that only one Core will succeed in broadcasting and the other Core will fail and its cache will be set to I state. So we can see that with the introduction of the cache layer, atomic operations are now implemented by bus arbitration instead of locking the memory bus.</p>
+<p>If the LOCK instruction prefix is declared, then the corresponding cache address will be locked by the bus. In the above example, other Cores will wait until the end of instruction execution before accessing it, which means that it becomes a serial operation and achieves atomicity for cache reads and writes.</p>
+<p>So, to summarize, cache lock: if the LOCK instruction prefix is declared in front of a code instruction to access memory data atomically, and if the memory data can be cached in the CPU&rsquo;s cache, the runtime usually does not generate the LOCK# signal on the bus, but prevents two or more CPU cores from accessing the same address concurrently through the cache coherency protocol, bus arbitration mechanism and cache locking. The cache coherency protocol, bus arbitration mechanism and cache locking are used to prevent two or more CPU cores from accessing the same address concurrently.</p>
+<p>So can all bus locks be optimized for cache locks? The answer is no. The case that cannot be optimized is split lock.</p>
+<h3 id="14-split-lock">1.4 Split lock</h3>
+<p>Since the granularity of the cache coherency protocol is a cache line, when the data of an atomic operation crosses a cache line, the cache locking mechanism cannot guarantee data consistency and degenerates to a bus lock to ensure consistency, which is split lock.</p>
+<p>For example, there is the following data structure.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">struct</span> <span class="n">Data</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">   <span class="kt">char</span> <span class="n">padding</span><span class="p">[</span><span class="mi">62</span><span class="p">];</span> <span class="c1">// 62字节
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="kt">int32_t</span> <span class="n">value</span><span class="p">;</span>  <span class="c1">// 4字节
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">}</span> <span class="n">__attribute__</span><span class="p">((</span><span class="n">packed</span><span class="p">))</span> <span class="c1">// 按实际字节对齐
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>When cached in a cache line of 64 bytes in size, the value member will span the cache line.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/d6e4e3ce23e14c14929aff854b0c13ec.png" alt="cache line"></p>
+<p>At this point, if you want to manipulate the value members of the Data structure by the <code>LOCK ADD</code> instruction, you cannot solve it by cache locking, and you have to go the old way, locking the bus to ensure data consistency.</p>
+<p>Locking the bus causes a serious performance degradation, increasing access latency by a factor of 100, and in memory-intensive operations, performance drops by two orders of magnitude. So in modern X86 processors, it is important to avoid writing code that generates split lock and to have the ability to detect split lock generation.</p>
+<h2 id="2-avoid-split-lock">2. Avoid Split lock</h2>
+<p>Recall the conditions under which Split lock is generated.</p>
+<ol>
+<li>atomic access to the data is performed</li>
+<li>the data to be accessed is stored across a cache line in the cache</li>
+</ol>
+<p>Since atomic operations are relatively basic, let&rsquo;s take data stored across a cache line as an intervention point.</p>
+<p>If the data is stored in only one cache line, the problem can be solved.</p>
+<h3 id="21-compiler-optimizations">2.1 Compiler optimizations</h3>
+<p>The GCC feature <code>__attribute__((packed))</code>, used in our previous data structure, indicates that no memory alignment optimization is performed.</p>
+<p>If <code>__attribute__((packed))</code> is not introduced, when using memory alignment optimizations, the compiler pads the memory data, for example by filling in 2 bytes after the padding so that the memory address of value can be divided by 4 bytes, thus achieving alignment. When the value is cached in the cache, it will not cross the cache line.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/d6c4b6647d6b4d16872c703c8913084b.png" alt="cache line"></p>
+<p>Why did the compiler introduce <code>__attribute__((packed))</code> when it can be optimized to avoid cross-cache line accesses through memory alignment?</p>
+<p>This is because there are benefits to forcing alignment by data structure through <code>__attribute__((packed))</code>. For example, network communication based on data structures, no need to fill extra bytes, etc.</p>
+<h3 id="22-precautions">2.2 Precautions</h3>
+<p>We have the following points to keep in mind when writing code.</p>
+<ol>
+<li>Use the compiler&rsquo;s memory alignment optimization as much as possible when available.</li>
+<li>When compiler optimization is not available, consider the size and declaration order of structure members.</li>
+<li>When generating potentially unaligned memory accesses, try not to use atomic instructions to do so.</li>
+</ol>
+<h2 id="3-split-lock-detection-and-handling">3. Split lock detection and handling</h2>
+<h3 id="31-usage-scenarios">3.1 Usage scenarios</h3>
+<ol>
+<li>hard real-time system: When a hard real-time application runs on some cores and another common program runs on other cores, the common program can generate bus lock to break the hard real-time requirement.</li>
+<li>cloud computing: multi-tenant running on a physical machine, bus lock can be generated within a virtual machine to interfere with the performance of other virtual machines.</li>
+</ol>
+<p>The following analysis is mainly for the cloud environment, from the bottom up.</p>
+<h3 id="32-hardware-detection-support">3.2 Hardware detection support</h3>
+<p>An Alignment Check (#AC) exception is generated when a split lock operation is attempted, and a Debug(#DB) trap is generated when a bus lock is acquired and executed.</p>
+<p>Hardware distinguishes between split lock and bus lock here.</p>
+<ul>
+<li>split lock is an atomic operation where the operand spans two cache lines.</li>
+<li>bus lock can be generated in two cases, either split lock for writeback memory, or any lock operation for non-writeback memory</li>
+</ul>
+<p>Conceptually, split lock is a kind of bus lock, split lock tends to access across cache lines, bus lock tends to lock bus operations.</p>
+<h4 id="321-related-registers-msr">3.2.1 Related registers (MSR)</h4>
+<p>Whether or not the corresponding exceptions are generated when split lock and bus lock occur can be controlled by specific registers, the following are the related control registers.</p>
+<ol>
+<li>
+<p>MSR_MEMORY_CTRL/MSR_TEST_CTRL: 33H Bit 29 of this MSR controls the #AC exception caused by split lock.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/9d2177c2330643cfaec504589ddcde77.png" alt="#AC exception"></p>
+</li>
+<li>
+<p>IA32_DEBUGCTL: bit 2 of this MSR, controls the #DB exception caused by bus lock.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/88c70e43d4144121a19d7d6f59a8f0d0.png" alt="#DB exception"></p>
+</li>
+</ol>
+<h3 id="33-kernel-processing-support">3.3 Kernel processing support</h3>
+<p>Take v5.17 as an example for analysis. The current version of the kernel supports a related startup parameter <code>split_lock_detect</code> with the following configuration items and corresponding functions.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/cf92a93cdd6a4f0cafc71ea084deaffe.png" alt="split_lock_detect"></p>
+<p>The implementation of split_lock_detect is mainly divided into 3 parts: configuration, initialization, and processing, and we analyze the source code item by item below.</p>
+<h4 id="331-configuration">3.3.1 Configuration</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="o">-&gt;</span> <span class="n">start_kernel</span>
+</span></span><span class="line"><span class="cl">    <span class="o">-&gt;</span> <span class="n">sld_setup</span>
+</span></span><span class="line"><span class="cl">        <span class="o">-&gt;</span> <span class="n">split_lock_setup</span>
+</span></span><span class="line"><span class="cl">            <span class="o">-&gt;</span> <span class="n">__split_lock_setup</span>
+</span></span><span class="line"><span class="cl">        <span class="o">-&gt;</span> <span class="n">sld_state_setup</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>When the kernel starts, it will do the setup of sld(split lock detect) first.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">void</span> <span class="n">__init</span> <span class="nf">__split_lock_setup</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">split_lock_verify_msr</span><span class="p">(</span><span class="nb">false</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="n">pr_info</span><span class="p">(</span><span class="s">&#34;MSR access failed: Disabled</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">rdmsrl</span><span class="p">(</span><span class="n">MSR_TEST_CTRL</span><span class="p">,</span> <span class="n">msr_test_ctrl_cache</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">split_lock_verify_msr</span><span class="p">(</span><span class="nb">true</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="n">pr_info</span><span class="p">(</span><span class="s">&#34;MSR access failed: Disabled</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="cm">/* Restore the MSR to its cached value. */</span>
+</span></span><span class="line"><span class="cl">        <span class="n">wrmsrl</span><span class="p">(</span><span class="n">MSR_TEST_CTRL</span><span class="p">,</span> <span class="n">msr_test_ctrl_cache</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">setup_force_cpu_cap</span><span class="p">(</span><span class="n">X86_FEATURE_SPLIT_LOCK_DETECT</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">bool</span> <span class="nf">split_lock_verify_msr</span><span class="p">(</span><span class="kt">bool</span> <span class="n">on</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">u64</span> <span class="n">ctrl</span><span class="p">,</span> <span class="n">tmp</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">rdmsrl_safe</span><span class="p">(</span><span class="n">MSR_TEST_CTRL</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">ctrl</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span> <span class="nb">false</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">on</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                <span class="n">ctrl</span> <span class="o">|=</span> <span class="n">MSR_TEST_CTRL_SPLIT_LOCK_DETECT</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="k">else</span>
+</span></span><span class="line"><span class="cl">                <span class="n">ctrl</span> <span class="o">&amp;=</span> <span class="o">~</span><span class="n">MSR_TEST_CTRL_SPLIT_LOCK_DETECT</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">wrmsrl_safe</span><span class="p">(</span><span class="n">MSR_TEST_CTRL</span><span class="p">,</span> <span class="n">ctrl</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span> <span class="nb">false</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="n">rdmsrl</span><span class="p">(</span><span class="n">MSR_TEST_CTRL</span><span class="p">,</span> <span class="n">tmp</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="n">ctrl</span> <span class="o">==</span> <span class="n">tmp</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="cp">#define MSR_TEST_CTRL               0x00000033
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>__split_lock_setup tries to enable/disable 33H MSR for verify, and ends without enabling split lock #AC exception, leaving only a global variable msr_test_ctrl_cache to be used as a cache for later manipulation of this MSR.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">void</span> <span class="n">__init</span> <span class="nf">sld_state_setup</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">enum</span> <span class="n">split_lock_detect_state</span> <span class="n">state</span> <span class="o">=</span> <span class="n">sld_warn</span><span class="p">;</span> <span class="c1">// 默认配置
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="kt">char</span> <span class="n">arg</span><span class="p">[</span><span class="mi">20</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">        <span class="kt">int</span> <span class="n">i</span><span class="p">,</span> <span class="n">ret</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">boot_cpu_has</span><span class="p">(</span><span class="n">X86_FEATURE_SPLIT_LOCK_DETECT</span><span class="p">)</span> <span class="o">&amp;&amp;</span>
+</span></span><span class="line"><span class="cl">            <span class="o">!</span><span class="n">boot_cpu_has</span><span class="p">(</span><span class="n">X86_FEATURE_BUS_LOCK_DETECT</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">ret</span> <span class="o">=</span> <span class="n">cmdline_find_option</span><span class="p">(</span><span class="n">boot_command_line</span><span class="p">,</span> <span class="s">&#34;split_lock_detect&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                                  <span class="n">arg</span><span class="p">,</span> <span class="k">sizeof</span><span class="p">(</span><span class="n">arg</span><span class="p">));</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">ret</span> <span class="o">&gt;=</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">ARRAY_SIZE</span><span class="p">(</span><span class="n">sld_options</span><span class="p">);</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                        <span class="k">if</span> <span class="p">(</span><span class="n">match_option</span><span class="p">(</span><span class="n">arg</span><span class="p">,</span> <span class="n">ret</span><span class="p">,</span> <span class="n">sld_options</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">option</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                                <span class="n">state</span> <span class="o">=</span> <span class="n">sld_options</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">state</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                                <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">                <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="n">sld_state</span> <span class="o">=</span> <span class="n">state</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">static</span> <span class="kr">inline</span> <span class="kt">bool</span> <span class="nf">match_option</span><span class="p">(</span><span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">arg</span><span class="p">,</span> <span class="kt">int</span> <span class="n">arglen</span><span class="p">,</span> <span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">opt</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="kt">int</span> <span class="n">len</span> <span class="o">=</span> <span class="n">strlen</span><span class="p">(</span><span class="n">opt</span><span class="p">),</span> <span class="n">ratelimit</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">strncmp</span><span class="p">(</span><span class="n">arg</span><span class="p">,</span> <span class="n">opt</span><span class="p">,</span> <span class="n">len</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span> <span class="nb">false</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * Min ratelimit is 1 bus lock/sec.
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * Max ratelimit is 1000 bus locks/sec.
+</span></span></span><span class="line"><span class="cl"><span class="cm">         */</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">sscanf</span><span class="p">(</span><span class="n">arg</span><span class="p">,</span> <span class="s">&#34;ratelimit:%d&#34;</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">ratelimit</span><span class="p">)</span> <span class="o">==</span> <span class="mi">1</span> <span class="o">&amp;&amp;</span>
+</span></span><span class="line"><span class="cl">            <span class="n">ratelimit</span> <span class="o">&gt;</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="n">ratelimit</span> <span class="o">&lt;=</span> <span class="mi">1000</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="n">ratelimit_state_init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">bld_ratelimit</span><span class="p">,</span> <span class="n">HZ</span><span class="p">,</span> <span class="n">ratelimit</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="n">ratelimit_set_flags</span><span class="p">(</span><span class="o">&amp;</span><span class="n">bld_ratelimit</span><span class="p">,</span> <span class="n">RATELIMIT_MSG_ON_RELEASE</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span> <span class="nb">true</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="n">len</span> <span class="o">==</span> <span class="n">arglen</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>What sld_state_setup does is resolve the configuration of the kernel boot parameter split_lock_detect (you can see that the default configuration is at the warn level). In case of ratelimit configuration, a bld_ratelimit global variable is initialized for the handle stage using the kernel&rsquo;s ratelimit library.</p>
+<h4 id="332-initialization">3.3.2 Initialization</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="o">-&gt;</span> <span class="n">start_kernel</span>
+</span></span><span class="line"><span class="cl">    <span class="o">-&gt;</span> <span class="n">init_intel</span>
+</span></span><span class="line"><span class="cl">        <span class="o">-&gt;</span> <span class="n">split_lock_init</span>
+</span></span><span class="line"><span class="cl">        <span class="o">-&gt;</span> <span class="n">bus_lock_init</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>After setup completes the basic verify and get the boot parameters configured, a hardware enbale operation is attempted.</p>
+<h5 id="3321-split-lock-init">3.3.2.1 split lock init</h5>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">void</span> <span class="nf">split_lock_init</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * #DB for bus lock handles ratelimit and #AC for split lock is
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * disabled.
+</span></span></span><span class="line"><span class="cl"><span class="cm">         */</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">sld_state</span> <span class="o">==</span> <span class="n">sld_ratelimit</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="n">split_lock_verify_msr</span><span class="p">(</span><span class="nb">false</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">cpu_model_supports_sld</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                <span class="n">split_lock_verify_msr</span><span class="p">(</span><span class="n">sld_state</span> <span class="o">!=</span> <span class="n">sld_off</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The init of split lock disables hardware detection for split lock if the configured parameter is found to be ratelimit. Other non-off parameters (warn, fatal) will enable the hardware.</p>
+<h5 id="3322-bus-lock-init">3.3.2.2 bus lock init</h5>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">void</span> <span class="nf">bus_lock_init</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">u64</span> <span class="n">val</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * Warn and fatal are handled by #AC for split lock if #AC for
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * split lock is supported.
+</span></span></span><span class="line"><span class="cl"><span class="cm">         */</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">boot_cpu_has</span><span class="p">(</span><span class="n">X86_FEATURE_BUS_LOCK_DETECT</span><span class="p">)</span> <span class="o">||</span>
+</span></span><span class="line"><span class="cl">            <span class="p">(</span><span class="n">boot_cpu_has</span><span class="p">(</span><span class="n">X86_FEATURE_SPLIT_LOCK_DETECT</span><span class="p">)</span> <span class="o">&amp;&amp;</span>
+</span></span><span class="line"><span class="cl">            <span class="p">(</span><span class="n">sld_state</span> <span class="o">==</span> <span class="n">sld_warn</span> <span class="o">||</span> <span class="n">sld_state</span> <span class="o">==</span> <span class="n">sld_fatal</span><span class="p">))</span> <span class="o">||</span>
+</span></span><span class="line"><span class="cl">            <span class="n">sld_state</span> <span class="o">==</span> <span class="n">sld_off</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * Enable #DB for bus lock. All bus locks are handled in #DB except
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * split locks are handled in #AC in the fatal case.
+</span></span></span><span class="line"><span class="cl"><span class="cm">         */</span>
+</span></span><span class="line"><span class="cl">        <span class="n">rdmsrl</span><span class="p">(</span><span class="n">MSR_IA32_DEBUGCTLMSR</span><span class="p">,</span> <span class="n">val</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">val</span> <span class="o">|=</span> <span class="n">DEBUGCTLMSR_BUS_LOCK_DETECT</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="n">wrmsrl</span><span class="p">(</span><span class="n">MSR_IA32_DEBUGCTLMSR</span><span class="p">,</span> <span class="n">val</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="cp">#define DEBUGCTLMSR_BUS_LOCK_DETECT (1UL &lt;&lt;  2)
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>In the init of bus lock, if the CPU does not support bus lock, the hardware detection of bus lock will not be enabled, and if the CPU supports both split lock and bus lock hardware detection and the configuration parameter is still warn or fatal, the hardware will not be enabled.</p>
+<p>So from the code, there are two cases to enable CPU bus lock detection: one is when the CPU supports bus lock detection and the configuration parameter is specified as ratelimt, and the other is when the CPU does not support split lock detection but supports bus lock detection and the configuration parameter is not off.</p>
+<h4 id="333-processing">3.3.3 Processing</h4>
+<h5 id="3331-split-lock-handle">3.3.3.1 split lock handle</h5>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="n">DEFINE_IDTENTRY_ERRORCODE</span><span class="p">(</span><span class="n">exc_alignment_check</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="kt">char</span> <span class="o">*</span><span class="n">str</span> <span class="o">=</span> <span class="s">&#34;alignment check&#34;</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">notify_die</span><span class="p">(</span><span class="n">DIE_TRAP</span><span class="p">,</span> <span class="n">str</span><span class="p">,</span> <span class="n">regs</span><span class="p">,</span> <span class="n">error_code</span><span class="p">,</span> <span class="n">X86_TRAP_AC</span><span class="p">,</span> <span class="n">SIGBUS</span><span class="p">)</span> <span class="o">==</span> <span class="n">NOTIFY_STOP</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">user_mode</span><span class="p">(</span><span class="n">regs</span><span class="p">))</span> <span class="c1">// 如果不是用户态
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>                <span class="n">die</span><span class="p">(</span><span class="s">&#34;Split lock detected</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">regs</span><span class="p">,</span> <span class="n">error_code</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">local_irq_enable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">handle_user_split_lock</span><span class="p">(</span><span class="n">regs</span><span class="p">,</span> <span class="n">error_code</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                <span class="k">goto</span> <span class="n">out</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">do_trap</span><span class="p">(</span><span class="n">X86_TRAP_AC</span><span class="p">,</span> <span class="n">SIGBUS</span><span class="p">,</span> <span class="s">&#34;alignment check&#34;</span><span class="p">,</span> <span class="n">regs</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                <span class="n">error_code</span><span class="p">,</span> <span class="n">BUS_ADRALN</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nl">out</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">        <span class="n">local_irq_disable</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">bool</span> <span class="n">handle_user_split_lock</span><span class="p">(</span><span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="n">regs</span><span class="p">,</span> <span class="kt">long</span> <span class="n">error_code</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">((</span><span class="n">regs</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;</span> <span class="n">X86_EFLAGS_AC</span><span class="p">)</span> <span class="o">||</span> <span class="n">sld_state</span> <span class="o">==</span> <span class="n">sld_fatal</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span> <span class="nb">false</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="n">split_lock_warn</span><span class="p">(</span><span class="n">regs</span><span class="o">-&gt;</span><span class="n">ip</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="nb">true</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">void</span> <span class="n">split_lock_warn</span><span class="p">(</span><span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">ip</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">pr_warn_ratelimited</span><span class="p">(</span><span class="s">&#34;#AC: %s/%d took a split_lock trap at address: 0x%lx</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                            <span class="n">current</span><span class="o">-&gt;</span><span class="n">comm</span><span class="p">,</span> <span class="n">current</span><span class="o">-&gt;</span><span class="n">pid</span><span class="p">,</span> <span class="n">ip</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * Disable the split lock detection for this task so it can make
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * progress and set TIF_SLD so the detection is re-enabled via
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * switch_to_sld() when the task is scheduled out.
+</span></span></span><span class="line"><span class="cl"><span class="cm">         */</span>
+</span></span><span class="line"><span class="cl">        <span class="n">sld_update_msr</span><span class="p">(</span><span class="nb">false</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">set_tsk_thread_flag</span><span class="p">(</span><span class="n">current</span><span class="p">,</span> <span class="n">TIF_SLD</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>When an #AC exception is generated, if it is not in the user state, it will call die and enter the panic process.</p>
+<p>If it is in user state, then configured as fatal, it will send SIGBUS signal to the current user state process, and the user state process will be killed if it does not catch SIGBUS manually.</p>
+<p>If the user state is configured as warn, it prints a warning log and outputs the current process information, disable split lock detection, and indicate that the process has been detected once by setting the TIF_SLD bit of the current process flags.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="o">-&gt;</span> <span class="n">context_switch</span>
+</span></span><span class="line"><span class="cl">    <span class="o">-&gt;</span> <span class="n">__switch_to_xtra</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">void</span> <span class="n">__switch_to_xtra</span><span class="p">(</span><span class="k">struct</span> <span class="n">task_struct</span> <span class="o">*</span><span class="n">prev_p</span><span class="p">,</span> <span class="k">struct</span> <span class="n">task_struct</span> <span class="o">*</span><span class="n">next_p</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">tifp</span><span class="p">,</span> <span class="n">tifn</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">tifn</span> <span class="o">=</span> <span class="n">read_task_thread_flags</span><span class="p">(</span><span class="n">next_p</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="n">tifp</span> <span class="o">=</span> <span class="n">read_task_thread_flags</span><span class="p">(</span><span class="n">prev_p</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">((</span><span class="n">tifp</span> <span class="o">^</span> <span class="n">tifn</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">_TIF_SLD</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                <span class="n">switch_to_sld</span><span class="p">(</span><span class="n">tifn</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">void</span> <span class="n">switch_to_sld</span><span class="p">(</span><span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">tifn</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">sld_update_msr</span><span class="p">(</span><span class="o">!</span><span class="p">(</span><span class="n">tifn</span> <span class="o">&amp;</span> <span class="n">_TIF_SLD</span><span class="p">));</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>When context_switch is performed, if the TIF_SLD bits in the flags of the prev process and the next process are different, then a split lock detect switch is performed. The switch is based on the TIF_SLD bit of the next process.</p>
+<p>For example, after process A on CPU 0 triggers a split lock warning detection, the split lock detection on CPU 0 is disable to avoid frequent warning logs, and the flags of process A are set to TIF_SLD, and after process A finishes execution, it switches to process B running on CPU 0. The flags of process A and B have different TIF_SLD bits, so we can enable split lock detection according to the flags of process B. When process B finishes execution, it will disable split lock again when it switches to process A again.</p>
+<p>The above mechanism achieves the requirement that each process only warn once.</p>
+<h5 id="3332-bus-lock-handle">3.3.3.2 bus lock handle</h5>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">static</span> <span class="n">__always_inline</span> <span class="kt">void</span> <span class="nf">exc_debug_user</span><span class="p">(</span><span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="n">regs</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                                           <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">dr6</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="cm">/* #DB for bus lock can only be triggered from userspace. */</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">dr6</span> <span class="o">&amp;</span> <span class="n">DR_BUS_LOCK</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                <span class="n">handle_bus_lock</span><span class="p">(</span><span class="n">regs</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">void</span> <span class="nf">handle_bus_lock</span><span class="p">(</span><span class="k">struct</span> <span class="n">pt_regs</span> <span class="o">*</span><span class="n">regs</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">switch</span> <span class="p">(</span><span class="n">sld_state</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">case</span> <span class="nl">sld_off</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">                <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="k">case</span> <span class="nl">sld_ratelimit</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">                <span class="cm">/* Enforce no more than bld_ratelimit bus locks/sec. */</span>
+</span></span><span class="line"><span class="cl">                <span class="k">while</span> <span class="p">(</span><span class="o">!</span><span class="n">__ratelimit</span><span class="p">(</span><span class="o">&amp;</span><span class="n">bld_ratelimit</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                        <span class="n">msleep</span><span class="p">(</span><span class="mi">20</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="cm">/* Warn on the bus lock. */</span>
+</span></span><span class="line"><span class="cl">                <span class="n">fallthrough</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="k">case</span> <span class="nl">sld_warn</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">                <span class="n">pr_warn_ratelimited</span><span class="p">(</span><span class="s">&#34;#DB: %s/%d took a bus_lock trap at address: 0x%lx</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                                    <span class="n">current</span><span class="o">-&gt;</span><span class="n">comm</span><span class="p">,</span> <span class="n">current</span><span class="o">-&gt;</span><span class="n">pid</span><span class="p">,</span> <span class="n">regs</span><span class="o">-&gt;</span><span class="n">ip</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="k">case</span> <span class="nl">sld_fatal</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">                <span class="n">force_sig_fault</span><span class="p">(</span><span class="n">SIGBUS</span><span class="p">,</span> <span class="n">BUS_ADRALN</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>After the #DB trap is generated, the flow of warn and fatal is basically similar to #AC, we focus here on ratelimit, which is also a strong requirement for the introduction of bus lock.</p>
+<p>Forcing the frequency of bus lock generation down to the configured ratelimit. The principle is that if the frequency exceeds the setting, it sleeps for 20 ms until the frequency drops (the frequency here is the frequency at which the whole system generates bus lock).</p>
+<p>After the frequency drop, a warning log is generated in the sld_warn case via the compiler&rsquo;s fallthrough stream.</p>
+<h2 id="4-detection-and-handling-of-virtualized-environments">4. Detection and handling of virtualized environments</h2>
+<p>The previous analysis was done for the kernel and user state programs (VMX root mode) on the physical machine. In a virtualized environment, we need to consider some more issues, such as how to detect split lock if it comes from the Guest? How to avoid the impact on other Guests? If you enable bus lock ratelimit directly on the Host, it may affect guests who are not ready for it, and if you expose the split lock detection switch directly to the Guest, what happens to the Host or other Guests, etc.</p>
+<p>The CPU can support #AC trap for split lock detection in VMX mode, and it is up to the hypervisor to decide what to do later. Most hypervisors forward the trap directly to the Guest, which can cause a crash if the Guest is not ready, as was the case in previous versions of VMX.</p>
+<p>So the first step is to get the hypervisor to handle traps correctly.</p>
+<h3 id="41-processing-flow-of-virtualized-environment">4.1 Processing flow of virtualized environment</h3>
+<p>The following is the overall processing flow for split lock and bus lock in a virtualized environment.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/d88441aed4cd4e59a60b5f584752aa41.png" alt="overall processing flow for split lock and bus lock in a virtualized environment"></p>
+<p>If the hardware does not support split lock detection or is legacy #AC, the #AC will be injected to the Guest for processing, if the hardware supports detection, then a warning will be generated according to the configuration, or even a SIGBUS will be attempted.</p>
+<p>After Guest performs bus lock, it will vm exit to kvm, which will notify QEMU and the vCPU thread will actively sleep to downscale.</p>
+<p>Let&rsquo;s analyze this from the bottom up.</p>
+<h3 id="42-hardware-support">4.2 Hardware support</h3>
+<h4 id="421-split-lock">4.2.1 split lock</h4>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/079abccc2afd4ea1bd04bf045d3d9d5d.png" alt="#AC exception"></p>
+<p>The #AC exception is included in the NMI exit reason.</p>
+<h4 id="422-bus-lock">4.2.2 bus lock</h4>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images/2022/05/10/c2309a0c4fc84c9a928af6bfcd4caa73.png" alt="bus lock VM exit"></p>
+<p>In VMX non-root mode, the CPU detects the bus lock and generates a VM exit with a reason of 74.</p>
+<h3 id="43-kvm-support">4.3 KVM Support</h3>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">-&gt; vmx_handle_exit
+</span></span><span class="line"><span class="cl">    -&gt; __vmx_handle_exit
+</span></span><span class="line"><span class="cl">        -&gt; kvm_vmx_exit_handlers
+</span></span><span class="line"><span class="cl">            -&gt; handle_exception_nmi // split lock
+</span></span><span class="line"><span class="cl">            -&gt; handle_bus_lock_vmexit // bus lock
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h4 id="431-split-lock">4.3.1 split lock</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">int</span> <span class="nf">handle_exception_nmi</span><span class="p">(</span><span class="k">struct</span> <span class="n">kvm_vcpu</span> <span class="o">*</span><span class="n">vcpu</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">switch</span> <span class="p">(</span><span class="n">ex_no</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">case</span> <span class="nl">AC_VECTOR</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">                <span class="k">if</span> <span class="p">(</span><span class="n">vmx_guest_inject_ac</span><span class="p">(</span><span class="n">vcpu</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                        <span class="n">kvm_queue_exception_e</span><span class="p">(</span><span class="n">vcpu</span><span class="p">,</span> <span class="n">AC_VECTOR</span><span class="p">,</span> <span class="n">error_code</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                        <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">                <span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm">                 * Handle split lock. Depending on detection mode this will
+</span></span></span><span class="line"><span class="cl"><span class="cm">                 * either warn and disable split lock detection for this
+</span></span></span><span class="line"><span class="cl"><span class="cm">                 * task or force SIGBUS on it.
+</span></span></span><span class="line"><span class="cl"><span class="cm">                 */</span>
+</span></span><span class="line"><span class="cl">                <span class="k">if</span> <span class="p">(</span><span class="n">handle_guest_split_lock</span><span class="p">(</span><span class="n">kvm_rip_read</span><span class="p">(</span><span class="n">vcpu</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">                        <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Guest handle
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kt">bool</span> <span class="n">vmx_guest_inject_ac</span><span class="p">(</span><span class="k">struct</span> <span class="n">kvm_vcpu</span> <span class="o">*</span><span class="n">vcpu</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">boot_cpu_has</span><span class="p">(</span><span class="n">X86_FEATURE_SPLIT_LOCK_DETECT</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span> <span class="nb">true</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="n">vmx_get_cpl</span><span class="p">(</span><span class="n">vcpu</span><span class="p">)</span> <span class="o">==</span> <span class="mi">3</span> <span class="o">&amp;&amp;</span> <span class="n">kvm_read_cr0_bits</span><span class="p">(</span><span class="n">vcpu</span><span class="p">,</span> <span class="n">X86_CR0_AM</span><span class="p">)</span> <span class="o">&amp;&amp;</span>
+</span></span><span class="line"><span class="cl">               <span class="p">(</span><span class="n">kvm_get_rflags</span><span class="p">(</span><span class="n">vcpu</span><span class="p">)</span> <span class="o">&amp;</span> <span class="n">X86_EFLAGS_AC</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// KVM handle
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kt">bool</span> <span class="n">handle_guest_split_lock</span><span class="p">(</span><span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">ip</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">sld_state</span> <span class="o">==</span> <span class="n">sld_warn</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="n">split_lock_warn</span><span class="p">(</span><span class="n">ip</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span> <span class="nb">true</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">pr_warn_once</span><span class="p">(</span><span class="s">&#34;#AC: %s/%d %s split_lock trap at address: 0x%lx</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                     <span class="n">current</span><span class="o">-&gt;</span><span class="n">comm</span><span class="p">,</span> <span class="n">current</span><span class="o">-&gt;</span><span class="n">pid</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                     <span class="n">sld_state</span> <span class="o">==</span> <span class="n">sld_fatal</span> <span class="o">?</span> <span class="s">&#34;fatal&#34;</span> <span class="o">:</span> <span class="s">&#34;bogus&#34;</span><span class="p">,</span> <span class="n">ip</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="n">current</span><span class="o">-&gt;</span><span class="kr">thread</span><span class="p">.</span><span class="n">error_code</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="n">current</span><span class="o">-&gt;</span><span class="kr">thread</span><span class="p">.</span><span class="n">trap_nr</span> <span class="o">=</span> <span class="n">X86_TRAP_AC</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="n">force_sig_fault</span><span class="p">(</span><span class="n">SIGBUS</span><span class="p">,</span> <span class="n">BUS_ADRALN</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="nb">false</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>When a split lock operation is generated inside the Guest, the VM will exit because it is an #AC exception.</p>
+<p>First of all, there are two types of #AC exceptions themselves.</p>
+<ol>
+<li>legacy #AC exception</li>
+<li>split lock #AC exception</li>
+</ol>
+<p>KVM eventually produces two behaviors based on Host and Guest states.</p>
+<ol>
+<li>
+<p>Let the Guest process: Inject #AC into the Guest.</p>
+<ul>
+<li>If the hardware does not support split lock detection, inject into Guest unconditionally.</li>
+<li>If the Host enables split lock detection, it will only be injected into the Guest if the #AC exception is generated for the Guest user state and the legacy #AC.</li>
+</ul>
+</li>
+<li>
+<p>Let HOST handle it: generate warnings or even send SIGBUS.</p>
+<ul>
+<li>When not injected into Guest, Host will only warn once per vCPU thread if it is configured to warn, or generate SIGBUS if it is configured to fatal.</li>
+</ul>
+</li>
+</ol>
+<h4 id="432-bus-lock">4.3.2 bus lock</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="cp">#define EXIT_REASON_BUS_LOCK            74
+</span></span></span><span class="line"><span class="cl"><span class="cp"></span>
+</span></span><span class="line"><span class="cl"><span class="k">static</span> <span class="nf">int</span> <span class="p">(</span><span class="o">*</span><span class="n">kvm_vmx_exit_handlers</span><span class="p">[])(</span><span class="k">struct</span> <span class="n">kvm_vcpu</span> <span class="o">*</span><span class="n">vcpu</span><span class="p">)</span> <span class="o">=</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="p">[</span><span class="n">EXIT_REASON_BUS_LOCK</span><span class="p">]</span>                <span class="o">=</span> <span class="n">handle_bus_lock_vmexit</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">int</span> <span class="nf">handle_bus_lock_vmexit</span><span class="p">(</span><span class="k">struct</span> <span class="n">kvm_vcpu</span> <span class="o">*</span><span class="n">vcpu</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * Hardware may or may not set the BUS_LOCK_DETECTED flag on BUS_LOCK
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * VM-Exits. Unconditionally set the flag here and leave the handling to
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * vmx_handle_exit().
+</span></span></span><span class="line"><span class="cl"><span class="cm">         */</span>
+</span></span><span class="line"><span class="cl">        <span class="n">to_vmx</span><span class="p">(</span><span class="n">vcpu</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">exit_reason</span><span class="p">.</span><span class="n">bus_lock_detected</span> <span class="o">=</span> <span class="nb">true</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">union</span> <span class="n">vmx_exit_reason</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">basic</span>                        <span class="p">:</span> <span class="mi">16</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">reserved16</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">reserved17</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">reserved18</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">reserved19</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">reserved20</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">reserved21</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">reserved22</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">reserved23</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">reserved24</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">reserved25</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">bus_lock_detected</span>        <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">enclave_mode</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">smi_pending_mtf</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">smi_from_vmx_root</span>        <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">reserved30</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="n">u32</span>        <span class="nl">failed_vmentry</span>                <span class="p">:</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="p">};</span>
+</span></span><span class="line"><span class="cl">        <span class="n">u32</span> <span class="n">full</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>After VM exit, the function handle_bus_lock_vmexit is executed according to the reason 74 index, which simply sets bus_lock_detected of exit_reason to bit.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">int</span> <span class="nf">vmx_handle_exit</span><span class="p">(</span><span class="k">struct</span> <span class="n">kvm_vcpu</span> <span class="o">*</span><span class="n">vcpu</span><span class="p">,</span> <span class="n">fastpath_t</span> <span class="n">exit_fastpath</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="kt">int</span> <span class="n">ret</span> <span class="o">=</span> <span class="n">__vmx_handle_exit</span><span class="p">(</span><span class="n">vcpu</span><span class="p">,</span> <span class="n">exit_fastpath</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * Exit to user space when bus lock detected to inform that there is
+</span></span></span><span class="line"><span class="cl"><span class="cm">         * a bus lock in guest.
+</span></span></span><span class="line"><span class="cl"><span class="cm">         */</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">to_vmx</span><span class="p">(</span><span class="n">vcpu</span><span class="p">)</span><span class="o">-&gt;</span><span class="n">exit_reason</span><span class="p">.</span><span class="n">bus_lock_detected</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="k">if</span> <span class="p">(</span><span class="n">ret</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                        <span class="n">vcpu</span><span class="o">-&gt;</span><span class="n">run</span><span class="o">-&gt;</span><span class="n">exit_reason</span> <span class="o">=</span> <span class="n">KVM_EXIT_X86_BUS_LOCK</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">                <span class="n">vcpu</span><span class="o">-&gt;</span><span class="n">run</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">|=</span> <span class="n">KVM_RUN_X86_BUS_LOCK</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="n">ret</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>After executing __vmx_handle_exit. The exit_reason and flags returned to the user state are set after the bus_lock_detected is detected.</p>
+<h3 id="44-qemu-support">4.4 QEMU support</h3>
+<p>Using the v6.2.0 version as an example for analysis.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="o">-&gt;</span> <span class="n">kvm_cpu_exec</span>
+</span></span><span class="line"><span class="cl">    <span class="o">-&gt;</span> <span class="n">kvm_vcpu_ioctl</span>
+</span></span><span class="line"><span class="cl">    <span class="o">-&gt;</span> <span class="n">kvm_arch_post_run</span>
+</span></span><span class="line"><span class="cl">    <span class="o">-&gt;</span> <span class="n">kvm_arch_handle_exit</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">int</span> <span class="n">kvm_arch_handle_exit</span><span class="p">(</span><span class="n">CPUState</span> <span class="o">*</span><span class="n">cs</span><span class="p">,</span> <span class="k">struct</span> <span class="n">kvm_run</span> <span class="o">*</span><span class="n">run</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">switch</span> <span class="p">(</span><span class="n">run</span><span class="o">-&gt;</span><span class="n">exit_reason</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">case</span> <span class="nl">KVM_EXIT_X86_BUS_LOCK</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">            <span class="cm">/* already handled in kvm_arch_post_run */</span>
+</span></span><span class="line"><span class="cl">            <span class="n">ret</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="n">MemTxAttrs</span> <span class="n">kvm_arch_post_run</span><span class="p">(</span><span class="n">CPUState</span> <span class="o">*</span><span class="n">cpu</span><span class="p">,</span> <span class="k">struct</span> <span class="n">kvm_run</span> <span class="o">*</span><span class="n">run</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">(</span><span class="n">run</span><span class="o">-&gt;</span><span class="n">flags</span> <span class="o">&amp;</span> <span class="n">KVM_RUN_X86_BUS_LOCK</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">kvm_rate_limit_on_bus_lock</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">void</span> <span class="n">kvm_rate_limit_on_bus_lock</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">uint64_t</span> <span class="n">delay_ns</span> <span class="o">=</span> <span class="n">ratelimit_calculate_delay</span><span class="p">(</span><span class="o">&amp;</span><span class="n">bus_lock_ratelimit_ctrl</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">(</span><span class="n">delay_ns</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">g_usleep</span><span class="p">(</span><span class="n">delay_ns</span> <span class="o">/</span> <span class="n">SCALE_US</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>QEMU learns from the KVM return value that bus lock is generated in the Guest and enters kvm_rate_limit_on_bus_lock, which also implements ratelimit through sleep to reduce the frequency of bus lock generated by the Guest.</p>
+<p>The ratelimit on the Host is controlled by the split_lock_detect startup parameter, but what about the Guest?</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">kvm_arch_init</span><span class="p">(</span><span class="n">MachineState</span> <span class="o">*</span><span class="n">ms</span><span class="p">,</span> <span class="n">KVMState</span> <span class="o">*</span><span class="n">s</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">(</span><span class="n">object_dynamic_cast</span><span class="p">(</span><span class="n">OBJECT</span><span class="p">(</span><span class="n">ms</span><span class="p">),</span> <span class="n">TYPE_X86_MACHINE</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">X86MachineState</span> <span class="o">*</span><span class="n">x86ms</span> <span class="o">=</span> <span class="n">X86_MACHINE</span><span class="p">(</span><span class="n">ms</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">x86ms</span><span class="o">-&gt;</span><span class="n">bus_lock_ratelimit</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="n">ret</span> <span class="o">=</span> <span class="n">kvm_check_extension</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">KVM_CAP_X86_BUS_LOCK_EXIT</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="p">(</span><span class="n">ret</span> <span class="o">&amp;</span> <span class="n">KVM_BUS_LOCK_DETECTION_EXIT</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="n">error_report</span><span class="p">(</span><span class="s">&#34;kvm: bus lock detection unsupported&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span> <span class="o">-</span><span class="n">ENOTSUP</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="p">}</span>
+</span></span><span class="line"><span class="cl">            <span class="n">ret</span> <span class="o">=</span> <span class="n">kvm_vm_enable_cap</span><span class="p">(</span><span class="n">s</span><span class="p">,</span> <span class="n">KVM_CAP_X86_BUS_LOCK_EXIT</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                                    <span class="n">KVM_BUS_LOCK_DETECTION_EXIT</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="p">(</span><span class="n">ret</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="n">error_report</span><span class="p">(</span><span class="s">&#34;kvm: Failed to enable bus lock detection cap: %s&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                             <span class="n">strerror</span><span class="p">(</span><span class="o">-</span><span class="n">ret</span><span class="p">));</span>
+</span></span><span class="line"><span class="cl">                <span class="k">return</span> <span class="n">ret</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">            <span class="p">}</span>
+</span></span><span class="line"><span class="cl">            <span class="n">ratelimit_init</span><span class="p">(</span><span class="o">&amp;</span><span class="n">bus_lock_ratelimit_ctrl</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">            <span class="n">ratelimit_set_speed</span><span class="p">(</span><span class="o">&amp;</span><span class="n">bus_lock_ratelimit_ctrl</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                                <span class="n">x86ms</span><span class="o">-&gt;</span><span class="n">bus_lock_ratelimit</span><span class="p">,</span> <span class="n">BUS_LOCK_SLICE_TIME</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">void</span> <span class="nf">x86_machine_get_bus_lock_ratelimit</span><span class="p">(</span><span class="n">Object</span> <span class="o">*</span><span class="n">obj</span><span class="p">,</span> <span class="n">Visitor</span> <span class="o">*</span><span class="n">v</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                                <span class="k">const</span> <span class="kt">char</span> <span class="o">*</span><span class="n">name</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">opaque</span><span class="p">,</span> <span class="n">Error</span> <span class="o">**</span><span class="n">errp</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">X86MachineState</span> <span class="o">*</span><span class="n">x86ms</span> <span class="o">=</span> <span class="n">X86_MACHINE</span><span class="p">(</span><span class="n">obj</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">uint64_t</span> <span class="n">bus_lock_ratelimit</span> <span class="o">=</span> <span class="n">x86ms</span><span class="o">-&gt;</span><span class="n">bus_lock_ratelimit</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="n">visit_type_uint64</span><span class="p">(</span><span class="n">v</span><span class="p">,</span> <span class="n">name</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">bus_lock_ratelimit</span><span class="p">,</span> <span class="n">errp</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">static</span> <span class="kt">void</span> <span class="nf">x86_machine_class_init</span><span class="p">(</span><span class="n">ObjectClass</span> <span class="o">*</span><span class="n">oc</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">data</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">object_class_property_add</span><span class="p">(</span><span class="n">oc</span><span class="p">,</span> <span class="n">X86_MACHINE_BUS_LOCK_RATELIMIT</span><span class="p">,</span> <span class="s">&#34;uint64_t&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                                <span class="n">x86_machine_get_bus_lock_ratelimit</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                                <span class="n">x86_machine_set_bus_lock_ratelimit</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="cp">#define X86_MACHINE_BUS_LOCK_RATELIMIT  &#34;bus-lock-ratelimit&#34;
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>QEMU ratelimit for Guest bus lock is obtained from the boot parameter bus-lock-ratelimit.</p>
+<h3 id="45-libvirt-support">4.5 Libvirt Support</h3>
+<p>Libvirt supports QEMU&rsquo;s bus-lock-ratelimit startup parameter which is currently not available from upsteam:</p>
+<p><a href="https://listman.redhat.com/archives/libvir-list/2021-December/225755.html">https://listman.redhat.com/archives/libvir-list/2021-December/225755.html</a></p>
+<h2 id="5-summary">5. Summary</h2>
+<p>Due to the nature of X86 hardware, which supports atomic semantics across cache lines, implementation requires split lock to maintain atomicity, but this comes at the cost of system-wide access performance. Developers gradually realize that this feature is harmful and try not to use it, for example, kernel developers ensure that they do not generate split lock, even at the expense of kernel panic, while user-state programs generate warnings and then reduce the execution frequency of the program or have the kernel kill it. The virtualized environment has a large software stack, so it is handled by the host-side KVM and QEMU as much as possible to alert or even kill the virtual machine, or to notify QEMU to downscale.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/cpu/">cpu</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/2022-05/cpp-std-expected/">
+            <span class="next-text nav-default">Basic usage of std::expected</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
