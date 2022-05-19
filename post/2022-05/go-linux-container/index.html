@@ -1,0 +1,1802 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Dissecting Linux container implementation principles using Go - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Exploring the principles of containerization using Go and Linux Kernel technologies, the main technical points being NameSpace and Cgroups." /><meta name="keywords" content="golang, Container, Linux" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-05/go-linux-container/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="Dissecting Linux container implementation principles using Go" />
+<meta property="og:description" content="Exploring the principles of containerization using Go and Linux Kernel technologies, the main technical points being NameSpace and Cgroups." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-05/go-linux-container/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-05-19T13:35:56+08:00" />
+<meta property="article:modified_time" content="2022-05-19T13:35:56+08:00" />
+
+<meta itemprop="name" content="Dissecting Linux container implementation principles using Go">
+<meta itemprop="description" content="Exploring the principles of containerization using Go and Linux Kernel technologies, the main technical points being NameSpace and Cgroups."><meta itemprop="datePublished" content="2022-05-19T13:35:56+08:00" />
+<meta itemprop="dateModified" content="2022-05-19T13:35:56+08:00" />
+<meta itemprop="wordCount" content="7068">
+<meta itemprop="keywords" content="golang,linux," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Dissecting Linux container implementation principles using Go"/>
+<meta name="twitter:description" content="Exploring the principles of containerization using Go and Linux Kernel technologies, the main technical points being NameSpace and Cgroups."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Dissecting Linux container implementation principles using Go</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-05-19 13:35:56 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 7068 words </span>
+          <span class="more-meta"> 15 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#advantages-of-containers">Advantages of containers</a></li>
+        <li><a href="#the-nature-of-containers">The nature of containers</a>
+          <ul>
+            <li><a href="#1-namespace">1. NameSpace</a></li>
+            <li><a href="#2-cgroups">2. Cgroups</a></li>
+            <li><a href="#3-unionfs">3. UnionFS</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="advantages-of-containers">Advantages of containers</h2>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/21d4ec7334ff42af90742a28bb5d2178.png" alt="Advantages of containers"></p>
+<p>Traditional model deployments, which run multiple applications directly on a physical server, may cause performance degradation of other applications if one of them takes up most of the resources.</p>
+<p>In the era of virtualized deployments, multiple virtual machines (VMs) can be run on the CPU of a single physical server, with each VM being a complete computer running all components (including the operating system) on top of the virtualized hardware. As a result, it is possible to have different applications running securely and in isolation between VMs, making better use of the resources on the physical server.</p>
+<p>Containers are similar to VMs in that they have their own file system, CPU, memory, process space, etc., but unlike VMs, containers share the operating system (OS) between them. Therefore, containers are considered to be a lightweight OS-level virtualization technology.</p>
+<p>Lightweight containers are better suited for cloud-native model practices than VMs.</p>
+<h2 id="the-nature-of-containers">The nature of containers</h2>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/29be127d9b1b48bea80ac904dbec222e.png" alt="containers"></p>
+<p>Containers are a lightweight operating system level virtualization technology.</p>
+<p>The focus is on the &ldquo;operating system level&rdquo;, i.e. containers essentially use the functionality provided by the operating system to implement virtualization.</p>
+<p>Docker, the poster child for container technology, is a virtualization tool based on the Linux operating system, written in Go, that invokes Linux Kernel functionality.</p>
+<p>To better understand the nature of containers, let&rsquo;s take a look at what Linux Kernel technologies are specifically used by containers and how they should be invoked in Go.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/671f3768d4bb47d78ed73a6497cb7d69.png" alt="The Linux Kernel technology behind containerization"></p>
+<h3 id="1-namespace">1. NameSpace</h3>
+<p>NameSpace is a powerful feature of Linux Kernel, which can be used for resource isolation between processes.</p>
+<p>As the OS is shared between containers, for the operating system, the essence of the container is the process, multiple containers running, corresponding to the operating system is also running multiple processes.</p>
+<p>When processes run in their own separate namespace, the resource isolation of the namespace ensures that the processes do not affect each other and everyone thinks they are in a separate OS. Such processes can be called containers.</p>
+<p>Back to resource isolation, starting from Kernel: version 5.6, there are 8 types of NameSpace, which can be used to isolate different resources (Docker mainly uses the first 6 types).</p>
+<table>
+<thead>
+<tr>
+<th>namespace</th>
+<th>system call parameters</th>
+<th>role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Mount (mnt)</td>
+<td>CLONE_NEWNS</td>
+<td>File directory mount isolation. Used to isolate the mount point view seen by individual processes</td>
+</tr>
+<tr>
+<td>Process ID (pid)</td>
+<td>CLONE_NEWPID</td>
+<td>Process ID isolation. Make each namespace have its own initialization process with a PID of 1, as the parent of all processes</td>
+</tr>
+<tr>
+<td>Network (net)</td>
+<td>CLONE_NEWNET</td>
+<td>Network isolation. Make each net namespace have separate network resources such as network devices, IP addresses, routing tables, /proc/net directories, etc.</td>
+</tr>
+<tr>
+<td>Interprocess Communication (ipc)</td>
+<td>CLONE_NEWIPC</td>
+<td>Process IPC communication isolation. Let only processes with the same IPC namespace share memory, semaphores, and message queues to communicate with each other</td>
+</tr>
+<tr>
+<td>UTS</td>
+<td>CLONE_NEWUTS</td>
+<td>Hostname or domain name isolation. So that it can be treated as a separate node on the network rather than a process on the host</td>
+</tr>
+<tr>
+<td>User ID (user)</td>
+<td>CLONE_NEWUSER</td>
+<td>User UIDs and group GIDs are isolated. For example, each namespace can have its own root user</td>
+</tr>
+<tr>
+<td>Control group (cgroup) Namespace</td>
+<td>CLONE_NEWCGROUP</td>
+<td>Cgroup information isolation. Used to hide the identity of the control group to which the process belongs, so that the cgroup view in the namespace is always presented as the root, for security</td>
+</tr>
+<tr>
+<td>Time Namespace</td>
+<td>CLONE_NEWTIME</td>
+<td>System time isolation. Allow different processes to see different system times</td>
+</tr>
+</tbody>
+</table>
+<p>A detailed description of NameSpace can be found in the NAMESPACES section of the <a href="https://man7.org/linux/man-pages/man7/namespaces.7.html">Linux man manual</a>, which also describes several NameSpace APIs, mainly process-related system call functions.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/9ea6fd021f414bbfb2836ab5f9c476ca.png" alt="name space api"></p>
+<h4 id="clone">clone()</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">clone</span><span class="p">(</span><span class="kt">int</span> <span class="p">(</span><span class="o">*</span><span class="n">fn</span><span class="p">)(</span><span class="kt">void</span> <span class="o">*</span><span class="p">),</span> <span class="kt">void</span> <span class="o">*</span><span class="n">stack</span><span class="p">,</span> <span class="kt">int</span> <span class="n">flags</span><span class="p">,</span> <span class="kt">void</span> <span class="o">*</span><span class="n">arg</span><span class="p">,</span> <span class="p">...</span>
+</span></span><span class="line"><span class="cl">                 <span class="cm">/* pid_t *parent_tid, void *tls, pid_t *child_tid */</span> <span class="p">);</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>clone() is used to create a new process. Different types of NameSpace can be created by passing one or more system call parameters (flags parameter) and the child processes will become members of these NameSpace.</p>
+<h4 id="setns">setns()</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">setns</span><span class="p">(</span><span class="kt">int</span> <span class="n">fd</span><span class="p">,</span> <span class="kt">int</span> <span class="n">nstype</span><span class="p">);</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>setns() is used to add a process to an existing Namespace. Where fd is a file descriptor that references the corresponding file in the <code>/proc/[pid]/ns/</code> directory and nstype represents the NameSpace type.</p>
+<h4 id="unshare">unshare()</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">unshare</span><span class="p">(</span><span class="kt">int</span> <span class="n">flags</span><span class="p">);</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>unshare() is used to move the process out of the original NameSpace and add it to the newly created NameSpace. The new NameSpace is also created by passing in one or more system call parameters (flags parameter).</p>
+<h4 id="ioctl">ioctl()</h4>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">ioctl</span><span class="p">(</span><span class="kt">int</span> <span class="n">fd</span><span class="p">,</span> <span class="kt">unsigned</span> <span class="kt">long</span> <span class="n">request</span><span class="p">,</span> <span class="p">...);</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>ioctl() is used to discover information about the NameSpace.</p>
+<p>The above system call functions can be called directly in C to create various types of NameSpace, which is the most intuitive way to do it. The Go language already encapsulates these functions internally for us, making it easier to use them directly and less mentally taxing.</p>
+<p>Let&rsquo;s start with a simple widget (from Containers From Scratch - <a href="https://www.youtube.com/watch?v=8fi7uSYlOdc">Liz Rice - GOTO 2018</a>).</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kn">package</span> <span class="nx">main</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;os&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;os/exec&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="k">switch</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="k">case</span> <span class="s">&#34;run&#34;</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="nf">run</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"> <span class="k">default</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="nb">panic</span><span class="p">(</span><span class="s">&#34;help&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">run</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">3</span><span class="p">:]</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdin</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdin</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">cmd</span><span class="p">.</span><span class="nf">Run</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">must</span><span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>This program takes the arguments passed from the user&rsquo;s command line and runs them using exec.Command. For example, when we execute go run main.go run echo hello, the main process is created, a new echo process is created by executing the echo hello command within the main process, and finally the main process ends and exits as the echo process finishes executing.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># go run main.go run echo hello</span>
+</span></span><span class="line"><span class="cl">hello
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/77247a5951dd45c6b11f022f355a57eb.png" alt="main -&gt; echo"></p>
+<p>But the process created above exits too soon for us to see. What happens if we let the main process start a bash process?</p>
+<p>For visual comparison, let&rsquo;s look at the process information for the current session.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># ps</span>
+</span></span><span class="line"><span class="cl">  PID TTY          TIME CMD
+</span></span><span class="line"><span class="cl"> <span class="m">1115</span> pts/0    00:00:00 bash
+</span></span><span class="line"><span class="cl"> <span class="m">1205</span> pts/0    00:00:00 ps
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># echo $$</span>
+</span></span><span class="line"><span class="cl"><span class="m">1115</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>We are currently in the <code>bash</code> session process with PID 1115, proceed to the next step.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># go run main.go run /bin/bash</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># ps</span>
+</span></span><span class="line"><span class="cl">  PID TTY          TIME CMD
+</span></span><span class="line"><span class="cl"> <span class="m">1115</span> pts/0    00:00:00 bash
+</span></span><span class="line"><span class="cl"> <span class="m">1207</span> pts/0    00:00:00 go
+</span></span><span class="line"><span class="cl"> <span class="m">1225</span> pts/0    00:00:00 main
+</span></span><span class="line"><span class="cl"> <span class="m">1228</span> pts/0    00:00:00 bash
+</span></span><span class="line"><span class="cl"> <span class="m">1240</span> pts/0    00:00:00 ps
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># echo $$</span>
+</span></span><span class="line"><span class="cl"><span class="m">1228</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># exit</span>
+</span></span><span class="line"><span class="cl"><span class="nb">exit</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># ps</span>
+</span></span><span class="line"><span class="cl">  PID TTY          TIME CMD
+</span></span><span class="line"><span class="cl"> <span class="m">1115</span> pts/0    00:00:00 bash
+</span></span><span class="line"><span class="cl"> <span class="m">1241</span> pts/0    00:00:00 ps
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># echo $$</span>
+</span></span><span class="line"><span class="cl"><span class="m">1115</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>After executing <code>go run main.go run /bin/bash</code>, our session is switched to the <code>bash</code> process with PID 1228, and the <code>main</code> process is still running (the <code>bash</code> process we are currently in is a child of the <code>main</code> process, and the <code>main</code> process must be alive in order to keep the <code>bash</code> process (running). When <code>exit</code> is executed to exit the <code>bash</code> process you are currently in, the <code>main</code> process ends and returns to the original PID 1115 <code>bash</code> session process.</p>
+<p>As we said, containers are essentially processes, and you can now think of the <code>main</code> process as the &ldquo;Docker&rdquo; tool, and the <code>bash</code> process started by the <code>main</code> process, as a &ldquo;container&rdquo;. Here &ldquo;Docker&rdquo; creates and starts a &ldquo;container&rdquo;.</p>
+<p>The reason for the double quotes is that in this <code>bash</code> process, we can use as many resources of the operating system as we want, and there is no resource isolation done.</p>
+<p>To implement resource isolation, it is also simple to add <code>SysProcAttr</code> configuration to the run() function, starting with the simplest UTS isolation, passing in the corresponding <code>CLONE_NEWUTS</code> system call parameters and setting the hostname via <code>syscall.Sethostname</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">run</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">3</span><span class="p">:]</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdin</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdin</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">SysProcAttr</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">syscall</span><span class="p">.</span><span class="nx">SysProcAttr</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nx">Cloneflags</span><span class="p">:</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">CLONE_NEWUTS</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Sethostname</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;mycontainer&#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">cmd</span><span class="p">.</span><span class="nf">Run</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>This code may not seem like a problem, but think about it.</p>
+<p>syscall.Sethostname Which process is executing this line, the main process or the child process created by the main process?</p>
+<p>No need to think about it, the child process is not even running yet! The main process is not isolated from resources, so it&rsquo;s like changing the host name of the host directly.</p>
+<p>The host name cannot be changed before the child process is run up, and when the child process is run up, it will enter the blocking state and cannot be changed to the host name in the child process by code. So what can be done?</p>
+<p>It seems that we have to bring out the magic tool <code>/proc/self/exe</code>.</p>
+<p>In Linux 2.2 kernel version and later, <code>/proc/[pid]/exe</code> is a symbolic link to the binary file corresponding to the pid process, containing the actual pathname of the command being executed. If you open this file, you open the corresponding binary, and can even re-run a process corresponding to the pid&rsquo;s binary by retyping <code>/proc/[pid]/exe</code>.</p>
+<p>For <code>/proc/self</code>, when the process accesses this magic symbolic link, it can resolve to the process&rsquo;s own <code>/proc/[pid]</code> directory.</p>
+<p>All together, when a process accesses <code>/proc/self/exe</code>, it can run a binary file corresponding to the process itself.</p>
+<p>What does this do? Continue with the following code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kn">package</span> <span class="nx">main</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;os&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;os/exec&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;syscall&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="k">switch</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="k">case</span> <span class="s">&#34;run&#34;</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="nf">run</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"> <span class="k">case</span> <span class="s">&#34;child&#34;</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="nf">child</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"> <span class="k">default</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="nb">panic</span><span class="p">(</span><span class="s">&#34;help&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">run</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="s">&#34;/proc/self/exe&#34;</span><span class="p">,</span> <span class="nb">append</span><span class="p">([]</span><span class="kt">string</span><span class="p">{</span><span class="s">&#34;child&#34;</span><span class="p">},</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">2</span><span class="p">:]</span><span class="o">...</span><span class="p">)</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdin</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdin</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">SysProcAttr</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">syscall</span><span class="p">.</span><span class="nx">SysProcAttr</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nx">Cloneflags</span><span class="p">:</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">CLONE_NEWUTS</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">cmd</span><span class="p">.</span><span class="nf">Run</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">child</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Sethostname</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;mycontainer&#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">3</span><span class="p">:]</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdin</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdin</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">cmd</span><span class="p">.</span><span class="nf">Run</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">must</span><span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>In the run() function, instead of running the user-passed command line arguments directly, we run <code>/proc/self/exe</code> and pass in the <code>child</code> argument and the user-passed command line arguments.</p>
+<p>Also when executing <code>go run main.go run echo hello</code>, the <code>main</code> process is created, and the <code>main</code> process executes the <code>/proc/self/exe child echo hello</code> command to create a new <code>exe</code> process, which is the key to this <code>exe</code> process, for which we have configured the <code>CLONE_NEWUTS</code> system call parameter for UTS isolation. That is, the <code>exe</code> process can have a different host name than the <code>main</code> process, without interfering with each other.</p>
+<p>Process access to <code>/proc/self/exe</code> means running the binary file of the corresponding process itself. Therefore, according to the start parameters of the <code>exe</code> process, the child() function is executed, and within the child() function, <code>syscall.Sethostname</code> is first called to change the hostname (which is executed by the <code>exe</code> process and does not affect the <code>main</code> process), and then, as with the run() function at the beginning of this article, the  <code>exec.Command</code> to run the parameters passed by the user command line.</p>
+<p>To summarize, the <code>main</code> process creates the <code>exe</code> process (the <code>exe</code> process is already UTS-isolated, so the host name change of the <code>exe</code> process will not affect the <code>main</code> process), then the <code>exe</code> process executes the <code>echo hello</code> command to create a new <code>echo</code> process, and finally, as the <code>echo</code> process finishes executing, the <code>exe</code> process ends, and after the <code>exe</code> process ends, the <code>main</code> process ends and exits again.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/c28d8d7c89a34660a0fa6bbbe616f646.png" alt="main -&gt; exe(UTF NS) -&gt; echo"></p>
+<p>What is the difference between the <code>echo</code> process created by the intermediary <code>exe</code> and the <code>echo</code> process created directly by the <code>main</code> process.</p>
+<p>We know that while creating the <code>exe</code> process we pass the <code>CLONE_NEWUTS</code> identifier to create a UTS NameSpace, Go internally encapsulates the call to the system call function clone() for us, and as we said, the children of the process created by the clone() function will also become members of these NameSpace. So by default (when creating a new process without continuing to specify system call parameters), the <code>echo</code> process created by the <code>exe</code> process will inherit the resources of the <code>exe</code> process, and the <code>echo</code> process will have the same hostname as the <code>exe</code> process, and will also not interfere with the <code>main</code> process.</p>
+<p>Thus, with the intermediary <code>exe</code> process, the <code>echo</code> process can be successfully resource isolated from the host (<code>main</code> process) and have a different host name.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/3961f3d9a5a2403986df73eaf88de789.png" alt="main exe(uts ns) -&gt; echo(uts ns)"></p>
+<p>Verify that the hostname has been successfully quarantined by starting <code>/bin/bash</code> again.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># hostname</span>
+</span></span><span class="line"><span class="cl">host
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># go run main.go run /bin/bash</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer go<span class="o">]</span><span class="c1"># hostname</span>
+</span></span><span class="line"><span class="cl">mycontainer
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer go<span class="o">]</span><span class="c1"># ps</span>
+</span></span><span class="line"><span class="cl">  PID TTY          TIME CMD
+</span></span><span class="line"><span class="cl"> <span class="m">1115</span> pts/0    00:00:00 bash
+</span></span><span class="line"><span class="cl"> <span class="m">1250</span> pts/0    00:00:00 go
+</span></span><span class="line"><span class="cl"> <span class="m">1268</span> pts/0    00:00:00 main
+</span></span><span class="line"><span class="cl"> <span class="m">1271</span> pts/0    00:00:00 exe
+</span></span><span class="line"><span class="cl"> <span class="m">1275</span> pts/0    00:00:00 bash
+</span></span><span class="line"><span class="cl"> <span class="m">1287</span> pts/0    00:00:00 ps
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer go<span class="o">]</span><span class="c1"># exit</span>
+</span></span><span class="line"><span class="cl"><span class="nb">exit</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># hostname</span>
+</span></span><span class="line"><span class="cl">host
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>When executing <code>go run main.go run /bin/bash</code>, we can also use <code>ps afx</code> in another ssh session to view hierarchical information about the <code>bash</code> session process with PID 15243.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host ~<span class="o">]</span><span class="c1"># ps afx</span>
+</span></span><span class="line"><span class="cl">......
+</span></span><span class="line"><span class="cl"> <span class="m">1113</span> ?        Ss     0:00  <span class="se">\_</span> sshd: root@pts/0
+</span></span><span class="line"><span class="cl"> <span class="m">1115</span> pts/0    Ss     0:00  <span class="p">|</span>   <span class="se">\_</span> -bash
+</span></span><span class="line"><span class="cl"> <span class="m">1250</span> pts/0    Sl     0:00  <span class="p">|</span>       <span class="se">\_</span> go run main.go run /bin/bash
+</span></span><span class="line"><span class="cl"> <span class="m">1268</span> pts/0    Sl     0:00  <span class="p">|</span>           <span class="se">\_</span> /tmp/go-build2476789953/b001/exe/main run /bin/bash
+</span></span><span class="line"><span class="cl"> <span class="m">1271</span> pts/0    Sl     0:00  <span class="p">|</span>               <span class="se">\_</span> /proc/self/exe child /bin/bash
+</span></span><span class="line"><span class="cl"> <span class="m">1275</span> pts/0    S+     0:00  <span class="p">|</span>                   <span class="se">\_</span> /bin/bash
+</span></span><span class="line"><span class="cl">......
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>And so on, adding new resources to isolate just keep passing the specified system call parameters.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kn">package</span> <span class="nx">main</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;fmt&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;os&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;os/exec&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;syscall&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="k">switch</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="k">case</span> <span class="s">&#34;run&#34;</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="nf">run</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"> <span class="k">case</span> <span class="s">&#34;child&#34;</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="nf">child</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"> <span class="k">default</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="nb">panic</span><span class="p">(</span><span class="s">&#34;help&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">run</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;[main]&#34;</span><span class="p">,</span> <span class="s">&#34;pid:&#34;</span><span class="p">,</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Getpid</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="s">&#34;/proc/self/exe&#34;</span><span class="p">,</span> <span class="nb">append</span><span class="p">([]</span><span class="kt">string</span><span class="p">{</span><span class="s">&#34;child&#34;</span><span class="p">},</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">2</span><span class="p">:]</span><span class="o">...</span><span class="p">)</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdin</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdin</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">SysProcAttr</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">syscall</span><span class="p">.</span><span class="nx">SysProcAttr</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nx">Cloneflags</span><span class="p">:</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">CLONE_NEWUTS</span> <span class="p">|</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">syscall</span><span class="p">.</span><span class="nx">CLONE_NEWPID</span> <span class="p">|</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">syscall</span><span class="p">.</span><span class="nx">CLONE_NEWNS</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nx">Unshareflags</span><span class="p">:</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">CLONE_NEWNS</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">cmd</span><span class="p">.</span><span class="nf">Run</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">child</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;[exe]&#34;</span><span class="p">,</span> <span class="s">&#34;pid:&#34;</span><span class="p">,</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Getpid</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Sethostname</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;mycontainer&#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nf">Chdir</span><span class="p">(</span><span class="s">&#34;/&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Mount</span><span class="p">(</span><span class="s">&#34;proc&#34;</span><span class="p">,</span> <span class="s">&#34;proc&#34;</span><span class="p">,</span> <span class="s">&#34;proc&#34;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">3</span><span class="p">:]</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdin</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdin</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">cmd</span><span class="p">.</span><span class="nf">Run</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Unmount</span><span class="p">(</span><span class="s">&#34;proc&#34;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">must</span><span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The <code>Cloneflags</code> parameter adds <code>CLONE_NEWPID</code> and <code>CLONE_NEWNS</code> to isolate the process pid and file directory mount point view respectively, while <code>Unshareflags: syscall.CLONE_NEWNS</code> is used to disable mount propagation (if this parameter is not set, the If this parameter is not set, the mounts in the container will be shared to the host, and mount propagation is out of the scope of this article).</p>
+<p>When we create the PID Namespace, the pid of the <code>exe</code> process including its created child processes is already isolated from the <code>main</code> process, which can be verified by printing the <code>os.Getpid()</code> result or executing the <code>echo $</code> command. But at this point you can&rsquo;t use the <code>ps</code> command to see it yet, because commands like <code>ps</code> and <code>top</code> use the contents of <code>/proc</code>, so we went ahead and introduced Mount Namespace and mounted the <code>/proc</code> directory on the <code>exe</code> process.</p>
+<blockquote>
+<p>Mount Namespace was the first Linux implementation of Namespace with the CLONE_NEWNS ( New Namespace ) system call parameter, because it was not realized that so many more Namespace types would be added later.</p>
+</blockquote>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># ps</span>
+</span></span><span class="line"><span class="cl">  PID TTY          TIME CMD
+</span></span><span class="line"><span class="cl"> <span class="m">1115</span> pts/0    00:00:00 bash
+</span></span><span class="line"><span class="cl"> <span class="m">3792</span> pts/0    00:00:00 ps
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># echo $$</span>
+</span></span><span class="line"><span class="cl"><span class="m">1115</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># go run main.go run /bin/bash</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>main<span class="o">]</span> pid: <span class="m">3811</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>exe<span class="o">]</span> pid: <span class="m">1</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer /<span class="o">]</span><span class="c1"># ps</span>
+</span></span><span class="line"><span class="cl">  PID TTY          TIME CMD
+</span></span><span class="line"><span class="cl">    <span class="m">1</span> pts/0    00:00:00 exe
+</span></span><span class="line"><span class="cl">    <span class="m">4</span> pts/0    00:00:00 bash
+</span></span><span class="line"><span class="cl">   <span class="m">15</span> pts/0    00:00:00 ps
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer /<span class="o">]</span><span class="c1"># echo $$</span>
+</span></span><span class="line"><span class="cl"><span class="m">4</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer /<span class="o">]</span><span class="c1"># exit</span>
+</span></span><span class="line"><span class="cl"><span class="nb">exit</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>At this point, <code>exe</code> as the initialization process, pid 1, created a pid 4 <code>bash</code> sub-process, and no longer see the <code>main</code> process.</p>
+<p>The rest of the IPC, NET, USER and other NameSpace will not be shown one by one in this article.</p>
+<h3 id="2-cgroups">2. Cgroups</h3>
+<p>NameSpace technology can help processes isolate their own separate spaces and successfully implement minimal containers. But how to limit the physical resource overhead of these spaces (CPU, memory, storage, I/O, etc.) requires the use of Cgroups technology.</p>
+<p>Limiting the resource usage of containers is a very important feature, if a container can use the server resources without restraint, it will return to the traditional model of running applications directly on the physical server drawbacks. This is not acceptable for containerization technology.</p>
+<p>Cgroups, whose full name is Control groups, was first started by Google engineers (mainly Paul Menage and Rohit Seth) in 2006 and was initially called process containers. In 2007, because the term container has many different meanings in the Linux Kernel, it was renamed cgroup to avoid confusion and was merged into the 2.6.24 version of the kernel.</p>
+<blockquote>
+<p>Android also uses this technique to assign different cgroups to each APP, isolating each APP without affecting other APP environments.</p>
+</blockquote>
+<p>Cgroups is a mechanism for managing groups of processes, providing the ability to limit, control and count the resources of a group of processes and their children, and defining a subsystem for each resource that can be controlled in a uniform interface, hence the name resource controllers.</p>
+<p>Some of the major subsystems are listed below (Cgroups V1).</p>
+<table>
+<thead>
+<tr>
+<th>subsystem</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>cpu</td>
+<td>Limit the cpu usage of the process</td>
+</tr>
+<tr>
+<td>cpuacct</td>
+<td>Count the cpu usage of the process</td>
+</tr>
+<tr>
+<td>cpuset</td>
+<td>Allocate separate cpu nodes or memory nodes for processes on multicore machines (NUMA architecture only)</td>
+</tr>
+<tr>
+<td>memory</td>
+<td>Limit the amount of memory used by the process</td>
+</tr>
+<tr>
+<td>blkio</td>
+<td>Control process access to block devices (e.g., hard disks) io</td>
+</tr>
+<tr>
+<td>devices</td>
+<td>Control process access to devices</td>
+</tr>
+<tr>
+<td>net_cls</td>
+<td>Mark network packets of the process so that they can be restricted, monitored, etc. using the tc module (traffic control)</td>
+</tr>
+<tr>
+<td>net_prio</td>
+<td>Control the priority of network traffic generated by the process</td>
+</tr>
+<tr>
+<td>freezer</td>
+<td>Suspend or resume processes</td>
+</tr>
+<tr>
+<td>pids</td>
+<td>Limit the number of processes in a cgroup</td>
+</tr>
+<tr>
+<td>For more subsystems refer to the <a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">Linux man cgroups documentation</a></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>With the Cgroups mechanism, a group of processes (task group) and a group of subsystems can be associated to achieve the ability to control the resources associated with the processes. As shown in the figure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/53ed1c2ed87e4b178d508cb1dafe8fba.png" alt="Cgroups"></p>
+<p>The hierarchy of Cgroups is called hierarchy (i.e. cgroup tree), which is a tree consisting of cgroup nodes.</p>
+<p>When a new hierarchy is created, all processes in the system are added to the root cgroup node of the hierarchy, which is created by default, and in the tree, child nodes can inherit the properties of the parent node.</p>
+<p>For the same hierarchy, processes can only exist in one of the cgroup nodes. If a process is added to another cgroup node in the same hierarchy, it is removed from the first cgroup node.</p>
+<p>A hierarchy can have one or more subsystems attached to it to have management rights to corresponding resources (such as cpu and memory), where each cgroup node can set different resource limit weights, and processes (tasks) are bound to cgroup nodes and their children are bound to the parent cgroup node by default. in the parent process.</p>
+<p>Based on these principles of Cgroups, we can conclude that if you want to restrict the memory resources of some processes, you can create a hierarchy and mount a memory subsystem for it, then create a cgroup node in this hierarchy, and in this node, write the pid and control attributes of the processes you want to control to in this node.</p>
+<p>Let&rsquo;s put it into practice next.</p>
+<blockquote>
+<p>Everything is a file in Linux.</p>
+<p>In the Linux Kernel, in order to make the configuration of Cgroups more intuitive, a hierarchy of directories is used to simulate a hierarchy, which is exposed to the user by means of a virtual tree file system.</p>
+</blockquote>
+<p>Create a hierarchy and mount the memory subsystem for it. We can skip this step because the system has already created a default hierarchy for each subsystem by default and we can use it directly.</p>
+<p>For example, the default hierarchy for the memory subsystem is in the <code>/sys/fs/cgroup/memory</code> directory.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># mount | grep memory</span>
+</span></span><span class="line"><span class="cl">cgroup on /sys/fs/cgroup/memory <span class="nb">type</span> cgroup <span class="o">(</span>rw,nosuid,nodev,noexec,relatime,memory<span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># cd /sys/fs/cgroup/memory</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host memory<span class="o">]</span><span class="c1"># pwd</span>
+</span></span><span class="line"><span class="cl">/sys/fs/cgroup/memory
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host memory<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Simply creating a folder in this hierarchy directory is equivalent to creating a cgroup node.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host memory<span class="o">]</span><span class="c1"># mkdir hello</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host memory<span class="o">]</span><span class="c1"># cd hello/</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># ls</span>
+</span></span><span class="line"><span class="cl">cgroup.clone_children           memory.kmem.slabinfo                memory.memsw.failcnt             memory.soft_limit_in_bytes
+</span></span><span class="line"><span class="cl">cgroup.event_control            memory.kmem.tcp.failcnt             memory.memsw.limit_in_bytes      memory.stat
+</span></span><span class="line"><span class="cl">cgroup.procs                    memory.kmem.tcp.limit_in_bytes      memory.memsw.max_usage_in_bytes  memory.swappiness
+</span></span><span class="line"><span class="cl">memory.failcnt                  memory.kmem.tcp.max_usage_in_bytes  memory.memsw.usage_in_bytes      memory.usage_in_bytes
+</span></span><span class="line"><span class="cl">memory.force_empty              memory.kmem.tcp.usage_in_bytes      memory.move_charge_at_immigrate  memory.use_hierarchy
+</span></span><span class="line"><span class="cl">memory.kmem.failcnt             memory.kmem.usage_in_bytes          memory.numa_stat                 notify_on_release
+</span></span><span class="line"><span class="cl">memory.kmem.limit_in_bytes      memory.limit_in_bytes               memory.oom_control               tasks
+</span></span><span class="line"><span class="cl">memory.kmem.max_usage_in_bytes  memory.max_usage_in_bytes           memory.pressure_level
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>All the files in the <code>hello</code> folder that we created are automatically created by the system. A few commonly used files function as follows.</p>
+<table>
+<thead>
+<tr>
+<th>filename</th>
+<th>function</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>tasks</td>
+<td>A list of processes (PIDs) running in a cgroup. Writing a PID to a cgroup&rsquo;s tasks file moves the process to that cgroup</td>
+</tr>
+<tr>
+<td>cgroup.procs</td>
+<td>A list of thread groups (TGIDs) running in a cgroup. Writing the TGID to a cgroup&rsquo;s cgroup.procs file moves the thread group to that cgroup</td>
+</tr>
+<tr>
+<td>cgroup.event_control</td>
+<td>The interface to event_fd(). Allows cgroup change status notifications to be sent</td>
+</tr>
+<tr>
+<td>notify_on_release</td>
+<td>Used to automatically remove empty cgroups. The default state is disabled (0). When set to enabled (1), when the cgroup no longer contains any tasks (i.e., the cgroup&rsquo;s tasks file contains a PID and the PID is removed, leaving the file empty), the kernel executes the contents of the release_agent file (which appears only for the root cgroup) and provides the relevant path (related to the root cgroup) to the cleared cgroup as an argument</td>
+</tr>
+<tr>
+<td>memory.usage_in_bytes</td>
+<td>Shows the total amount of memory (in bytes) currently used by processes in the cgroup</td>
+</tr>
+<tr>
+<td>memory.memsw.usage_in_bytes</td>
+<td>Shows the total amount of memory and swap space (in bytes) currently used by processes in the cgroup</td>
+</tr>
+<tr>
+<td>memory.max_usage_in_bytes</td>
+<td>Shows the maximum amount of memory (in bytes) used by processes in the cgroup</td>
+</tr>
+<tr>
+<td>memory.memsw.max_usage_in_bytes</td>
+<td>Shows the maximum memory usage and maximum swap space usage (in bytes) of the processes in the cgroup</td>
+</tr>
+<tr>
+<td>memory.limit_in_bytes</td>
+<td>Set the maximum amount of user memory (including file cache)</td>
+</tr>
+<tr>
+<td>memory.memsw.limit_in_bytes</td>
+<td>Set the maximum value of the sum of memory and swap usage</td>
+</tr>
+<tr>
+<td>memory.failcnt</td>
+<td>Shows the number of times the memory reaches the limit set by memory.limit_in_bytes</td>
+</tr>
+<tr>
+<td>memory.memsw.failcnt</td>
+<td>Shows the number of times the sum of memory and swap space reached the limit set by memory.memsw.limit_in_bytes</td>
+</tr>
+<tr>
+<td>memory.oom_control</td>
+<td>The Out of Memory (OOM) terminator can be enabled or disabled for cgroup. The default is enabled (0), and tasks that attempt to consume more memory than they are allowed are immediately terminated by the OOM terminator. When set to the disabled state (1), tasks that attempt to use more memory than they are allowed will be suspended until additional memory is available.</td>
+</tr>
+<tr>
+<td>For more information on the functionality of the file, see cgroup-v1/memory in the <a href="https://www.kernel.org/doc/Documentation/cgroup-v1/memory.txt">kernel documentation</a>.</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>In this <code>hello cgroup</code> node, we want to limit the memory resources of certain processes by writing the corresponding process pid to the <code>tasks</code> file and setting the maximum memory usage to the <code>memory.limit_in_bytes</code> file.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># cat memory.oom_control</span>
+</span></span><span class="line"><span class="cl">oom_kill_disable <span class="m">0</span>
+</span></span><span class="line"><span class="cl">under_oom <span class="m">0</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># cat memory.failcnt</span>
+</span></span><span class="line"><span class="cl"><span class="m">0</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># echo 100M &gt; memory.limit_in_bytes</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># cat memory.limit_in_bytes</span>
+</span></span><span class="line"><span class="cl"><span class="m">104857600</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The <code>hello cgroup</code> node has OOM termination enabled by default, so when a process tries to use more memory than is available, it will be terminated immediately. A query to <code>memory.failcnt</code> shows that no process memory has yet reached the set maximum memory limit.</p>
+<p>We have set the maximum memory available for the <code>hello cgroup</code> node to 100M, so start a new <code>bash</code> session process and move it into the <code>hello cgroup</code> node.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># /bin/bash</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># echo $$</span>
+</span></span><span class="line"><span class="cl"><span class="m">4123</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># cat tasks</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># echo $$ &gt; tasks</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># cat tasks</span>
+</span></span><span class="line"><span class="cl"><span class="m">4123</span>
+</span></span><span class="line"><span class="cl"><span class="m">4135</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># cat memory.usage_in_bytes</span>
+</span></span><span class="line"><span class="cl"><span class="m">196608</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Subsequent child processes created in this session will be added to the <code>hello cgroup</code> node (e.g. pid 4135 is a new process created as a result of the cat command and is automatically added to the tasks file).</p>
+<p>Continue using the <a href="https://pyropus.ca./software/memtester/">memtester</a> utility to test that the 100M maximum memory limit is in effect.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># memtester 50M 1</span>
+</span></span><span class="line"><span class="cl">memtester version 4.5.1 <span class="o">(</span>64-bit<span class="o">)</span>
+</span></span><span class="line"><span class="cl">Copyright <span class="o">(</span>C<span class="o">)</span> 2001-2020 Charles Cazabon.
+</span></span><span class="line"><span class="cl">Licensed under the GNU General Public License version <span class="m">2</span> <span class="o">(</span>only<span class="o">)</span>.
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">pagesize is <span class="m">4096</span>
+</span></span><span class="line"><span class="cl">pagesizemask is 0xfffffffffffff000
+</span></span><span class="line"><span class="cl">want 50MB <span class="o">(</span><span class="m">52428800</span> bytes<span class="o">)</span>
+</span></span><span class="line"><span class="cl">got  50MB <span class="o">(</span><span class="m">52428800</span> bytes<span class="o">)</span>, trying mlock ...locked.
+</span></span><span class="line"><span class="cl">Loop 1/1:
+</span></span><span class="line"><span class="cl">  Stuck Address       : ok
+</span></span><span class="line"><span class="cl">  Random Value        : ok
+</span></span><span class="line"><span class="cl">  Compare XOR         : ok
+</span></span><span class="line"><span class="cl">  Compare SUB         : ok
+</span></span><span class="line"><span class="cl">  Compare MUL         : ok
+</span></span><span class="line"><span class="cl">  Compare DIV         : ok
+</span></span><span class="line"><span class="cl">  Compare OR          : ok
+</span></span><span class="line"><span class="cl">  Compare AND         : ok
+</span></span><span class="line"><span class="cl">  Sequential Increment: ok
+</span></span><span class="line"><span class="cl">  Solid Bits          : ok
+</span></span><span class="line"><span class="cl">  Block Sequential    : ok
+</span></span><span class="line"><span class="cl">  Checkerboard        : ok
+</span></span><span class="line"><span class="cl">  Bit Spread          : ok
+</span></span><span class="line"><span class="cl">  Bit Flip            : ok
+</span></span><span class="line"><span class="cl">  Walking Ones        : ok
+</span></span><span class="line"><span class="cl">  Walking Zeroes      : ok
+</span></span><span class="line"><span class="cl">  8-bit Writes        : ok
+</span></span><span class="line"><span class="cl">  16-bit Writes       : ok
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">Done.
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># memtester 100M 1</span>
+</span></span><span class="line"><span class="cl">memtester version 4.5.1 <span class="o">(</span>64-bit<span class="o">)</span>
+</span></span><span class="line"><span class="cl">Copyright <span class="o">(</span>C<span class="o">)</span> 2001-2020 Charles Cazabon.
+</span></span><span class="line"><span class="cl">Licensed under the GNU General Public License version <span class="m">2</span> <span class="o">(</span>only<span class="o">)</span>.
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">pagesize is <span class="m">4096</span>
+</span></span><span class="line"><span class="cl">pagesizemask is 0xfffffffffffff000
+</span></span><span class="line"><span class="cl">want 100MB <span class="o">(</span><span class="m">104857600</span> bytes<span class="o">)</span>
+</span></span><span class="line"><span class="cl">got  100MB <span class="o">(</span><span class="m">104857600</span> bytes<span class="o">)</span>, trying mlock ...over system/pre-process limit, reducing...
+</span></span><span class="line"><span class="cl">got  99MB <span class="o">(</span><span class="m">104853504</span> bytes<span class="o">)</span>, trying mlock ...over system/pre-process limit, reducing...
+</span></span><span class="line"><span class="cl">got  99MB <span class="o">(</span><span class="m">104849408</span> bytes<span class="o">)</span>, trying mlock ...over system/pre-process limit, reducing...
+</span></span><span class="line"><span class="cl">......
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># cat memory.failcnt</span>
+</span></span><span class="line"><span class="cl"><span class="m">1434</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>You can see that when memtester tries to request 100M memory, it fails, and <code>memory.failcnt</code> reports that the number of times the memory reaches the limit set by <code>memory.limit_in_bytes</code> (100M) is 1434.</p>
+<p>If you want to delete a cgroup node, you only need to delete the corresponding folder.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># exit</span>
+</span></span><span class="line"><span class="cl"><span class="nb">exit</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host hello<span class="o">]</span><span class="c1"># cd ../</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host memory<span class="o">]</span><span class="c1"># rmdir hello/</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host memory<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>After using and practicing Cgroups above, we can apply it to our previous Go programs.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kn">package</span> <span class="nx">main</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;fmt&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;io/ioutil&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;os&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;os/exec&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;path/filepath&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;strconv&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="s">&#34;syscall&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="k">switch</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="k">case</span> <span class="s">&#34;run&#34;</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="nf">run</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"> <span class="k">case</span> <span class="s">&#34;child&#34;</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="nf">child</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"> <span class="k">default</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="nb">panic</span><span class="p">(</span><span class="s">&#34;help&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">run</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;[main]&#34;</span><span class="p">,</span> <span class="s">&#34;pid:&#34;</span><span class="p">,</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Getpid</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="s">&#34;/proc/self/exe&#34;</span><span class="p">,</span> <span class="nb">append</span><span class="p">([]</span><span class="kt">string</span><span class="p">{</span><span class="s">&#34;child&#34;</span><span class="p">},</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">2</span><span class="p">:]</span><span class="o">...</span><span class="p">)</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdin</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdin</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">SysProcAttr</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">syscall</span><span class="p">.</span><span class="nx">SysProcAttr</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nx">Cloneflags</span><span class="p">:</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">CLONE_NEWUTS</span> <span class="p">|</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">syscall</span><span class="p">.</span><span class="nx">CLONE_NEWPID</span> <span class="p">|</span>
+</span></span><span class="line"><span class="cl">   <span class="nx">syscall</span><span class="p">.</span><span class="nx">CLONE_NEWNS</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="nx">Unshareflags</span><span class="p">:</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">CLONE_NEWNS</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">cmd</span><span class="p">.</span><span class="nf">Run</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">child</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;[exe]&#34;</span><span class="p">,</span> <span class="s">&#34;pid:&#34;</span><span class="p">,</span> <span class="nx">os</span><span class="p">.</span><span class="nf">Getpid</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">cg</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Sethostname</span><span class="p">([]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;mycontainer&#34;</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nf">Chdir</span><span class="p">(</span><span class="s">&#34;/&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Mount</span><span class="p">(</span><span class="s">&#34;proc&#34;</span><span class="p">,</span> <span class="s">&#34;proc&#34;</span><span class="p">,</span> <span class="s">&#34;proc&#34;</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span> <span class="o">:=</span> <span class="nx">exec</span><span class="p">.</span><span class="nf">Command</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Args</span><span class="p">[</span><span class="mi">3</span><span class="p">:]</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdin</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdin</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stdout</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stdout</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">cmd</span><span class="p">.</span><span class="nx">Stderr</span> <span class="p">=</span> <span class="nx">os</span><span class="p">.</span><span class="nx">Stderr</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">cmd</span><span class="p">.</span><span class="nf">Run</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">syscall</span><span class="p">.</span><span class="nf">Unmount</span><span class="p">(</span><span class="s">&#34;proc&#34;</span><span class="p">,</span> <span class="mi">0</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">cg</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">mycontainer_memory_cgroups</span> <span class="o">:=</span> <span class="s">&#34;/sys/fs/cgroup/memory/mycontainer&#34;</span>
+</span></span><span class="line"><span class="cl"> <span class="nx">os</span><span class="p">.</span><span class="nf">Mkdir</span><span class="p">(</span><span class="nx">mycontainer_memory_cgroups</span><span class="p">,</span> <span class="mo">0755</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">ioutil</span><span class="p">.</span><span class="nf">WriteFile</span><span class="p">(</span><span class="nx">filepath</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">mycontainer_memory_cgroups</span><span class="p">,</span> <span class="s">&#34;memory.limit_in_bytes&#34;</span><span class="p">),</span> <span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;100M&#34;</span><span class="p">),</span> <span class="mo">0700</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">ioutil</span><span class="p">.</span><span class="nf">WriteFile</span><span class="p">(</span><span class="nx">filepath</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">mycontainer_memory_cgroups</span><span class="p">,</span> <span class="s">&#34;notify_on_release&#34;</span><span class="p">),</span> <span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="s">&#34;1&#34;</span><span class="p">),</span> <span class="mo">0700</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"> <span class="nf">must</span><span class="p">(</span><span class="nx">ioutil</span><span class="p">.</span><span class="nf">WriteFile</span><span class="p">(</span><span class="nx">filepath</span><span class="p">.</span><span class="nf">Join</span><span class="p">(</span><span class="nx">mycontainer_memory_cgroups</span><span class="p">,</span> <span class="s">&#34;tasks&#34;</span><span class="p">),</span> <span class="p">[]</span><span class="nb">byte</span><span class="p">(</span><span class="nx">strconv</span><span class="p">.</span><span class="nf">Itoa</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nf">Getpid</span><span class="p">())),</span> <span class="mo">0700</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">must</span><span class="p">(</span><span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nb">panic</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>We added a call to the cg() function in the <code>exe</code> process, the code is relatively simple and almost identical to our practice, except that we set the <code>notify_on_release</code> file to a value of 1 so that when our <code>exe</code> process exits, the created cgroup is automatically removed.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1"># go run main.go run /bin/bash</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>main<span class="o">]</span> pid: <span class="m">4693</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>exe<span class="o">]</span> pid: <span class="m">1</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer /<span class="o">]</span><span class="c1"># ps</span>
+</span></span><span class="line"><span class="cl">  PID TTY          TIME CMD
+</span></span><span class="line"><span class="cl">    <span class="m">1</span> pts/2    00:00:00 exe
+</span></span><span class="line"><span class="cl">    <span class="m">4</span> pts/2    00:00:00 bash
+</span></span><span class="line"><span class="cl">   <span class="m">15</span> pts/2    00:00:00 ps
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer /<span class="o">]</span><span class="c1"># cat /sys/fs/cgroup/memory/mycontainer/tasks</span>
+</span></span><span class="line"><span class="cl"><span class="m">1</span>
+</span></span><span class="line"><span class="cl"><span class="m">4</span>
+</span></span><span class="line"><span class="cl"><span class="m">16</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer /<span class="o">]</span><span class="c1"># cat /sys/fs/cgroup/memory/mycontainer/notify_on_release</span>
+</span></span><span class="line"><span class="cl"><span class="m">1</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer /<span class="o">]</span><span class="c1"># cat /sys/fs/cgroup/memory/mycontainer/memory.limit_in_bytes</span>
+</span></span><span class="line"><span class="cl"><span class="m">104857600</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer /<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Testing with memtester was consistent with the results expected.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer /<span class="o">]</span><span class="c1"># memtester 100M 1</span>
+</span></span><span class="line"><span class="cl">memtester version 4.5.1 <span class="o">(</span>64-bit<span class="o">)</span>
+</span></span><span class="line"><span class="cl">Copyright <span class="o">(</span>C<span class="o">)</span> 2001-2020 Charles Cazabon.
+</span></span><span class="line"><span class="cl">Licensed under the GNU General Public License version <span class="m">2</span> <span class="o">(</span>only<span class="o">)</span>.
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">pagesize is <span class="m">4096</span>
+</span></span><span class="line"><span class="cl">pagesizemask is 0xfffffffffffff000
+</span></span><span class="line"><span class="cl">want 100MB <span class="o">(</span><span class="m">104857600</span> bytes<span class="o">)</span>
+</span></span><span class="line"><span class="cl">got  100MB <span class="o">(</span><span class="m">104857600</span> bytes<span class="o">)</span>, trying mlock ...over system/pre-process limit, reducing...
+</span></span><span class="line"><span class="cl">got  99MB <span class="o">(</span><span class="m">104853504</span> bytes<span class="o">)</span>, trying mlock ...over system/pre-process limit, reducing...
+</span></span><span class="line"><span class="cl">got  99MB <span class="o">(</span><span class="m">104849408</span> bytes<span class="o">)</span>, trying mlock ...over system/pre-process limit, reducing...
+</span></span><span class="line"><span class="cl">......
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@mycontainer /<span class="o">]</span><span class="c1"># exit</span>
+</span></span><span class="line"><span class="cl"><span class="nb">exit</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host go<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The rest of the subsystem will not be shown in this article.</p>
+<p>In fact, we have already isolated the processes through NameSpace technology to help them isolate their own separate space, and use Cgroups technology to limit and monitor the resource overhead of these spaces, this special process is the essence of the container. We can say that we have achieved the purpose of this article and can end it.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/ff27fb1972dd44188ce6e0d0473a3e7c.png" alt="The Linux technology behind containerization"></p>
+<p>But in addition to using NameSpace and Cgroups to implement <strong>containers</strong>, in Docker, a Linux Kernel technology is also used: UnionFS to implement <strong>images</strong>.</p>
+<blockquote>
+<p>The main theme of this article is to explore the principles of containerization using Go and Linux Kernel technologies with the main technical points being NameSpace and Cgroups. UnionFS, the technology for implementing images, is an extra.</p>
+</blockquote>
+<h3 id="3-unionfs">3. UnionFS</h3>
+<p>UnionFS, known as the Union File System, was developed in 2004 by the State University of New York at Stony Brook as a hierarchical, lightweight and high-performance file system for Linux, FreeBSD and NetBSD operating systems that <strong>mounts the contents of multiple directories under the same directory</strong>, while the physical locations of the directories are separate. physical locations are separate, and changes to the filesystem are made as a single commit <strong>overlaid on top of each other</strong>, similar to git&rsquo;s commit.</p>
+<p>In Docker, mirrors are the equivalent of container templates, and a single image can spawn multiple containers. Mirroring using UnionFS technology to achieve, you can use its <strong>layered characteristics</strong> to mirror inheritance, based on the base image, to create a variety of specific application images, different containers can directly <strong>share the base file system layer</strong>, while adding their own unique changes layer, greatly improving the efficiency of storage.</p>
+<p>Take this <a href="https://docs.docker.com/storage/storagedriver/">Dockerfile</a> as an example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-dockerfile" data-lang="dockerfile"><span class="line"><span class="cl"><span class="k">FROM</span><span class="s"> ubuntu:18.04</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">LABEL</span> org.opencontainers.image.authors<span class="o">=</span><span class="s2">&#34;org@example.com&#34;</span><span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">COPY</span> . /app<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">RUN</span> make /app<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">RUN</span> rm -r <span class="nv">$HOME</span>/.cache<span class="err">
+</span></span></span><span class="line"><span class="cl"><span class="err"></span><span class="k">CMD</span> python /app/app.py<span class="err">
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><p>Each layer of the image can represent a command in the Dockerfile, and each layer except the last one is read-only.</p>
+<p>The Dockerfile contains several commands that create a layer if the command modifies the filesystem (using the UnionFS principle).</p>
+<p>First, the FROM statement creates a layer [1] from the ubuntu:18.04 image, while the LABEL command only modifies the image&rsquo;s metadata and does not create a new image layer, and then the COPY command adds files from the current directory to the /app directory in the image, creating layer [2] on top of layer [1].</p>
+<p>The first RUN command builds the application using make and writes the result to the new layer [3]. The second RUN command removes the cache directory and writes the results to the new layer [4]. Finally, the CMD command specifies what commands to run inside the container, modifying only the metadata of the image and not generating the image layer.</p>
+<p>These [4] layers are stacked on top of each other to form an image. When a new container is created, a new writable layer, called the container layer, is added on top of the image layers. All changes made to the running container, such as writing new files, modifying existing files, and deleting files, are written to this writable container layer.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/ba54d9cde63f4d44b215be2cf0f7d4a3.png" alt="container"></p>
+<p>For the same image layer, each container will have its own writable container layer and all changes are stored in this container layer, so multiple containers can share access to the same underlying image and have their own data state. And when a container is deleted, its writable container layer is also deleted. If users need to persist the data in the container, they need to use Volume to mount it to the host directory.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/b875296768474209b94f84ef23a7007a.png" alt="Ubuntu image"></p>
+<p>After looking at how Docker images work, let&rsquo;s go back to its implementation technology, UnionFS itself.</p>
+<p>There are several types of UnionFS currently supported by Docker.</p>
+<table>
+<thead>
+<tr>
+<th>Union File System</th>
+<th>Storage Drivers</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OverlayFS</td>
+<td>overlay2</td>
+<td>Preferred storage driver for all currently supported Linux distributions and does not require any additional configuration</td>
+</tr>
+<tr>
+<td>OverlayFS</td>
+<td>fuse-overlayfs</td>
+<td>Preferred only when running Rootless Docker on hosts that do not provide support for rootless</td>
+</tr>
+<tr>
+<td>Btrfs 和 ZFS</td>
+<td>btrfs 和 zfs</td>
+<td>Allows advanced options, such as creating snapshots, but requires more maintenance and setup</td>
+</tr>
+<tr>
+<td>VFS</td>
+<td>vfs</td>
+<td>旨Intended for testing purposes and for use in cases where a copy-on-write file system is not available. This storage driver has poor performance and is generally not recommended for production use</td>
+</tr>
+<tr>
+<td>AUFS</td>
+<td>aufs</td>
+<td>The preferred storage driver for Docker 18.06 and earlier. However, on machines without an overlay2 driver, aufs will still be used as the default driver for Docker</td>
+</tr>
+<tr>
+<td>Device Mapper</td>
+<td>devicemapper</td>
+<td>Default storage driver for Docker Engine in RHEL (older kernel versions do not support overlay2, newer versions do), with two configuration modes: loop-lvm (zero configuration but poor performance) and direct-lvm (recommended for production environments)</td>
+</tr>
+<tr>
+<td>OverlayFS</td>
+<td>overlay</td>
+<td>Recommended overlay2 storage driver</td>
+</tr>
+</tbody>
+</table>
+<p>Whenever possible, it is recommended to use the overlay2 storage driver for OverlayFS, which is the current default storage driver for Docker (formerly aufs for AUFS).</p>
+<p>To see which storage driver is used by Docker.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host ~<span class="o">]</span><span class="c1"># docker -v</span>
+</span></span><span class="line"><span class="cl">Docker version 20.10.15, build fd82621
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host ~<span class="o">]</span><span class="c1"># docker info | grep Storage</span>
+</span></span><span class="line"><span class="cl"> Storage Driver: overlay2
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host ~<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>OverlayFS is actually a modern Union file system for Linux similar to AUFS, which was merged into the Linux Kernel (version 3.18) in 2014 and is faster and simpler to implement than AUFS. Overlay2 (Linux Kernel version 4.0 or higher) is the recommended driver for it.</p>
+<p>overlay2 consists of four structures, of which</p>
+<ul>
+<li>lowerdir : denotes the lower directory, which corresponds to the read-only image layer in Docker.</li>
+<li>upperdir : indicates the upper directory, which corresponds to the writeable container layer in Docker.</li>
+<li>workdir : indicates the working layer (middle layer) directory, which is not visible to users during use.</li>
+<li>merged : A joint mount point for all directories after merging, exposing a unified view of directories to the user, corresponding to the actual view of directories in the container that the user sees in Docker.</li>
+</ul>
+<p>This is the architecture diagram for overlays in the <a href="https://docs.docker.com/storage/storagedriver/overlayfs-driver/#how-the-overlay-driver-works">Docker documentation</a>, but it also works for overlay2.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/8a7cf2048e8e442ca39dd041b2a92f8e.png" alt="architecture diagram for overlays in the Docker"></p>
+<p>The image layer corresponding to lowerdir can actually have many layers, but only one layer is drawn in the figure.</p>
+<p>Careful people may find that there is no workdir in the diagram, how exactly does it work?</p>
+<p>We can understand from the perspective of reading and writing, for the case of reading.</p>
+<ul>
+<li>the file is in upperdir, read it directly.</li>
+<li>file is not in upperdir, read from lowerdir, incurring a very small performance overhead.</li>
+<li>files exist in both upperdir and lowerdir, read from upperdir (files in upperdir hide files of the same name in lowerdir).</li>
+</ul>
+<p>For the write case.</p>
+<ul>
+<li>Create a new file, if the file does not exist in both upperdir and lowerdir, then create it directly in upperdir.</li>
+<li>Modify the file, if it exists in upperdir, then modify it directly.</li>
+<li>modify the file, or if the file does not exist in upperdir, perform a copy_up operation to copy the file from lowerdir to upperdir, and subsequent writes to the file will operate on the copy file already copied to upperdir. This is <strong>copy-on-write</strong>.</li>
+<li>Delete the file, or just delete it if it exists only in the upperdir.</li>
+<li>Delete the file, or create a blank file with the same name (whiteout file) in upperdir if the file exists only in lowerdir. The files in lowerdir are not deleted because they are read-only, but the whiteout file prevents them from continuing to be displayed</li>
+<li>Delete files, if they exist in both upperdir and lowerdir, the file in upperdir will be deleted first and then a blank file with the same name (whiteout file) will be created.</li>
+<li>Deleting a directory is the same as deleting a file, creating an opaque directory with the same name in the upperdir (opaque directory). Like the whiteout file principle, the opaque directory will prevent users from continuing to access it, even if the directory in the lowerdir still exists.</li>
+</ul>
+<p>After all the talk, it seems that the role of workdir has not been mentioned. This has to be understood, after all, they are not visible to the user in the process of use.</p>
+<p>But in fact, the role of workdir can not be ignored. Imagine a scenario where a file (or directory) is deleted (the file or directory exists in both upperdir and lowerdir), for lowerdir it&rsquo;s nothing, after all it&rsquo;s read-only and doesn&rsquo;t need to be ignored, but for upperdir it&rsquo;s different. In upperdir, we have to delete the corresponding file before we can create a whiteout file with the same name, and how to ensure that both steps must be performed involves atomic operations.</p>
+<p>Workdir is used to perform some intermediate operations, which include atomicity guarantees. In the above problem, you can create a whiteout file with the same name in workdir first, then perform the two steps on upperdir, and then delete the whiteout file in workdir after it succeeds.</p>
+<p>When modifying files, workdir also acts as an intermediate layer, when modifying the copy in upperdir, it will be put into workdir first, and then moved from workdir to upperdir.</p>
+<p>After understanding how overlay2 works, let&rsquo;s move on to the demonstration.</p>
+<p>First, you can see how the mount point of a container looks like after it is started in Docker.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host ~<span class="o">]</span><span class="c1"># mount | grep overlay</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host ~<span class="o">]</span><span class="c1"># docker run -d -it ubuntu:18.04 /bin/bash</span>
+</span></span><span class="line"><span class="cl">cb25841054d9f037ec5cf4c24a97a05f771b43a358dd89b40346ca3ab0e5eaf4
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host ~<span class="o">]</span><span class="c1"># mount | grep overlay</span>
+</span></span><span class="line"><span class="cl">overlay on /var/lib/docker/overlay2/56bbb1dbdd636984e4891db7850939490ece5bc7a3f3361d75b1341f0fb30b85/merged <span class="nb">type</span> overlay <span class="o">(</span>rw,relatime,lowerdir<span class="o">=</span>/var/lib/docker/overlay2/l/OOPFROHUDK727Z5QKNPWG5FBWV:/var/lib/docker/overlay2/l/6TWQL4UC7XYLZWZBKPS6F4IKLF,upperdir<span class="o">=</span>/var/lib/docker/overlay2/56bbb1dbdd636984e4891db7850939490ece5bc7a3f3361d75b1341f0fb30b85/diff,workdir<span class="o">=</span>/var/lib/docker/overlay2/56bbb1dbdd636984e4891db7850939490ece5bc7a3f3361d75b1341f0fb30b85/work<span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host ~<span class="o">]</span><span class="c1"># ll /var/lib/docker/overlay2/56bbb1dbdd636984e4891db7850939490ece5bc7a3f3361d75b1341f0fb30b85/merged</span>
+</span></span><span class="line"><span class="cl">total <span class="m">76</span>
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">28</span> 08:04 bin
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">24</span>  <span class="m">2018</span> boot
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">1</span> root root <span class="m">4096</span> May <span class="m">10</span> 11:17 dev
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">1</span> root root <span class="m">4096</span> May <span class="m">10</span> 11:17 etc
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">24</span>  <span class="m">2018</span> home
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">8</span> root root <span class="m">4096</span> May <span class="m">23</span>  <span class="m">2017</span> lib
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">28</span> 08:03 lib64
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">28</span> 08:03 media
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">28</span> 08:03 mnt
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">28</span> 08:03 opt
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">24</span>  <span class="m">2018</span> proc
+</span></span><span class="line"><span class="cl">drwx------  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">28</span> 08:04 root
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">5</span> root root <span class="m">4096</span> Apr <span class="m">28</span> 08:04 run
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">28</span> 08:04 sbin
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">28</span> 08:03 srv
+</span></span><span class="line"><span class="cl">drwxr-xr-x  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">24</span>  <span class="m">2018</span> sys
+</span></span><span class="line"><span class="cl">drwxrwxrwt  <span class="m">2</span> root root <span class="m">4096</span> Apr <span class="m">28</span> 08:04 tmp
+</span></span><span class="line"><span class="cl">drwxr-xr-x <span class="m">10</span> root root <span class="m">4096</span> Apr <span class="m">28</span> 08:03 usr
+</span></span><span class="line"><span class="cl">drwxr-xr-x <span class="m">11</span> root root <span class="m">4096</span> Apr <span class="m">28</span> 08:04 var
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host ~<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>As you can see, the merged directory after mounting includes the lowerdir, upperdir, and workdir directories, and the merged directory is actually the view of the directory seen by users inside the container.</p>
+<p>Back to the technology itself, we can try to use the <a href="https://man7.org/linux/man-pages/man8/mount.8.html">mount&rsquo;s overlay mount option</a> ourselves.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/19/509866aa829d468082220c5908b5ae53.png" alt="mount&amp;rsquo;s overlay mount option"></p>
+<p>First create the lowerdir (2 were created), upperdir, workdir, merged directories and write some files to the lowerdir and upperdir directories.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host ~<span class="o">]</span><span class="c1"># mkdir test_overlay</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host ~<span class="o">]</span><span class="c1"># cd test_overlay/</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1"># mkdir lower1</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1"># mkdir lower2</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1"># mkdir upper</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1"># mkdir work</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1"># mkdir merged</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1"># echo &#39;lower1-file1&#39; &gt; lower1/file1.txt</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1"># echo &#39;lower2-file2&#39; &gt; lower2/file2.txt</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1"># echo &#39;upper-file3&#39; &gt; upper/file3.txt</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1"># tree</span>
+</span></span><span class="line"><span class="cl">.
+</span></span><span class="line"><span class="cl"><span class="p">|</span>-- lower1
+</span></span><span class="line"><span class="cl"><span class="p">|</span>   <span class="sb">`</span>-- file1.txt
+</span></span><span class="line"><span class="cl"><span class="p">|</span>-- lower2
+</span></span><span class="line"><span class="cl"><span class="p">|</span>   <span class="sb">`</span>-- file2.txt
+</span></span><span class="line"><span class="cl"><span class="p">|</span>-- merged
+</span></span><span class="line"><span class="cl"><span class="p">|</span>-- upper
+</span></span><span class="line"><span class="cl"><span class="p">|</span>   <span class="sb">`</span>-- file3.txt
+</span></span><span class="line"><span class="cl"><span class="sb">`</span>-- work
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="m">5</span> directories, <span class="m">3</span> files
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Use the mount command&rsquo;s overlay option mode for mounting.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1"># mount -t overlay overlay -olowerdir=lower1:lower2,upperdir=upper,workdir=work merged</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1"># mount | grep overlay</span>
+</span></span><span class="line"><span class="cl">......
+</span></span><span class="line"><span class="cl">overlay on /root/test_overlay/merged <span class="nb">type</span> overlay <span class="o">(</span>rw,relatime,lowerdir<span class="o">=</span>lower1:lower2,upperdir<span class="o">=</span>upper,workdir<span class="o">=</span>work<span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>At this point, you can see all the files by going to the merged directory.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host test_overlay<span class="o">]</span><span class="c1"># cd merged/</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host merged<span class="o">]</span><span class="c1"># ls</span>
+</span></span><span class="line"><span class="cl">file1.txt  file2.txt  file3.txt
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host merged<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>We try to modify the files in the lowerdir directory.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@host merged<span class="o">]</span><span class="c1"># echo &#39;lower1-file1-hello&#39; &gt; file1.txt</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host merged<span class="o">]</span><span class="c1"># cat file1.txt</span>
+</span></span><span class="line"><span class="cl">lower1-file1-hello
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host merged<span class="o">]</span><span class="c1"># cat /root/test_overlay/lower1/file1.txt</span>
+</span></span><span class="line"><span class="cl">lower1-file1
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host merged<span class="o">]</span><span class="c1"># ls /root/test_overlay/upper/</span>
+</span></span><span class="line"><span class="cl">file1.txt  file3.txt
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host merged<span class="o">]</span><span class="c1"># cat /root/test_overlay/upper/file1.txt</span>
+</span></span><span class="line"><span class="cl">lower1-file1-hello
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@host merged<span class="o">]</span><span class="c1">#</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>As we said before, when a file in lowerdir is modified, a copy_up operation is performed to copy the file from lowerdir to upperdir, and subsequent writes to the file will be performed on the copy file that has been copied to upperdir.</p>
+<p>For other read and write cases, you can try it yourself.</p>
+<h2 id="summary">Summary</h2>
+<p>In fact, the underlying principle of the container is not difficult, is essentially a special process, special in its creation of a NameSpace isolated runtime environment, with Cgroups for its control of resource overhead, these are standing on the shoulders of the Linux operating system to achieve, including Docker image implementation is also the use of the UnionFS hierarchical union technology.</p>
+<p>We can even say that the essence of almost all applications is that the upper layer calls the lower layer and the lower layer supports the upper layer.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          <a href="/tags/linux/">linux</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/2022-05/victoria-metrics-operator/">
+            <span class="next-text nav-default">Manage VM clusters with Victoria Metrics Operator</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
