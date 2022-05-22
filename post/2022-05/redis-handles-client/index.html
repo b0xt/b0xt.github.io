@@ -1,0 +1,517 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How Redis handles client requests? - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Explore Redis&#39; request processing model. From registering to listen for fd events, to executing commands, to finally writing data back to the client." /><meta name="keywords" content="redis" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-05/redis-handles-client/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.css" integrity="sha256-7TyXnr2YU040zfSP+rEcz29ggW4j56/ujTPwjMzyqFY=" crossorigin="anonymous">
+
+
+<meta property="og:title" content="How Redis handles client requests?" />
+<meta property="og:description" content="Explore Redis&#39; request processing model. From registering to listen for fd events, to executing commands, to finally writing data back to the client." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-05/redis-handles-client/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-05-22T10:54:11+08:00" />
+<meta property="article:modified_time" content="2022-05-22T10:54:11+08:00" />
+
+<meta itemprop="name" content="How Redis handles client requests?">
+<meta itemprop="description" content="Explore Redis&#39; request processing model. From registering to listen for fd events, to executing commands, to finally writing data back to the client."><meta itemprop="datePublished" content="2022-05-22T10:54:11+08:00" />
+<meta itemprop="dateModified" content="2022-05-22T10:54:11+08:00" />
+<meta itemprop="wordCount" content="1489">
+<meta itemprop="keywords" content="redis," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How Redis handles client requests?"/>
+<meta name="twitter:description" content="Explore Redis&#39; request processing model. From registering to listen for fd events, to executing commands, to finally writing data back to the client."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How Redis handles client requests?</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-05-22 10:54:11 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1489 words </span>
+          <span class="more-meta"> 3 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#call-flow">Call Flow</a></li>
+        <li><a href="#command-execution-process--write-back-to-client">Command execution process &amp; write back to client</a>
+          <ul>
+            <li><a href="#command-execution">Command Execution</a></li>
+            <li><a href="#writing-data-back-to-client">Writing data back to Client</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>I feel that this part of the code is still quite interesting, and I will try to explain it in a more general way.</p>
+<h2 id="overview">Overview</h2>
+<p>I remember my article on the Go HTTP Standard Library, which explains how to create a Server-side application for Go.</p>
+<ul>
+<li>First, register the processor.</li>
+<li>Start a loop to listen for ports, and create a Goroutine for each connection.</li>
+<li>Then the Goroutine waits in a loop to receive the request data, then matches the corresponding processor in the processor routing table based on the request address, and hands the request to the processor for processing.</li>
+</ul>
+<p>In code, it looks like this.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">srv</span> <span class="o">*</span><span class="nx">Server</span><span class="p">)</span> <span class="nf">Serve</span><span class="p">(</span><span class="nx">l</span> <span class="nx">net</span><span class="p">.</span><span class="nx">Listener</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span> 
+</span></span><span class="line"><span class="cl">    <span class="o">...</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">baseCtx</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">Background</span><span class="p">()</span>  
+</span></span><span class="line"><span class="cl">    <span class="nx">ctx</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithValue</span><span class="p">(</span><span class="nx">baseCtx</span><span class="p">,</span> <span class="nx">ServerContextKey</span><span class="p">,</span> <span class="nx">srv</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// 接收 listener 过来的网络连接
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="nx">rw</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">l</span><span class="p">.</span><span class="nf">Accept</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">        <span class="o">...</span> 
+</span></span><span class="line"><span class="cl">        <span class="nx">tempDelay</span> <span class="p">=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">c</span> <span class="o">:=</span> <span class="nx">srv</span><span class="p">.</span><span class="nf">newConn</span><span class="p">(</span><span class="nx">rw</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">c</span><span class="p">.</span><span class="nf">setState</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">rwc</span><span class="p">,</span> <span class="nx">StateNew</span><span class="p">)</span> 
+</span></span><span class="line"><span class="cl">        <span class="c1">// 创建协程处理连接
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="k">go</span> <span class="nx">c</span><span class="p">.</span><span class="nf">serve</span><span class="p">(</span><span class="nx">connCtx</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Redis is a bit different because it is single-threaded and cannot use multiple threads to handle connections, so Redis chooses to use an event driver based on the Reactor pattern to implement concurrent processing of events.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/22/fdca8bd7b880414da87098745b6556ba.png" alt="Reactor "></p>
+<p>The so-called Reactor mode in Redis is to listen to multiple fd&rsquo;s through epoll, and whenever these fd&rsquo;s respond, they will notify epoll in the form of events for callbacks, each of which has a corresponding event handler.</p>
+<p>Each event has a corresponding event handler, such as accept for acceptTCPHandler, read &amp; write for readQueryFromClient, and so on, and then the events are assigned to event handlers for processing in the form of circular dispatching of events.</p>
+<p>So the above Reactor pattern is implemented through epoll, and there are three main methods for epoll.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">//创建一个epoll的句柄，size用来告诉内核这个监听的数目一共有多大
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kt">int</span> <span class="nf">epoll_create</span><span class="p">(</span><span class="kt">int</span> <span class="nx">size</span><span class="p">)</span><span class="err">；</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm"> * 可以理解为，增删改 fd 需要监听的事件
+</span></span></span><span class="line"><span class="cl"><span class="cm"> * epfd 是 epoll_create() 创建的句柄。
+</span></span></span><span class="line"><span class="cl"><span class="cm"> * op 表示 增删改
+</span></span></span><span class="line"><span class="cl"><span class="cm"> * epoll_event 表示需要监听的事件，Redis 只用到了可读，可写，错误，挂断 四个状态
+</span></span></span><span class="line"><span class="cl"><span class="cm"> */</span>
+</span></span><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">epoll_ctl</span><span class="p">(</span><span class="kt">int</span> <span class="nx">epfd</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">op</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">fd</span><span class="p">,</span> <span class="kd">struct</span> <span class="nx">epoll_event</span> <span class="o">*</span><span class="nx">event</span><span class="p">)</span><span class="err">；</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm"> * 可以理解为查询符合条件的事件
+</span></span></span><span class="line"><span class="cl"><span class="cm"> * epfd 是 epoll_create() 创建的句柄。
+</span></span></span><span class="line"><span class="cl"><span class="cm"> * epoll_event 用来存放从内核得到事件的集合
+</span></span></span><span class="line"><span class="cl"><span class="cm"> * maxevents 获取的最大事件数
+</span></span></span><span class="line"><span class="cl"><span class="cm"> * timeout 等待超时时间
+</span></span></span><span class="line"><span class="cl"><span class="cm"> */</span>
+</span></span><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">epoll_wait</span><span class="p">(</span><span class="kt">int</span> <span class="nx">epfd</span><span class="p">,</span> <span class="kd">struct</span> <span class="nx">epoll_event</span> <span class="o">*</span> <span class="nx">events</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">maxevents</span><span class="p">,</span> <span class="kt">int</span> <span class="nx">timeout</span><span class="p">);</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>So we can implement a simple server based on these three methods.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// 创建监听
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kt">int</span> <span class="nx">listenfd</span> <span class="p">=</span> <span class="p">::</span><span class="nf">socket</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// 绑定ip和端口
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kt">int</span> <span class="nx">r</span> <span class="p">=</span> <span class="p">::</span><span class="nf">bind</span><span class="p">();</span>  
+</span></span><span class="line"><span class="cl"><span class="c1">// 创建 epoll 实例
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kt">int</span> <span class="nx">epollfd</span> <span class="p">=</span> <span class="nf">epoll_create</span><span class="p">(</span><span class="nx">xxx</span><span class="p">);</span> 
+</span></span><span class="line"><span class="cl"><span class="c1">// 添加epoll要监听的事件类型
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kt">int</span> <span class="nx">r</span> <span class="p">=</span> <span class="nf">epoll_ctl</span><span class="p">(</span><span class="o">...</span><span class="p">,</span> <span class="nx">listenfd</span><span class="p">,</span> <span class="o">...</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">struct</span> <span class="nx">epoll_event</span><span class="o">*</span> <span class="nx">alive_events</span> <span class="p">=</span>  <span class="nx">static_cast</span><span class="p">&lt;</span><span class="nx">epoll_event</span><span class="o">*</span><span class="p">&gt;(</span><span class="nf">calloc</span><span class="p">(</span><span class="nx">kMaxEvents</span><span class="p">,</span> <span class="nf">sizeof</span><span class="p">(</span><span class="nx">epoll_event</span><span class="p">)));</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nf">while</span> <span class="p">(</span><span class="kc">true</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// 等待事件
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="kt">int</span> <span class="nx">num</span> <span class="p">=</span> <span class="nf">epoll_wait</span><span class="p">(</span><span class="nx">epollfd</span><span class="p">,</span> <span class="nx">alive_events</span><span class="p">,</span> <span class="nx">kMaxEvents</span><span class="p">,</span> <span class="nx">kEpollWaitTime</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// 遍历事件，并进行事件处理
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="nx">i</span> <span class="p">=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">num</span><span class="p">;</span> <span class="o">++</span><span class="nx">i</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="kt">int</span> <span class="nx">fd</span> <span class="p">=</span> <span class="nx">alive_events</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">data</span><span class="p">.</span><span class="nx">fd</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// 获取事件
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="kt">int</span> <span class="nx">events</span> <span class="p">=</span> <span class="nx">alive_events</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">events</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// 进行事件的分发
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="k">if</span> <span class="p">(</span> <span class="p">(</span><span class="nx">events</span> <span class="o">&amp;</span> <span class="nx">EPOLLERR</span><span class="p">)</span> <span class="o">||</span> <span class="p">(</span><span class="nx">events</span> <span class="o">&amp;</span> <span class="nx">EPOLLHUP</span><span class="p">)</span> <span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="o">...</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span> <span class="k">else</span>  <span class="k">if</span> <span class="p">(</span><span class="nx">events</span> <span class="o">&amp;</span> <span class="nx">EPOLLRDHUP</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="o">...</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span> 
+</span></span><span class="line"><span class="cl">        <span class="o">...</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>   
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h2 id="call-flow">Call Flow</h2>
+<p>So, based on the above, you can see that an event loop for Redis is just a few steps.</p>
+<ol>
+<li>registering event listeners and callback functions.</li>
+<li>wait in the loop to get the event and process it.</li>
+<li>call the callback function to process the data logic.</li>
+<li>write back the data to the Client.</li>
+</ol>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/22/881f89cb77394d8db155279d1de4d893.png" alt="Call Flow"></p>
+<ol>
+<li>register fd to epoll and set the callback function acceptTcpHandler, which will be called if there is a new connection.</li>
+<li>start a dead loop calling epoll_wait to wait and keep processing events, later we will return to the aeMain function to loop through the aeProcessEvents function.</li>
+<li>when a network event comes, it will follow the callback function acceptTcpHandler all the way to readQueryFromClient for data processing. readQueryFromClient will parse the client&rsquo;s data and find the corresponding cmd function to execute;</li>
+<li>the Redis instance, after receiving the client request, will write the data to be returned to the client output buffer instead of returning it immediately after processing the client command.</li>
+<li>the beforeSleep function is then called at each loop of the aeMain function to write the data in the buffer back to the client; the beforeSleep function is then called at each loop of the aeMain function to write the data in the buffer back to the client.</li>
+</ol>
+<p>The entire process of the event loop above has actually been written in very clear code steps, and there are many articles on the Internet about it, so I won&rsquo;t say much.</p>
+<h2 id="command-execution-process--write-back-to-client">Command execution process &amp; write back to client</h2>
+<h3 id="command-execution">Command Execution</h3>
+<p>Let&rsquo;s talk about something that many articles on the web don&rsquo;t mention, and see how Redis executes commands, stores them in the cache, and writes the data back to the Client from the cache.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/22/f08378dac9e84aa28f410870472bab3d.png" alt="Command execution process"></p>
+<p>As we mentioned in the previous section, the readQueryFromClient function is called if a network event comes through, and it is where the command is actually executed. We&rsquo;ll also follow this method all the way down to.</p>
+<ol>
+<li>readQueryFromClient will call the processInputBufferAndReplicate function to process the requested command.</li>
+<li>the processInputBufferAndReplicate function calls processInputBuffer and determines whether the command needs to be replicated to other nodes if it is in cluster mode.</li>
+<li>the processInputBuffer function will loop through the requested commands, call the processInlineBuffer function according to the requested protocol, and call the processCommand to execute the commands after the redisObject object.</li>
+<li>processCommand will lookupCommand to the <code>server.commands</code> table to find the corresponding execution function according to the command, then after a series of checks, call the corresponding function to execute the command, and call addReply to write the data to be returned to the client output buffer.</li>
+</ol>
+<p><code>server.commands</code> registers all Redis commands in the populateCommandTable function as a table of command functions based on command names.</p>
+<p>For example, to execute the get command, the getCommand function would be called.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">void</span> <span class="nf">getCommand</span><span class="p">(</span><span class="n">client</span> <span class="o">*</span><span class="n">c</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">getGenericCommand</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">getGenericCommand</span><span class="p">(</span><span class="n">client</span> <span class="o">*</span><span class="n">c</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">robj</span> <span class="o">*</span><span class="n">o</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// 查找数据
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span> <span class="p">((</span><span class="n">o</span> <span class="o">=</span> <span class="n">lookupKeyReadOrReply</span><span class="p">(</span><span class="n">c</span><span class="p">,</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">argv</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span><span class="n">shared</span><span class="p">.</span><span class="n">nullbulk</span><span class="p">))</span> <span class="o">==</span> <span class="nb">NULL</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="n">C_OK</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">...</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="n">robj</span> <span class="o">*</span><span class="nf">lookupKeyReadOrReply</span><span class="p">(</span><span class="n">client</span> <span class="o">*</span><span class="n">c</span><span class="p">,</span> <span class="n">robj</span> <span class="o">*</span><span class="n">key</span><span class="p">,</span> <span class="n">robj</span> <span class="o">*</span><span class="n">reply</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">//到db中查找数据
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="n">robj</span> <span class="o">*</span><span class="n">o</span> <span class="o">=</span> <span class="n">lookupKeyRead</span><span class="p">(</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">db</span><span class="p">,</span> <span class="n">key</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// 写入到缓存中
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="o">!</span><span class="n">o</span><span class="p">)</span> <span class="n">addReply</span><span class="p">(</span><span class="n">c</span><span class="p">,</span><span class="n">reply</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="n">o</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Find the data in the getCommand function and call addReply to write the data to be returned to the client&rsquo;s output buffer.</p>
+<h3 id="writing-data-back-to-client">Writing data back to Client</h3>
+<p>After the above command is written to the buffer, the data needs to be retrieved from the buffer and returned to the Client, which is actually done in the event loop of the server.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/22/1b04c7cdc82e4431aec26c889c0ce580.png" alt="Writing data back to Client"></p>
+<ol>
+<li>first Redis will call the aeSetBeforeSleepProc function in the main function to register the beforeSleep function of the writeback package to the eventLoop; 2. then Redis will call the aeMain function for the event loop to see if beforesleep has been set.</li>
+<li>then Redis will determine if beforesleep has been set when calling the aeMain function for the event loop, and if it has, then it will call it.</li>
+<li>the beforesleep function will call the handleClientsWithPendingWrites function, which will call writeToClient to write the data back to the client from the buffer.</li>
+</ol>
+<h2 id="summary">Summary</h2>
+<p>This article describes how the entire Redis request processing model really works. From registering to listen for fd events, to executing commands, to finally writing data back to the client, I&rsquo;ve done a general analysis. Of course, this article is also a bit different from my previous articles, I didn&rsquo;t post the code at length, mainly because I don&rsquo;t think it&rsquo;s necessary, but you can follow the flowchart to see the code.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/redis/">redis</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-05/esbuild/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Use the ESBuild plug-in mechanism to implement the required functionality</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-05/prometheus-test/">
+            <span class="next-text nav-default">Stress testing of Prometheus-compatible timing databases</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/jquery@3.2.1/dist/jquery.min.js" integrity="sha256-hwg4gsxgFZhOsEEamdOYGBf13FyQuiTwlAQgxVSNgt4=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/slideout@1.0.1/dist/slideout.min.js" integrity="sha256-t+zJ/g8/KXIJMjSVQdnibt4dlaDxc9zXr/9oNPeWqdg=" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@3.1.20/dist/jquery.fancybox.min.js" integrity="sha256-XVLffZaxoWfGUEbdzuLi7pwaUJv1cecsQJQqGLe7axY=" crossorigin="anonymous"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
