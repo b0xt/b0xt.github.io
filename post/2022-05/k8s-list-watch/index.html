@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Kubernetes list/watch design and rationale - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Explore the design and rationale of Kubernetes list/watch." /><meta name="keywords" content="kubernetes, Level Trigger, Edge trigger" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-05/k8s-list-watch/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link href="/lib/fancybox/jquery.fancybox-3.1.20.min.css" rel="stylesheet">
+
+
+<meta property="og:title" content="Kubernetes list/watch design and rationale" />
+<meta property="og:description" content="Explore the design and rationale of Kubernetes list/watch." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-05/k8s-list-watch/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-05-26T13:04:09+08:00" />
+<meta property="article:modified_time" content="2022-05-26T13:04:09+08:00" />
+
+<meta itemprop="name" content="Kubernetes list/watch design and rationale">
+<meta itemprop="description" content="Explore the design and rationale of Kubernetes list/watch."><meta itemprop="datePublished" content="2022-05-26T13:04:09+08:00" />
+<meta itemprop="dateModified" content="2022-05-26T13:04:09+08:00" />
+<meta itemprop="wordCount" content="1394">
+<meta itemprop="keywords" content="kubernetes," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Kubernetes list/watch design and rationale"/>
+<meta name="twitter:description" content="Explore the design and rationale of Kubernetes list/watch."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a><a href="/ukraine/">
+        <li class="mobile-menu-item">UKRAINE</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/ukraine/">UKRAINE</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Kubernetes list/watch design and rationale</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-05-26 13:04:09 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1394 words </span>
+          <span class="more-meta"> 3 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#level-trigger-and-edge-trigger">Level Trigger and Edge trigger</a></li>
+        <li><a href="#why-kubernetes-uses-level-trigger-and-not-edge-trigger">Why kubernetes uses Level Trigger and not Edge trigger</a>
+          <ul>
+            <li><a href="#interference-of-signals">Interference of signals</a></li>
+          </ul>
+        </li>
+        <li><a href="#how-do-i-make-the-desired-state-the-same-as-the-actual-state">How do I make the desired state the same as the actual state?</a></li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>The design of kubernetes is broadly divided into 3 parts.</p>
+<ul>
+<li>API-driven features.</li>
+<li>Control loops and conditional triggers (Level Trigger).</li>
+<li>API extensibility.</li>
+</ul>
+<p>These design features are what make kubernetes work very stably.</p>
+<h2 id="level-trigger-and-edge-trigger">Level Trigger and Edge trigger</h2>
+<p>I saw an online source that explains the two belongings as follows.</p>
+<ul>
+<li><strong>condition-trigger(level-trigger) LT means:</strong> Triggers an event whenever the condition is met (constant notification as long as there is data not fetched).</li>
+<li><strong>edge-trigger(edge-trigger)ET:</strong> Triggers an event whenever the state changes.</li>
+</ul>
+<p>By looking up some information, I don&rsquo;t actually understand exactly which science these belong to in terms of theory, but the specific explanation is very clear to see.</p>
+<p><strong>LEVEL TRIGGERING</strong> : There are two levels of current, <code>VH</code> and <code>VL</code>. These represent the two trigger event levels. If <code>VH</code> is set to LED in positive clock. When the voltage is VH, the LED can be lit at any point in that timeline. This is called <strong>LEVEL TRIGGERING</strong> and triggers an event whenever the <code>VH</code> timeline is encountered. The event is started at any point in time until the condition is met.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/26/42c9c7d869c441f19cb36ea8a803a1b6.png" alt="LEVEL TRIGGERING"></p>
+<p><strong>Edge TRIGGERING</strong> : As shown, you will see the rising and falling lines, when the event is triggered at the rising/falling edge (the intersection of the two states), it is called edge triggering (<strong>Edge TRIGGERING</strong>).</p>
+<p>If the LED needs to be turned on, it will be on when the clock transitions from <code>VL</code> to <code>VH</code>, not when a family is on the corresponding clock line, but only at the transition.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/26/e4b3bcffbd95406fb9a7508526b6ef92.png" alt="Edge TRIGGERING"></p>
+<h2 id="why-kubernetes-uses-level-trigger-and-not-edge-trigger">Why kubernetes uses Level Trigger and not Edge trigger</h2>
+<p>As described in the figure, there are two different design patterns that respond to the shape of time. How to trigger the corresponding event when the system is shutting down or in an uncontrollable abnormal state when the system is going from high to low or from low to high.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/26/0dd1aa87c8664758928887773effc06d.png" alt="kubernetes Level Trigger"></p>
+<p>To put it another way, let&rsquo;s say by addition, as follows, i=3, when giving I+4 as an operation to trigger an event.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="c1"># let i=3</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># let i+=4</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># let i</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># echo $i</span>
+</span></span><span class="line"><span class="cl"><span class="m">7</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>When operating on <code>Edge trigger</code>, you will see <code>i+4</code>, while on <code>level trigger</code> you will see <code>i=7</code>. Here it will be <code>i+4</code> until the next signal is triggered.</p>
+<h3 id="interference-of-signals">Interference of signals</h3>
+<p>Normally, there is no difference between the two, but in a large-scale distributed network environment, there are many factors that make any of them unreliable, in which case it changes our perception of the event signal.</p>
+<p>As shown in the figure, there is no difference between the simulated signal generation of <code>Level Trigger</code> and <code>Edge trigger</code> in the ideal case.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/26/6bd2d30f44bf42ce8ec8960c1f2241de.png" alt="Level Trigger &amp; Edge trigger"></p>
+<h4 id="one-interruption-scenario">One interruption scenario</h4>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/26/df2911cab10543a6ba9a8099497810d9.png" alt="interruption scenario"></p>
+<p>As can be seen from the figure, <code>Edge trigger</code> when the signal interruption occurs at the right point in time, it will have a great impact on the whole stream, even changing the whole state, for less disturbance does not have a better result on having a single interruption, so that <code>Edge trigger</code> misses the change from high to low, while <code>level trigger</code> basically guarantees all the changed states of the whole semaphore.</p>
+<h4 id="two-interruption-scenarios">Two interruption scenarios</h4>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/26/a10f0d0cb725452d9f7dfc57b2fc665e.png" alt="Two interruption scenarios"></p>
+<p>As can be seen from the figure, if there is an interruption during the rise and fall of the signal, <code>Edge trigger</code> loses the rising signal, but the final state is correct.</p>
+<p>Two interruptions occur during two changes of the signal state. The difference between the <code>Level Trigger</code> and the <code>Edge trigger</code> is clear: the signal of the <code>Edge trigger</code> misses the first rise, while the <code>Level Trigger</code> keeps the last observed state until the other state is obtained. This mode ensures that the signals obtained are essentially correct, but occur with a delay until after the interrupt is restored.</p>
+<h4 id="representation-of-the-change-of-two-modes-by-arithmetic">Representation of the change of two modes by arithmetic</h4>
+<p>The complete signal.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="c1"># let i=2</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># let i+1</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># let i-=1</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># let i+1</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># echo $i</span>
+</span></span><span class="line"><span class="cl"><span class="m">3</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Edge trigger.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="c1"># let i=2</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># let i+1  </span>
+</span></span><span class="line"><span class="cl"><span class="o">(</span><span class="c1"># let i-=1) miss this</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># let i+1</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># echo $i</span>
+</span></span><span class="line"><span class="cl"><span class="m">4</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h2 id="how-do-i-make-the-desired-state-the-same-as-the-actual-state">How do I make the desired state the same as the actual state?</h2>
+<p>In Kubernetes, not only one signal of the object is observed, but also two other signals, the expected state of the cluster and the actual state. The expected state is the state that the user expects the cluster to be in, such as when I run 2 instances (pods). In the most ideal scenario, the actual state of the cluster is the same as the expected state, but this process can be affected by arbitrary external factors that interfere with the actual state and deviate from the ideal state.</p>
+<p>Kubernetes must accept the actual state and reconcile it with the desired state. This is done continuously, taking the two states, determining the differences between them, and correcting their constant changes to bring the actual state to the desired state.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/05/26/101e0cb9fda74a4bb75223bcfccd7cde.png" alt="k8s Scaling"></p>
+<p>As shown in the figure, in an <code>Edge trigger</code>, the final result is likely to deviate from the desired result.</p>
+<p>When the initial instance is 1 and you want to scale to 5 replicas and then down to 2 replicas, the <code>Edge trigger</code> environment will see the following state: The actual state of the system does not immediately respond to these commands. As described in the figure, it may terminate 3 replicas when only 3 are running. This leaves us with 0 copies instead of the required 2 copies.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="c1"># let replicas=1</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># let replicas += 4 # 此时副本数为5，但是这个过程需要时间而不是立即完成至理想状态</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># let replicas -= 3 # 当未完成时又接到信号的变化，此时副本数为3，减去3，很可能实际状态为0，与理想状态2发生了偏差</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Instead, when using <code>Level Trigger</code>, the complete desired state and the actual state are always compared until the actual state is the same as the desired state. This greatly reduces the generation of inter-state synchronization (errors).</p>
+<h2 id="summary">Summary</h2>
+<p>There must be a reason for every kind of trigger, <code>Edge trigger</code> itself is not very bad, just different application scenarios, and the use of different models, such as nginx&rsquo;s high performance is the use of <code>Edge trigger</code> model, such as nginx use <code>Level trigger</code> in the large concurrency, when a change signal waiting to return when a large number of client connections are in the listening queue, which does not happen with the <code>Edge trigger</code> model.</p>
+<p>In summary, kubernetes needs to be designed in such a way that the components are aware of the final desired state of the data and do not need to worry about missing the process of data changes. In turn, the design of the kubernentes system message notification mechanism (or data real-time notification mechanism) should also satisfy the following requirements.</p>
+<ul>
+<li>
+<p>Real-time (i.e., the faster the relevant components feel when the data changes, the better). Messages must be real-time. Under the <code>list/watch</code> mechanism, whenever an apiserver resource has a state change event, the event will be pushed to the client in time to ensure the real-time nature of the message.</p>
+</li>
+<li>
+<p>Message Sequence: The order of messages is also important. In concurrency scenarios, clients may receive multiple events for the same resource in a short period of time. For kubernetes, which is concerned with final consistency, it needs to know which is the most recent event and ensure that the final state of the resource is consistent with that expressed by the most recent event. kubernetes carries a <code>resourceVersion</code> tag in each resource event, which is incremental. Thus, clients can compare <code>resourceVersion</code> when concurrently processing events for the same resource to ensure that the final state matches the expected state of the most recent event.</p>
+</li>
+<li>
+<p>Message reliability to ensure that messages are not lost or that there is a mechanism to reliably reacquire them (e.g., network fluctuations between <code>kubelet</code> and <code>kube-apisever</code> (<code>network flashover</code>) need to ensure that the kubelet can receive messages generated during network failures after the network has recovered).</p>
+</li>
+</ul>
+<p>It is the use of <code>Level trigger</code> by Kubernetes that makes the cluster more reliable.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/kubernetes/">kubernetes</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-05/go-error/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">New idea for Go error handling? Using left-hand functions and expressions</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-05/golang-divide-and-conque/">
+            <span class="next-text nav-default">Golang Divide and conque practice (merge sort and fast sort)</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  <script type="text/javascript" src="/lib/jquery/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="/lib/slideout/slideout-1.0.1.min.js"></script>
+  <script type="text/javascript" src="/lib/fancybox/jquery.fancybox-3.1.20.min.js"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
