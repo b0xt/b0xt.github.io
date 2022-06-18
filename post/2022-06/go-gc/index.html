@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Talking about Go&#39;s two soon-to-be-obsolete GC optimization strategies - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article introduces the GC optimization strategies in Golang: Memory Ballast, GC Tuner and the new Soft Memory Limit in version 1.19." /><meta name="keywords" content="Go Memory Ballast,  Go GC Tuner, debug.SetMemoryLimit" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-06/go-gc/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link href="/lib/fancybox/jquery.fancybox-3.1.20.min.css" rel="stylesheet">
+
+
+<meta property="og:title" content="Talking about Go&#39;s two soon-to-be-obsolete GC optimization strategies" />
+<meta property="og:description" content="This article introduces the GC optimization strategies in Golang: Memory Ballast, GC Tuner and the new Soft Memory Limit in version 1.19." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-06/go-gc/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-06-18T13:32:57+08:00" />
+<meta property="article:modified_time" content="2022-06-18T13:32:57+08:00" />
+
+<meta itemprop="name" content="Talking about Go&#39;s two soon-to-be-obsolete GC optimization strategies">
+<meta itemprop="description" content="This article introduces the GC optimization strategies in Golang: Memory Ballast, GC Tuner and the new Soft Memory Limit in version 1.19."><meta itemprop="datePublished" content="2022-06-18T13:32:57+08:00" />
+<meta itemprop="dateModified" content="2022-06-18T13:32:57+08:00" />
+<meta itemprop="wordCount" content="3850">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Talking about Go&#39;s two soon-to-be-obsolete GC optimization strategies"/>
+<meta name="twitter:description" content="This article introduces the GC optimization strategies in Golang: Memory Ballast, GC Tuner and the new Soft Memory Limit in version 1.19."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Talking about Go&#39;s two soon-to-be-obsolete GC optimization strategies</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-06-18 13:32:57 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 3850 words </span>
+          <span class="more-meta"> 8 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#overview">Overview</a>
+          <ul>
+            <li><a href="#when-is-a-gc-triggered">When is a GC triggered?</a></li>
+          </ul>
+        </li>
+        <li><a href="#go-memory-ballast">Go Memory Ballast</a></li>
+        <li><a href="#go-gc-tuner">Go GC Tuner</a></li>
+        <li><a href="#soft-memory-limit">Soft Memory Limit</a></li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>This article was supposed to talk about how Go Memory Ballast and Go GC Tuner adjust GC, how they are implemented, and how they work. But in the process of writing it, I found out that Go 1.19 is out and there is a new feature that makes these two optimizations history after all.</p>
+<h2 id="overview">Overview</h2>
+<p>First let&rsquo;s take a brief look at what is done in Go GC and what are the more time consuming parts of it so that we can optimize it.</p>
+<p>First of all, there are several phases of GC:</p>
+<ol>
+<li>sweep termination: STW is triggered and all P&rsquo;s enter the safe-point.</li>
+<li>the mark phase: resumes program execution and the GC executes the root mark, which includes scanning all stacks, global objects, and runtime data structures that are not in the heap.</li>
+<li>the mark termination: triggering STW, reversing the GC state, closing the GC worker thread, etc.</li>
+<li>the sweep phase: resumes program execution with a background concurrent cleanup of all memory management units.</li>
+</ol>
+<p>In these phases, since the mark phase is to traverse the heap from the root node and color mark the surviving objects, the mark time is related to the current surviving objects, not the heap size, i.e. the garbage objects on the heap do not increase the mark time of GC.</p>
+<p>And since freeing memory is a very fast operation for modern operating systems, Go&rsquo;s GC time is largely determined by the marking phase, not the cleanup phase.</p>
+<h3 id="when-is-a-gc-triggered">When is a GC triggered?</h3>
+<p>There are three main places in Go where GC is triggered.</p>
+<ol>
+<li>a timed call to runtime.sysmon in the monitor thread.</li>
+<li>manually calling the runtime.GC function for garbage collection.</li>
+<li>runtime.mallocgc is called when memory is requested, depending on the size of the heap.</li>
+</ol>
+<h4 id="runtimesysmon">runtime.sysmon</h4>
+<p>The runtime.sysmon function runs in the background when a Go program is started, and is used to check for deadlocks, run timers, schedule preemptions, and GC.</p>
+<p>It executes the test function in <code>runtime.gcTrigger</code> to determine if a GC should be performed, and since GCs can take a long time to execute, a Goroutine is opened at application startup to execute the forcegchelper function.</p>
+<p>However, the forcegchelper function is normally kept pending by the goparkunlock function. When the sysmon trigger GC verification passes, the hung Goroutine is put into the global scheduling queue waiting to be scheduled for GC execution.</p>
+<h4 id="runtimegc">runtime.GC</h4>
+<p>This is relatively simple, it will get the current GC cycle count and then set the value to gcTriggerCycle mode to call gcStart for the cycle.</p>
+<h4 id="runtimemallocgc">runtime.mallocgc</h4>
+<p>When memory is allocated, objects are divided by size into three categories: tiny malloc, small alloc, and large alloc.</p>
+<p>Go&rsquo;s memory allocation uses a pooling technique, similar to the CPU design, and is divided into three levels of cache: a separate cache pool mcache for each thread, a central cache mcentral, and a heap page mheap.</p>
+<p>tiny malloc and small alloc will first look for free memory blocks in the mcache to allocate memory, and if no memory is allocated in the mcache, it will go to the mcentral or mheap to request memory, which will then try to trigger GC; and for large alloc, it will definitely try to trigger GC because it directly allocates memory on the heap page. for large alloc will definitely try to trigger GC because it directly allocates memory on the heap page.</p>
+<h4 id="how-to-control-whether-the-gc-should-be-executed-or-not">How to control whether the GC should be executed or not?</h4>
+<p>The above three GC triggers will eventually call gcStart to execute the GC, but before executing the GC, we must first determine whether this call should be executed, not every call will definitely execute the GC, at this time we need to talk about the test function in <code>runtime.gcTrigger</code>, this function is responsible for checking whether this GC should be executed.</p>
+<p>The test function in <code>runtime.gcTrigger</code> ultimately determines whether a GC should be executed based on its three policies.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/06/18/a7eb8ea7ba234ef28bf195bdbe93b7f0.png" alt="go gc policies"></p>
+<ul>
+<li>gcTriggerHeap: triggered by heap size, triggered when the heap size reaches a certain threshold compared to the last GC.</li>
+<li>gcTriggerTime: triggered by time, if it has not been GC&rsquo;d for more than forcegcperiod (default 2 minutes), then GC will be executed.</li>
+<li>gcTriggerCycle: triggered if garbage collection is not turned on, then a new cycle is triggered.</li>
+</ul>
+<p>If it is a gcTriggerHeap policy, then it will determine whether or not to perform GC based on the value calculated in the <code>runtime.gcSetTriggerRatio</code> function, which is mainly determined by the environment variable GOGC (default value is 100) to determine what the threshold value is.</p>
+<p>We can roughly assume that the timing of triggering GC is determined by the growth rate of the heap memory size at the last GC, compared to the current heap memory size value, which is the environment variable GOGC, default is 100, and the calculation formula can be roughly understood as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">hard_target = live_dataset + live_dataset * (GOGC / 100).
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Assuming that the current memory footprint is 100M, then according to the above formula, the GC will be triggered only when it reaches 200M.</p>
+<p>The timing of the GC trigger is not only determined by a single GOGC variable, but also by the code <code>runtime.gcSetTriggerRatio</code>, which controls a range of</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">gcSetTriggerRatio</span><span class="p">(</span><span class="nx">triggerRatio</span> <span class="kt">float64</span><span class="p">)</span> <span class="p">{</span> 
+</span></span><span class="line"><span class="cl">    <span class="c1">// gcpercent 由环境变量 GOGC 决定
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span> <span class="nx">gcpercent</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// 默认是 1
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="nx">scalingFactor</span> <span class="o">:=</span> <span class="nb">float64</span><span class="p">(</span><span class="nx">gcpercent</span><span class="p">)</span> <span class="o">/</span> <span class="mi">100</span> 
+</span></span><span class="line"><span class="cl">        <span class="c1">// 最大的 maxTriggerRatio 是 0.95
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="nx">maxTriggerRatio</span> <span class="o">:=</span> <span class="mf">0.95</span> <span class="o">*</span> <span class="nx">scalingFactor</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nx">triggerRatio</span> <span class="p">&gt;</span> <span class="nx">maxTriggerRatio</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">triggerRatio</span> <span class="p">=</span> <span class="nx">maxTriggerRatio</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">        <span class="c1">// 最大的 minTriggerRatio 是 0.6
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="nx">minTriggerRatio</span> <span class="o">:=</span> <span class="mf">0.6</span> <span class="o">*</span> <span class="nx">scalingFactor</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nx">triggerRatio</span> <span class="p">&lt;</span> <span class="nx">minTriggerRatio</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">triggerRatio</span> <span class="p">=</span> <span class="nx">minTriggerRatio</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="nx">triggerRatio</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span> 
+</span></span><span class="line"><span class="cl">        <span class="nx">triggerRatio</span> <span class="p">=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">memstats</span><span class="p">.</span><span class="nx">triggerRatio</span> <span class="p">=</span> <span class="nx">triggerRatio</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nx">trigger</span> <span class="o">:=</span> <span class="p">^</span><span class="nb">uint64</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">gcpercent</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// 当前标记存活的大小乘以1+系数triggerRatio
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="nx">trigger</span> <span class="p">=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nb">float64</span><span class="p">(</span><span class="nx">memstats</span><span class="p">.</span><span class="nx">heap_marked</span><span class="p">)</span> <span class="o">*</span> <span class="p">(</span><span class="mi">1</span> <span class="o">+</span> <span class="nx">triggerRatio</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">        <span class="o">...</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">memstats</span><span class="p">.</span><span class="nx">gc_trigger</span> <span class="p">=</span> <span class="nx">trigger</span>
+</span></span><span class="line"><span class="cl">    <span class="o">...</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The calculation of the specific threshold is more complex, as seen in the <code>gcControllerState.endCycle</code> function, the timing of the GC execution depends on the following factors.</p>
+<ul>
+<li>current CPU usage, the maximum GC tagging phase cannot exceed 25% of the entire application.</li>
+<li>Auxiliary GC tagging object CPU usage.</li>
+<li>Target growth rate (estimated), which is equal to: (heap size after the next GC - heap live size) / heap live size.</li>
+<li>actual heap growth rate: total heap size / live size after the last marker - 1.</li>
+<li>the size of the heap growth rate triggered at the last GC.</li>
+</ul>
+<p>The value obtained from these combined factors is the current triggered GC heap growth rate size. These can be printed out by <code>GODEBUG=gctrace=1,gcpacertrace=1</code>.</p>
+<p>Let&rsquo;s look at a concrete example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kn">package</span> <span class="nx">main</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl">    <span class="s">&#34;fmt&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">allocate</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">_</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">20</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;start.&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;&gt; loop.&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nf">allocate</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;&lt; loop.&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Use gctrace to track GC.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@localhost gotest<span class="o">]</span><span class="c1"># go build main.go </span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span>root@localhost gotest<span class="o">]</span><span class="c1"># GODEBUG=gctrace=1 ./main</span>
+</span></span><span class="line"><span class="cl">start.
+</span></span><span class="line"><span class="cl">&gt; loop.
+</span></span><span class="line"><span class="cl">...
+</span></span><span class="line"><span class="cl">gc <span class="m">1409</span> @0.706s 14%: 0.009+0.22+0.076 ms clock, 0.15+0.060/0.053/0.033+1.2 ms cpu, 4-&gt;6-&gt;2 MB, <span class="m">5</span> MB goal, <span class="m">16</span> P
+</span></span><span class="line"><span class="cl">gc <span class="m">1410</span> @0.706s 14%: 0.007+0.26+0.092 ms clock, 0.12+0.050/0.070/0.030+1.4 ms cpu, 4-&gt;7-&gt;3 MB, <span class="m">5</span> MB goal, <span class="m">16</span> P
+</span></span><span class="line"><span class="cl">gc <span class="m">1411</span> @0.707s 14%: 0.007+0.36+0.059 ms clock, 0.12+0.047/0.092/0.017+0.94 ms cpu, 5-&gt;7-&gt;2 MB, <span class="m">6</span> MB goal, <span class="m">16</span> P
+</span></span><span class="line"><span class="cl">...
+</span></span><span class="line"><span class="cl">&lt; loop.
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The above shows 3 GC&rsquo;s, below we look at.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">gc <span class="m">1410</span> @0.706s 14%: 0.007+0.26+0.092 ms clock, 0.12+0.050/0.070/0.030+1.4 ms cpu, 4-&gt;7-&gt;3 MB, <span class="m">5</span> MB goal, <span class="m">16</span> P
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">内存
+</span></span><span class="line"><span class="cl"><span class="m">4</span> MB：标记开始前堆占用大小 （in-use before the Marking started）
+</span></span><span class="line"><span class="cl"><span class="m">7</span> MB：标记结束后堆占用大小 （in-use after the Marking finished）
+</span></span><span class="line"><span class="cl"><span class="m">3</span> MB：标记完成后存活堆的大小 （marked as live after the Marking finished）
+</span></span><span class="line"><span class="cl"><span class="m">5</span> MB goal：标记完成后正在使用的堆内存的目标大小 （Collection goal）
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>You can see that the heap size after marking is 7 MB, but the target estimate given is 5 MB, you can see that the recycler exceeds the target set by 2 MB, so this target value is also inaccurate.</p>
+<p>In 1410 GCs, the heap size after the last marker is 3 MB, so we can roughly guess that the heap size should not exceed 6 MB in the next GC based on GOGC, so we can look at 1411 GCs.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">gc <span class="m">1411</span> @0.707s 14%: 0.007+0.36+0.059 ms clock, 0.12+0.047/0.092/0.017+0.94 ms cpu, 5-&gt;7-&gt;2 MB, <span class="m">6</span> MB goal, <span class="m">16</span> P
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">内存
+</span></span><span class="line"><span class="cl"><span class="m">5</span> MB：标记开始前堆占用大小 （in-use before the Marking started）
+</span></span><span class="line"><span class="cl"><span class="m">7</span> MB：标记结束后堆占用大小 （in-use after the Marking finished）
+</span></span><span class="line"><span class="cl"><span class="m">2</span> MB：标记完成后存活堆的大小 （marked as live after the Marking finished）
+</span></span><span class="line"><span class="cl"><span class="m">6</span> MB goal：标记完成后正在使用的堆内存的目标大小 （Collection goal）
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>You can see that the heap size is 5 MB at the start of 1411 GCs, which is within the control range.</p>
+<p>Having said all these GC mechanisms, is it possible that the speed of GC cannot catch up with the speed of garbage creation? This brings us to another mechanism in GC: Mark assist.</p>
+<p>If the collector determines that it needs to slow down allocation, it will recruit application goroutines to assist in the marking effort. This is called Mark assist. This is why it is necessary to determine whether to perform a mallocgc GC when allocating memory.</p>
+<p>Goroutines will pause their current work while Mark assist is performed, which will cause some delay in the task that Goroutines are currently working on.</p>
+<p>Our GC will also try to eliminate Mark assist as much as possible, so the next GC will be earlier, which will cause the GC to be triggered more often.</p>
+<p>We can observe Mark assist by using the go tool trace.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/06/18/ab4683b0403a48c3b169d3781c72f301.png" alt="go tool trace"></p>
+<h2 id="go-memory-ballast">Go Memory Ballast</h2>
+<p>After we got familiar with the Go GC strategy above, let&rsquo;s see how Go Memory Ballast optimizes GC. Here&rsquo;s an example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">allocate</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">_</span> <span class="p">=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="mi">1</span><span class="o">&lt;&lt;</span><span class="mi">20</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">ballast</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="mi">200</span><span class="o">*</span><span class="mi">1024</span><span class="o">*</span><span class="mi">1024</span><span class="p">)</span> <span class="c1">// 200M 
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="mi">10</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;start.&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;&gt; loop.&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">            <span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="nf">allocate</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">            <span class="p">}</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">fmt</span><span class="p">.</span><span class="nf">Println</span><span class="p">(</span><span class="s">&#34;&lt; loop.&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}()</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span> 
+</span></span><span class="line"><span class="cl">    <span class="nx">runtime</span><span class="p">.</span><span class="nf">KeepAlive</span><span class="p">(</span><span class="nx">ballast</span><span class="p">)</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>We run the above code snippet and then we do a simple count of the resource utilization.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/06/18/96de1cc0c8eb458097c786265ec209b3.png" alt="a simple count of the resource utilization"></p>
+<p>From the above results we can see that the CPU utilization of GC is around 5.5 %.</p>
+<p>Let&rsquo;s remove the ballast memory usage and see what it would be.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/06/18/b9e71070eb5b4e109ea55ffcdc80f751.png" alt="a simple count of the resource utilization"></p>
+<p>You can see that the CPU usage of GC is around 28% when there is no ballast. For those who are interested in other information about GC, you can use <code>runtime.Memstats</code> to grab the GC information periodically and print it.</p>
+<p>So why is the CPU usage so much lower after requesting an empty array? First of all, as we mentioned in the overview, the GC will decide the next GC execution time based on the environment variable GOGC. So if we request an array of 200M, the next GC will be at about 400M. Since the objects requested by the allocate function in our example above are temporary objects, they will be reduced to about 200M again after the GC, so the next GC will be set to 400M again.</p>
+<p>However, if you don&rsquo;t have ballast array, you can test it by yourself, it will trigger GC at about 4M, which will undoubtedly cause quite frequent GC for systems with more temporary variables.</p>
+<p>In short, by setting the ballast array, we have achieved the effect of delaying GC, but this effect is only useful for systems with more temporary variables, not for systems with more global variables.</p>
+<p>Then there is another question, is it a waste of memory to request 200M of memory in the system for no reason? After all, memory is so expensive. Actually, don&rsquo;t worry, as long as we don&rsquo;t read or write to the ballast array, we won&rsquo;t really use the physical memory footprint, as we can see with the following example.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">func main<span class="o">()</span> <span class="o">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nv">_</span> <span class="o">=</span> make<span class="o">([]</span>byte, 100<span class="s">&lt;&lt;20)
+</span></span></span><span class="line"><span class="cl"><span class="s">    &lt;-time.After(time.Duration(math.MaxInt64))
+</span></span></span><span class="line"><span class="cl"><span class="s">}
+</span></span></span><span class="line"><span class="cl"><span class="s">
+</span></span></span><span class="line"><span class="cl"><span class="s">$ ps -eo pmem,comm,pid,maj_flt,min_flt,rss,vsz --sort -rss | numfmt --header --to=iec --field 4-5 | numfmt --header --from-unit=102</span><span class="m">4</span> --to<span class="o">=</span>iec --field 6-7 <span class="p">|</span> column -t <span class="p">|</span> egrep <span class="s2">&#34;[t]est|[P]ID&#34;</span>
+</span></span><span class="line"><span class="cl">%MEM  COMMAND     PID    MAJFL  MINFL  RSS   VSZ
+</span></span><span class="line"><span class="cl">0.0   test_alloc  <span class="m">31248</span>  <span class="m">0</span>      1.1K   7.4M  821M
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>You can see that the virtual memory VSZ is very large, but the size of the memory allocated by the RSS process is very small.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">ballast</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">([]</span><span class="kt">byte</span><span class="p">,</span> <span class="mi">100</span><span class="o">&lt;&lt;</span><span class="mi">20</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="mi">0</span><span class="p">;</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nb">len</span><span class="p">(</span><span class="nx">ballast</span><span class="p">)</span><span class="o">/</span><span class="mi">2</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">ballast</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span> <span class="p">=</span> <span class="nb">byte</span><span class="p">(</span><span class="sc">&#39;A&#39;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="o">&lt;-</span><span class="nx">time</span><span class="p">.</span><span class="nf">After</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="nx">math</span><span class="p">.</span><span class="nx">MaxInt64</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="err">$</span> <span class="nx">ps</span> <span class="o">-</span><span class="nx">eo</span> <span class="nx">pmem</span><span class="p">,</span><span class="nx">comm</span><span class="p">,</span><span class="nx">pid</span><span class="p">,</span><span class="nx">maj_flt</span><span class="p">,</span><span class="nx">min_flt</span><span class="p">,</span><span class="nx">rss</span><span class="p">,</span><span class="nx">vsz</span> <span class="o">--</span><span class="nx">sort</span> <span class="o">-</span><span class="nx">rss</span> <span class="p">|</span> <span class="nx">numfmt</span> <span class="o">--</span><span class="nx">header</span> <span class="o">--</span><span class="nx">to</span><span class="p">=</span><span class="nx">iec</span> <span class="o">--</span><span class="nx">field</span> <span class="mi">4</span><span class="o">-</span><span class="mi">5</span> <span class="p">|</span> <span class="nx">numfmt</span> <span class="o">--</span><span class="nx">header</span> <span class="o">--</span><span class="nx">from</span><span class="o">-</span><span class="nx">unit</span><span class="p">=</span><span class="mi">1024</span> <span class="o">--</span><span class="nx">to</span><span class="p">=</span><span class="nx">iec</span> <span class="o">--</span><span class="nx">field</span> <span class="mi">6</span><span class="o">-</span><span class="mi">7</span> <span class="p">|</span> <span class="nx">column</span> <span class="o">-</span><span class="nx">t</span> <span class="p">|</span> <span class="nx">egrep</span> <span class="s">&#34;[t]est|[P]ID&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="o">%</span><span class="nx">MEM</span>  <span class="nx">COMMAND</span>     <span class="nx">PID</span>    <span class="nx">MAJFL</span>  <span class="nx">MINFL</span>  <span class="nx">RSS</span>   <span class="nx">VSZ</span>
+</span></span><span class="line"><span class="cl"><span class="mf">0.4</span>   <span class="nx">test_alloc</span>  <span class="mi">31692</span>  <span class="mi">0</span>      <span class="mi">774</span>    <span class="mi">60</span><span class="nx">M</span>   <span class="mi">821</span><span class="nx">M</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>But if we want to write to it, the memory size allocated by the RSS process will become larger, and the rest can be verified by yourself.</p>
+<p>For the Go Ballast discussion was actually mentioned a long time ago <a href="https://github.com/golang/go/issues/23044">issue</a>, in fact, the official only need to add a minimum heap size parameter can be, but has not been implemented. In contrast, Java is much better GC tuning parameters, InitialHeapSize can set the initial value of the heap.</p>
+<p>This has led to many performance-critical projects such as <a href="https://github.com/pingcap/tidb/pull/29121/files">tidb</a> and <a href="https://github.com/cortexproject/cortex/blob/master/cmd/cortex/main.go#L148">cortex</a> to add such an empty array implementation to their code.</p>
+<h2 id="go-gc-tuner">Go GC Tuner</h2>
+<p>This method is actually introduced in this article from <a href="https://eng.uber.com/how-we-saved-70k-cores-across-30-mission-critical-services/">uber</a>. The fundamental problem is that Go&rsquo;s GC is too frequent, causing the marker to take up a high CPU, but Go also provides GOGC to adjust the timing of GC, so is there a way to dynamically adjust the value of GOGC according to the current memory, so as to control the frequency of GC?</p>
+<p>Go actually provides the <code>runtime.SetFinalizer</code> function, which will be called back at the end when the object is GC&rsquo;d. In Go, it is defined as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">any</span> <span class="p">=</span> <span class="kd">interface</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">SetFinalizer</span><span class="p">(</span><span class="nx">obj</span> <span class="nx">any</span><span class="p">,</span> <span class="nx">finalizer</span> <span class="nx">any</span><span class="p">)</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>An obj is generally a pointer to an object; a finalizer is a function that takes a single argument that can be directly assigned with an obj type value. That is, SetFinalizer is a function that sets the destructor of an obj object to finalizer, and when the garbage collector finds that the obj can no longer be accessed directly or indirectly, it will clean up the obj and call finalizer.</p>
+<p>So we can use it to set a hook to check the memory situation after each GC and then set the GOGC value to.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">finalizer</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">ref</span> <span class="o">*</span><span class="nx">finalizerRef</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">finalizerRef</span> <span class="kd">struct</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">parent</span> <span class="o">*</span><span class="nx">finalizer</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">finalizerHandler</span><span class="p">(</span><span class="nx">f</span> <span class="o">*</span><span class="nx">finalizerRef</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// 为 GOGC 动态设值
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nf">getCurrentPercentAndChangeGOGC</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="c1">// 重新设置回去，否则会被真的清理
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">runtime</span><span class="p">.</span><span class="nf">SetFinalizer</span><span class="p">(</span><span class="nx">f</span><span class="p">,</span> <span class="nx">finalizerHandler</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">NewTuner</span><span class="p">(</span><span class="nx">options</span> <span class="o">...</span><span class="nx">OptFunc</span><span class="p">)</span> <span class="o">*</span><span class="nx">finalizer</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="c1">// 处理传入的参数
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="o">...</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="nx">f</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">finalizer</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">f</span><span class="p">.</span><span class="nx">ref</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">finalizerRef</span><span class="p">{</span><span class="nx">parent</span><span class="p">:</span> <span class="nx">f</span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">runtime</span><span class="p">.</span><span class="nf">SetFinalizer</span><span class="p">(</span><span class="nx">f</span><span class="p">.</span><span class="nx">ref</span><span class="p">,</span> <span class="nx">finalizerHandler</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">  <span class="c1">// 设置为 nil，让 GC 认为原 f.ref 函数是垃圾，以便触发 finalizerHandler 调用
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">f</span><span class="p">.</span><span class="nx">ref</span> <span class="p">=</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="nx">f</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The above code takes advantage of the finalizer feature and calls getCurrentPercentAndChangeGOGC at GC time to reset the GOGC value, and since the finalizer extends the life of the object once, we can call SetFinalizer again after setting the GOGC in the finalizerHandler to rebind the object to the finalizer. SetFinalizer is called again to rebind the object to the Finalizer.</p>
+<p>This constitutes a loop, and each GC will have a finalizerRef object dynamically changing the GOGC value according to the current memory situation, thus achieving the purpose of adjusting the number of GCs and saving resources.</p>
+<p>As we mentioned above, the GC basically calculates the timing of the next GC based on the heap size after the current GC.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="nv">hard_target</span> <span class="o">=</span> live_dataset + live_dataset * <span class="o">(</span>GOGC / 100<span class="o">)</span>.
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>For example, if the heap size live_dataset is 100 M after this GC, the default value of 100 for GOGC will trigger a GC when the heap size is 200M.</p>
+<p>In order to maximize the memory utilization and reduce the number of GCs, then we can set GOGC to</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">(Maximum percentage of memory available - current percentage of memory occupied) / current percentage of memory occupied * 100
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>This means that if there is a machine with all the memory for our application, and the application currently occupies 10%, or 100M, then.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl"> GOGC = （100%-10%）/10% * 100 = 900
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Of course, we can&rsquo;t be that extreme in production, and the specific maximum percentage of available memory needs to be adjusted according to the current situation.</p>
+<p>Then, converted into code, our getCurrentPercentAndChangeGOGC can be written as follows</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">var</span> <span class="nx">memoryLimitInPercent</span> <span class="kt">float64</span> <span class="p">=</span> <span class="mi">100</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">getCurrentPercentAndChangeGOGC</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">p</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">process</span><span class="p">.</span><span class="nf">NewProcess</span><span class="p">(</span><span class="nb">int32</span><span class="p">(</span><span class="nx">os</span><span class="p">.</span><span class="nf">Getpid</span><span class="p">()))</span>
+</span></span><span class="line"><span class="cl">  <span class="c1">// 获取当前应用占用百分比
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="nx">memPercent</span><span class="p">,</span> <span class="nx">_</span> <span class="o">:=</span> <span class="nx">p</span><span class="p">.</span><span class="nf">MemoryPercent</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">  <span class="c1">// 计算 GOGC 值
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="nx">newgogc</span> <span class="o">:=</span> <span class="p">(</span><span class="nx">memoryLimitInPercent</span> <span class="o">-</span> <span class="nb">float64</span><span class="p">(</span><span class="nx">memPercent</span><span class="p">))</span> <span class="o">/</span> <span class="nx">memPercent</span> <span class="o">*</span> <span class="mf">100.0</span>
+</span></span><span class="line"><span class="cl">  <span class="c1">// 设置 GOGC 值
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="nx">debug</span><span class="p">.</span><span class="nf">SetGCPercent</span><span class="p">(</span><span class="nb">int</span><span class="p">(</span><span class="nx">newgogc</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The above code I omitted a lot of exception handling, default handling, and memoryLimitInPercent written as a fixed value, in the real use, the code needs to be improved.</p>
+<p>At this point, the above Go Memory Ballast and Go GC Tuner have achieved our optimization goals.</p>
+<h2 id="soft-memory-limit">Soft Memory Limit</h2>
+<p>This optimization is from issue<a href="https://github.com/golang/go/issues/48409">#48409</a> and was added in Go 1.19. The principle of the optimization is actually similar to the above, with the built-in <code>debug.SetMemoryLimit</code> function we can adjust the target value of heap memory for triggering The built-in <code>debug.SetMemoryLimit</code> function allows us to adjust the target value of heap memory for triggering GC, thus reducing the number of GCs and the CPU usage during GC.</p>
+<p>As we mentioned above, Go implements three strategies for triggering GCs, one of which is gcTriggerHeap, which sets the heap target value for the next GC based on the heap size. The code in version 1.19 modifies the gcTriggerHeap policy.</p>
+<p>We can see from the code call that two methods are used to calculate the HeapGoal in <code>gcControllerState.heapGoalInternal</code>, one is calculated by the GOGC value and the other is calculated by the memoryLimit value, and then the smaller of the two is taken as the HeapGoal.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">gcControllerState</span><span class="p">)</span> <span class="nf">heapGoalInternal</span><span class="p">()</span> <span class="p">(</span><span class="nx">goal</span><span class="p">,</span> <span class="nx">minTrigger</span> <span class="kt">uint64</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// Start with the goal calculated for gcPercent.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">goal</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">gcPercentHeapGoal</span><span class="p">.</span><span class="nf">Load</span><span class="p">()</span> <span class="c1">//通过 GOGC 计算 heapGoal
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// 通过 memoryLimit 计算 heapGoal，并和 goal 比较大小，取小的
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span> <span class="nx">newGoal</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">memoryLimitHeapGoal</span><span class="p">();</span> <span class="nx">go119MemoryLimitSupport</span> <span class="o">&amp;&amp;</span> <span class="nx">newGoal</span> <span class="p">&lt;</span> <span class="nx">goal</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">goal</span> <span class="p">=</span> <span class="nx">newGoal</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="o">...</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The gcPercentHeapGoal is calculated as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">gcControllerState</span><span class="p">)</span> <span class="nf">commit</span><span class="p">(</span><span class="nx">isSweepDone</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="o">...</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">gcPercentHeapGoal</span> <span class="o">:=</span> <span class="p">^</span><span class="nb">uint64</span><span class="p">(</span><span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">gcPercent</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">gcPercent</span><span class="p">.</span><span class="nf">Load</span><span class="p">();</span> <span class="nx">gcPercent</span> <span class="o">&gt;=</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// HeapGoal = 存活堆大小 + （存活堆大小+栈大小+全局变量大小）* GOGC/100
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="nx">gcPercentHeapGoal</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">heapMarked</span> <span class="o">+</span> <span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">heapMarked</span><span class="o">+</span><span class="nx">atomic</span><span class="p">.</span><span class="nf">Load64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">lastStackScan</span><span class="p">)</span><span class="o">+</span><span class="nx">atomic</span><span class="p">.</span><span class="nf">Load64</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">c</span><span class="p">.</span><span class="nx">globalsScan</span><span class="p">))</span><span class="o">*</span><span class="nb">uint64</span><span class="p">(</span><span class="nx">gcPercent</span><span class="p">)</span><span class="o">/</span><span class="mi">100</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">c</span><span class="p">.</span><span class="nx">gcPercentHeapGoal</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="nx">gcPercentHeapGoal</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="o">...</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>is not very different from the hard_target calculation we mentioned above and can be understood as follows</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">HeapGoal = live_dataset + (live_dataset+stack size+global variable size)* GOGC/100
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s look at the memoryLimitHeapGoal calculation again.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">gcControllerState</span><span class="p">)</span> <span class="nf">memoryLimitHeapGoal</span><span class="p">()</span> <span class="kt">uint64</span> <span class="p">{</span> 
+</span></span><span class="line"><span class="cl">    <span class="kd">var</span> <span class="nx">heapFree</span><span class="p">,</span> <span class="nx">heapAlloc</span><span class="p">,</span> <span class="nx">mappedReady</span> <span class="kt">uint64</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">heapFree</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">heapFree</span><span class="p">.</span><span class="nf">load</span><span class="p">()</span>                          
+</span></span><span class="line"><span class="cl">    <span class="nx">heapAlloc</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">totalAlloc</span><span class="p">.</span><span class="nf">Load</span><span class="p">()</span> <span class="o">-</span> <span class="nx">c</span><span class="p">.</span><span class="nx">totalFree</span><span class="p">.</span><span class="nf">Load</span><span class="p">()</span>  
+</span></span><span class="line"><span class="cl">    <span class="nx">mappedReady</span> <span class="p">=</span> <span class="nx">c</span><span class="p">.</span><span class="nx">mappedReady</span><span class="p">.</span><span class="nf">Load</span><span class="p">()</span>                   
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nx">memoryLimit</span> <span class="o">:=</span> <span class="nb">uint64</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">memoryLimit</span><span class="p">.</span><span class="nf">Load</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nx">nonHeapMemory</span> <span class="o">:=</span> <span class="nx">mappedReady</span> <span class="o">-</span> <span class="nx">heapFree</span> <span class="o">-</span> <span class="nx">heapAlloc</span> 
+</span></span><span class="line"><span class="cl">    <span class="o">...</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">goal</span> <span class="o">:=</span> <span class="nx">memoryLimit</span> <span class="o">-</span> <span class="nx">nonHeapMemory</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="o">...</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="nx">goal</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The above code can basically be understood as follows</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">goal = memoryLimit - non-heap memory
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>So because the Go GC is triggered by the smaller of the above two calculations, we can now add the memoryLimit parameter to limit the OOM if we used to fill the GOGC too much; or we can just set the memoryLimit parameter with GOGC = off and use it to allocate our GC.</p>
+<h2 id="summary">Summary</h2>
+<p>The Go Memory Ballast is a pre-defined large array that allows Go to raise the heap memory threshold for the next Go GC trigger at startup, thus avoiding unnecessary consumption when there is enough memory but a lot of temporary variables in the application.</p>
+<p>Go GC Tuner mainly uses the GC hooks provided by Go to set the Finalizer to dynamically set the GOGC by the current memory usage after the GC, so as to reduce the GC.</p>
+<p>Soft Memory Limit is a new feature in version 1.19 that enables GC control in a built-in way. By setting memoryLimit to control the GC memory trigger threshold to achieve the purpose of reducing GC. The principle is actually not fundamentally different from the above two methods, but because it is built into the GC loop, it can check the current non-heap memory usage in a more fine-grained way, thus achieving more precise control.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-06/grafana-loki-rw/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Extending Grafana Loki with Read-Write Separation Patterns</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-06/gomock/">
+            <span class="next-text nav-default">What is mock testing and the use of gomock</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  <script type="text/javascript" src="/lib/jquery/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="/lib/slideout/slideout-1.0.1.min.js"></script>
+  <script type="text/javascript" src="/lib/fancybox/jquery.fancybox-3.1.20.min.js"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
