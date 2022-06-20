@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>The cost of context switching - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Explore the cost of Linux context switching to understand why coroutines make fuller use of the CPU." /><meta name="keywords" content="context switching, cost" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-06/ctx-switch/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link href="/lib/fancybox/jquery.fancybox-3.1.20.min.css" rel="stylesheet">
+
+
+<meta property="og:title" content="The cost of context switching" />
+<meta property="og:description" content="Explore the cost of Linux context switching to understand why coroutines make fuller use of the CPU." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-06/ctx-switch/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-06-20T20:51:00+08:00" />
+<meta property="article:modified_time" content="2022-06-20T20:51:00+08:00" />
+
+<meta itemprop="name" content="The cost of context switching">
+<meta itemprop="description" content="Explore the cost of Linux context switching to understand why coroutines make fuller use of the CPU."><meta itemprop="datePublished" content="2022-06-20T20:51:00+08:00" />
+<meta itemprop="dateModified" content="2022-06-20T20:51:00+08:00" />
+<meta itemprop="wordCount" content="2618">
+<meta itemprop="keywords" content="linux," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="The cost of context switching"/>
+<meta name="twitter:description" content="Explore the cost of Linux context switching to understand why coroutines make fuller use of the CPU."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">The cost of context switching</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-06-20 20:51:00 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 2618 words </span>
+          <span class="more-meta"> 6 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#concepts">Concepts</a></li>
+        <li><a href="#testing">Testing</a></li>
+        <li><a href="#soft-interrupt-overhead-calculation">Soft interrupt overhead calculation</a></li>
+        <li><a href="#hyperthreading-switching-overhead">Hyperthreading switching overhead</a></li>
+        <li><a href="#testing-tools">Testing tools</a></li>
+        <li><a href="#coroutine-impact-on-performance">coroutine impact on performance</a></li>
+        <li><a href="#conclusion">Conclusion</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="concepts">Concepts</h2>
+<p>Process switching, soft interrupts, kernel state user state switching, CPU hyperthreading switching</p>
+<p>Kernel state user state switch: still in a thread, just from the user state into the kernel state for safety and other factors need more instructions, system calls specific more what to do see: <a href="https://github.com/torvalds/linux/blob/v5.2/arch/x86/entry/entry_64.S#L145">https://github.com/torvalds/linux/blob/v5.2/arch/x86/entry/entry_64.S#L145</a></p>
+<p>Soft interrupts: such as network packet arrival, triggering ksoftirqd (one per core) process to handle, is a kind of process switching</p>
+<p>Process switching is the heaviest inside, less context switching, and the cost of process blocking wake-up call scheduling. In addition, process switching has the initiative to give up the CPU switch, there are also time slices are switched after running out</p>
+<p>CPU hyperthreading switch: the lightest, occurs inside the CPU, OS, applications can not sense</p>
+<p>Hot flame diagram under multi-thread scheduling.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/06/20/5a2bab25c66241119935d9209a84d51f.png" alt="Hot flame diagram under multi-thread scheduling"></p>
+<p>Context switching will also cause threads to lag longer because of scheduling.</p>
+<p>Linux kernel process scheduling time slice is generally the inverse of HZ, HZ is generally set to 1000 when compiling, the inverse is 1ms, that is, the time slice of each process is 1ms (in the early years is 10ms - when HZ is 100), if process 1 blocks to let out the CPU into the scheduling queue, at this time there are two more in front of the scheduling queue Processes 2/3 are in the queue, which means that at worst it will be 2ms before 1 is scheduled for execution. The load determines the length of the queue, if the process whose turn to be scheduled is ready then there is no performance waste, on the other hand if the process whose turn to be scheduled is not ready (e.g. network packet not arrived) it is a waste of a scheduling.</p>
+<blockquote>
+<p><code>sched_min_granularity_ns</code> is the most prominent setting. In the original <a href="https://elixir.bootlin.com/linux/v2.6.25/source/Documentation/scheduler/sched-design-CFS.txt#L82">sched-design-CFS.txt</a> this was described as the only &ldquo;tunable&rdquo; setting, &ldquo;to tune the scheduler from &lsquo;desktop&rsquo; (low latencies) to &lsquo;server&rsquo; (good batching) workloads.&rdquo;</p>
+<p>In other words, we can change this setting to reduce overheads from context-switching, and therefore improve throughput at the cost of responsiveness (&ldquo;latency&rdquo;).</p>
+<p>The CFS setting as mimicking the previous build-time setting, <a href="https://elixir.bootlin.com/linux/v2.6.25/source/kernel/Kconfig.hz">CONFIG_HZ</a>. In the first version of the CFS code, the default value was 1 ms, equivalent to 1000 Hz for &ldquo;desktop&rdquo; usage. Other supported values of CONFIG_HZ were 250 Hz (the default), and 100 Hz for the &ldquo;server&rdquo; end. 100 Hz was also useful when running Linux on very slow CPUs, this was one of the reasons given <a href="https://lwn.net/Articles/56378/">when CONFIG_HZ was first added as an build setting on X86</a>.</p>
+</blockquote>
+<p>Or parameter adjustment.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-csh" data-lang="csh"><span class="line"><span class="cl"><span class="c">#sysctl -a |grep -i sched_ |grep -v cpu</span>
+</span></span><span class="line"><span class="cl">kernel.sched_autogroup_enabled <span class="o">=</span> 0
+</span></span><span class="line"><span class="cl">kernel.sched_cfs_bandwidth_slice_us <span class="o">=</span> 5000
+</span></span><span class="line"><span class="cl">kernel.sched_cfs_bw_burst_enabled <span class="o">=</span> 1
+</span></span><span class="line"><span class="cl">kernel.sched_cfs_bw_burst_onset_percent <span class="o">=</span> 0
+</span></span><span class="line"><span class="cl">kernel.sched_child_runs_first <span class="o">=</span> 0
+</span></span><span class="line"><span class="cl">kernel.sched_latency_ns <span class="o">=</span> 24000000
+</span></span><span class="line"><span class="cl">kernel.sched_migration_cost_ns <span class="o">=</span> 500000
+</span></span><span class="line"><span class="cl">kernel.sched_min_granularity_ns <span class="o">=</span> 3000000
+</span></span><span class="line"><span class="cl">kernel.sched_nr_migrate <span class="o">=</span> 32
+</span></span><span class="line"><span class="cl">kernel.sched_rr_timeslice_ms <span class="o">=</span> 100
+</span></span><span class="line"><span class="cl">kernel.sched_rt_period_us <span class="o">=</span> 1000000
+</span></span><span class="line"><span class="cl">kernel.sched_rt_runtime_us <span class="o">=</span> 950000
+</span></span><span class="line"><span class="cl">kernel.sched_schedstats <span class="o">=</span> 1
+</span></span><span class="line"><span class="cl">kernel.sched_tunable_scaling <span class="o">=</span> 1
+</span></span><span class="line"><span class="cl">kernel.sched_wakeup_granularity_ns <span class="o">=</span> 4000000
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h2 id="testing">Testing</h2>
+<p><a href="https://blog.tsunanet.net/2010/11/how-long-does-it-take-to-make-context.html">How long does it take to make a context switch?</a>?</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span><span class="lnt">51
+</span><span class="lnt">52
+</span><span class="lnt">53
+</span><span class="lnt">54
+</span><span class="lnt">55
+</span><span class="lnt">56
+</span><span class="lnt">57
+</span><span class="lnt">58
+</span><span class="lnt">59
+</span><span class="lnt">60
+</span><span class="lnt">61
+</span><span class="lnt">62
+</span><span class="lnt">63
+</span><span class="lnt">64
+</span><span class="lnt">65
+</span><span class="lnt">66
+</span><span class="lnt">67
+</span><span class="lnt">68
+</span><span class="lnt">69
+</span><span class="lnt">70
+</span><span class="lnt">71
+</span><span class="lnt">72
+</span><span class="lnt">73
+</span><span class="lnt">74
+</span><span class="lnt">75
+</span><span class="lnt">76
+</span><span class="lnt">77
+</span><span class="lnt">78
+</span><span class="lnt">79
+</span><span class="lnt">80
+</span><span class="lnt">81
+</span><span class="lnt">82
+</span><span class="lnt">83
+</span><span class="lnt">84
+</span><span class="lnt">85
+</span><span class="lnt">86
+</span><span class="lnt">87
+</span><span class="lnt">88
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">model name : Intel(R) Xeon(R) Platinum 8269CY CPU @ 2.50GHz
+</span></span><span class="line"><span class="cl">2 physical CPUs, 26 cores/CPU, 2 hardware threads/core = 104 hw threads total
+</span></span><span class="line"><span class="cl">-- No CPU affinity --
+</span></span><span class="line"><span class="cl">10000000 system calls in 1144720626ns (114.5ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 6280519812ns (3140.3ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 6417846724ns (3208.9ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 147035970ns (73.5ns/ctxsw)
+</span></span><span class="line"><span class="cl">-- With CPU affinity --
+</span></span><span class="line"><span class="cl">10000000 system calls in 1109675081ns (111.0ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 4204573541ns (2102.3ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 2740739815ns (1370.4ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 474815006ns (237.4ns/ctxsw)
+</span></span><span class="line"><span class="cl">-- With CPU affinity to CPU 0 --
+</span></span><span class="line"><span class="cl">10000000 system calls in 1039827099ns (104.0ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 5622932975ns (2811.5ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 5697704164ns (2848.9ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 143474146ns (71.7ns/ctxsw)
+</span></span><span class="line"><span class="cl">----------
+</span></span><span class="line"><span class="cl">model name : Intel(R) Xeon(R) CPU E5-2682 v4 @ 2.50GHz
+</span></span><span class="line"><span class="cl">2 physical CPUs, 16 cores/CPU, 2 hardware threads/core = 64 hw threads total
+</span></span><span class="line"><span class="cl">-- No CPU affinity --
+</span></span><span class="line"><span class="cl">10000000 system calls in 772827735ns (77.3ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 4009838007ns (2004.9ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 5234823470ns (2617.4ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 193276269ns (96.6ns/ctxsw)
+</span></span><span class="line"><span class="cl">-- With CPU affinity --
+</span></span><span class="line"><span class="cl">10000000 system calls in 746578449ns (74.7ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 3598569493ns (1799.3ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 2475733882ns (1237.9ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 381484302ns (190.7ns/ctxsw)
+</span></span><span class="line"><span class="cl">-- With CPU affinity to CPU 0 --
+</span></span><span class="line"><span class="cl">10000000 system calls in 746674401ns (74.7ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 4129856807ns (2064.9ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 4226458450ns (2113.2ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 193047255ns (96.5ns/ctxsw)
+</span></span><span class="line"><span class="cl">---------
+</span></span><span class="line"><span class="cl">model name : Intel(R) Xeon(R) Platinum 8163 CPU @ 2.50GHz
+</span></span><span class="line"><span class="cl">2 physical CPUs, 24 cores/CPU, 2 hardware threads/core = 96 hw threads total
+</span></span><span class="line"><span class="cl">-- No CPU affinity --
+</span></span><span class="line"><span class="cl">10000000 system calls in 765013680ns (76.5ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 5906908170ns (2953.5ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 6741875538ns (3370.9ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 173271254ns (86.6ns/ctxsw)
+</span></span><span class="line"><span class="cl">-- With CPU affinity --
+</span></span><span class="line"><span class="cl">10000000 system calls in 764139687ns (76.4ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 4040915457ns (2020.5ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 2327904634ns (1164.0ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 378847082ns (189.4ns/ctxsw)
+</span></span><span class="line"><span class="cl">-- With CPU affinity to CPU 0 --
+</span></span><span class="line"><span class="cl">10000000 system calls in 762375921ns (76.2ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 5827318932ns (2913.7ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 6360562477ns (3180.3ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 173019064ns (86.5ns/ctxsw)
+</span></span><span class="line"><span class="cl">--------ECS
+</span></span><span class="line"><span class="cl">model name : Intel(R) Xeon(R) Platinum 8269CY CPU @ 2.50GHz
+</span></span><span class="line"><span class="cl">1 physical CPUs, 2 cores/CPU, 2 hardware threads/core = 4 hw threads total
+</span></span><span class="line"><span class="cl">-- No CPU affinity --
+</span></span><span class="line"><span class="cl">10000000 system calls in 561242906ns (56.1ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 3025706345ns (1512.9ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 3333843503ns (1666.9ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 145410372ns (72.7ns/ctxsw)
+</span></span><span class="line"><span class="cl">-- With CPU affinity --
+</span></span><span class="line"><span class="cl">10000000 system calls in 586742944ns (58.7ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 2369203084ns (1184.6ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 1929627973ns (964.8ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 335827569ns (167.9ns/ctxsw)
+</span></span><span class="line"><span class="cl">-- With CPU affinity to CPU 0 --
+</span></span><span class="line"><span class="cl">10000000 system calls in 630259940ns (63.0ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 3027444795ns (1513.7ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 3172677638ns (1586.3ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 144168251ns (72.1ns/ctxsw)
+</span></span><span class="line"><span class="cl">---------kupeng 920
+</span></span><span class="line"><span class="cl">2 physical CPUs, 96 cores/CPU, 1 hardware threads/core = 192 hw threads total
+</span></span><span class="line"><span class="cl">-- No CPU affinity --
+</span></span><span class="line"><span class="cl">10000000 system calls in 1216730780ns (121.7ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 4653366132ns (2326.7ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 4689966324ns (2345.0ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 167871167ns (83.9ns/ctxsw)
+</span></span><span class="line"><span class="cl">-- With CPU affinity --
+</span></span><span class="line"><span class="cl">10000000 system calls in 1220106854ns (122.0ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 3420506934ns (1710.3ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 2962106029ns (1481.1ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 543325133ns (271.7ns/ctxsw)
+</span></span><span class="line"><span class="cl">-- With CPU affinity to CPU 0 --
+</span></span><span class="line"><span class="cl">10000000 system calls in 1216466158ns (121.6ns/syscall)
+</span></span><span class="line"><span class="cl">2000000 process context switches in 2797948549ns (1399.0ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 3119316050ns (1559.7ns/ctxsw)
+</span></span><span class="line"><span class="cl">2000000  thread context switches in 167728516ns (83.9ns/ctxsw)
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Test code repository: <a href="https://github.com/tsuna/contextswitch">https://github.com/tsuna/contextswitch</a></p>
+<p>Source code: <a href="https://github.com/tsuna/contextswitch/blob/master/timectxsw.c">timectxsw.c</a> Results:</p>
+<ul>
+<li>Intel 5150: ~4300ns/context switch</li>
+<li>Intel E5440: ~3600ns/context switch</li>
+<li>Intel E5520: ~4500ns/context switch</li>
+<li>Intel X5550: ~3000ns/context switch</li>
+<li>Intel L5630: ~3000ns/context switch</li>
+<li>Intel E5-2620: ~3000ns/context switch</li>
+</ul>
+<p>Context switching can speed up between 66-45% if tied to a core.</p>
+<p>System call cost.</p>
+<p>Source code: <a href="https://github.com/tsuna/contextswitch/blob/master/timesyscall.c">timesyscall.c</a> Results:</p>
+<ul>
+<li>Intel 5150: 105ns/syscall</li>
+<li>Intel E5440: 87ns/syscall</li>
+<li>Intel E5520: 58ns/syscall</li>
+<li>Intel X5550: 52ns/syscall</li>
+<li>Intel L5630: 58ns/syscall</li>
+<li>Intel E5-2620: 67ns/syscall</li>
+</ul>
+<p>How much overhead does a process/thread switch actually require?</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="cm">/*
+</span></span></span><span class="line"><span class="cl"><span class="cm">Create two processes and pass a token between them. One of the processes causes blocking when it reads the token. The other process sends the token and waits for its return while also blocking. This is done a certain number of times and then their average single switchover time overhead is counted.
+</span></span></span><span class="line"><span class="cl"><span class="cm">*/</span>
+</span></span><span class="line"><span class="cl"><span class="cp">#include</span> <span class="cpf">&lt;stdio.h&gt;  </span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp">#include</span> <span class="cpf">&lt;stdlib.h&gt;  </span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp">#include</span> <span class="cpf">&lt;sys/time.h&gt;  </span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp">#include</span> <span class="cpf">&lt;time.h&gt;  </span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp">#include</span> <span class="cpf">&lt;sched.h&gt;  </span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp">#include</span> <span class="cpf">&lt;sys/types.h&gt;  </span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp">#include</span> <span class="cpf">&lt;unistd.h&gt;      //pipe()  </span><span class="cp">
+</span></span></span><span class="line"><span class="cl"><span class="cp"></span>  
+</span></span><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">main</span><span class="p">()</span>  
+</span></span><span class="line"><span class="cl"><span class="p">{</span>  
+</span></span><span class="line"><span class="cl">    <span class="kt">int</span> <span class="n">x</span><span class="p">,</span> <span class="n">i</span><span class="p">,</span> <span class="n">fd</span><span class="p">[</span><span class="mi">2</span><span class="p">],</span> <span class="n">p</span><span class="p">[</span><span class="mi">2</span><span class="p">];</span>  
+</span></span><span class="line"><span class="cl">    <span class="kt">char</span> <span class="n">send</span>    <span class="o">=</span> <span class="sc">&#39;s&#39;</span><span class="p">;</span>  
+</span></span><span class="line"><span class="cl">    <span class="kt">char</span> <span class="n">receive</span><span class="p">;</span>  
+</span></span><span class="line"><span class="cl">    <span class="n">pipe</span><span class="p">(</span><span class="n">fd</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">    <span class="n">pipe</span><span class="p">(</span><span class="n">p</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">    <span class="k">struct</span> <span class="n">timeval</span> <span class="n">tv</span><span class="p">;</span>  
+</span></span><span class="line"><span class="cl">    <span class="k">struct</span> <span class="n">sched_param</span> <span class="n">param</span><span class="p">;</span>  
+</span></span><span class="line"><span class="cl">    <span class="n">param</span><span class="p">.</span><span class="n">sched_priority</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>  
+</span></span><span class="line"><span class="cl">  
+</span></span><span class="line"><span class="cl">    <span class="k">while</span> <span class="p">((</span><span class="n">x</span> <span class="o">=</span> <span class="n">fork</span><span class="p">())</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span><span class="p">);</span> 
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">(</span><span class="n">x</span><span class="o">==</span><span class="mi">0</span><span class="p">)</span> <span class="p">{</span>  
+</span></span><span class="line"><span class="cl">        <span class="n">sched_setscheduler</span><span class="p">(</span><span class="n">getpid</span><span class="p">(),</span> <span class="n">SCHED_FIFO</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">param</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">        <span class="n">gettimeofday</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tv</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">        <span class="n">printf</span><span class="p">(</span><span class="s">&#34;Before Context Switch Time%u s, %u us</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">tv</span><span class="p">.</span><span class="n">tv_sec</span><span class="p">,</span> <span class="n">tv</span><span class="p">.</span><span class="n">tv_usec</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">        <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">10000</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>  
+</span></span><span class="line"><span class="cl">            <span class="n">read</span><span class="p">(</span><span class="n">fd</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="o">&amp;</span><span class="n">receive</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">            <span class="n">write</span><span class="p">(</span><span class="n">p</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="o">&amp;</span><span class="n">send</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>  
+</span></span><span class="line"><span class="cl">        <span class="n">exit</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>  
+</span></span><span class="line"><span class="cl">    <span class="k">else</span> <span class="p">{</span>  
+</span></span><span class="line"><span class="cl">        <span class="n">sched_setscheduler</span><span class="p">(</span><span class="n">getpid</span><span class="p">(),</span> <span class="n">SCHED_FIFO</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">param</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">        <span class="k">for</span> <span class="p">(</span><span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="mi">10000</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>  
+</span></span><span class="line"><span class="cl">            <span class="n">write</span><span class="p">(</span><span class="n">fd</span><span class="p">[</span><span class="mi">1</span><span class="p">],</span> <span class="o">&amp;</span><span class="n">send</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">            <span class="n">read</span><span class="p">(</span><span class="n">p</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="o">&amp;</span><span class="n">receive</span><span class="p">,</span> <span class="mi">1</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>  
+</span></span><span class="line"><span class="cl">        <span class="n">gettimeofday</span><span class="p">(</span><span class="o">&amp;</span><span class="n">tv</span><span class="p">,</span> <span class="nb">NULL</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">        <span class="n">printf</span><span class="p">(</span><span class="s">&#34;After Context SWitch Time%u s, %u us</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">tv</span><span class="p">.</span><span class="n">tv_sec</span><span class="p">,</span> <span class="n">tv</span><span class="p">.</span><span class="n">tv_usec</span><span class="p">);</span>  
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>  
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>  
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Each context switch takes about 3.5us on average</p>
+<h2 id="soft-interrupt-overhead-calculation">Soft interrupt overhead calculation</h2>
+<p>The following calculation is rather brown, for reference only. The higher the pressure, the more network packets a soft interrupt needs to handle, the longer the time consumed. If the number of packets is too small then the test interference is too severe and the data is not accurate.</p>
+<p>The tester sets the send/receive queue to 1, so that all soft interrupts are given to a single core to handle.</p>
+<p>Interrupt is about 4000 when there is no pressure, then deliberately run pressure, CPU run to 80%, and check by vmstat and top.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="nv">$vmstat</span> <span class="m">1</span> 
+</span></span><span class="line"><span class="cl">procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----
+</span></span><span class="line"><span class="cl"> r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
+</span></span><span class="line"><span class="cl"><span class="m">19</span>  <span class="m">0</span>      <span class="m">0</span> <span class="m">174980</span> <span class="m">151840</span> <span class="m">3882800</span>    <span class="m">0</span>    <span class="m">0</span>     <span class="m">0</span>    <span class="m">11</span>    <span class="m">1</span>    <span class="m">1</span>  <span class="m">1</span>  <span class="m">0</span> <span class="m">99</span>  <span class="m">0</span>  <span class="m">0</span>
+</span></span><span class="line"><span class="cl"><span class="m">11</span>  <span class="m">0</span>      <span class="m">0</span> <span class="m">174820</span> <span class="m">151844</span> <span class="m">3883668</span>    <span class="m">0</span>    <span class="m">0</span>     <span class="m">0</span>     <span class="m">0</span> <span class="m">30640</span> <span class="m">113918</span> <span class="m">59</span> <span class="m">22</span> <span class="m">20</span>  <span class="m">0</span>  <span class="m">0</span>
+</span></span><span class="line"><span class="cl"> <span class="m">9</span>  <span class="m">0</span>      <span class="m">0</span> <span class="m">175952</span> <span class="m">151852</span> <span class="m">3884576</span>    <span class="m">0</span>    <span class="m">0</span>     <span class="m">0</span>   <span class="m">224</span> <span class="m">29611</span> <span class="m">108549</span> <span class="m">57</span> <span class="m">22</span> <span class="m">21</span>  <span class="m">0</span>  <span class="m">0</span>
+</span></span><span class="line"><span class="cl"><span class="m">11</span>  <span class="m">0</span>      <span class="m">0</span> <span class="m">171752</span> <span class="m">151852</span> <span class="m">3885636</span>    <span class="m">0</span>    <span class="m">0</span>     <span class="m">0</span>  <span class="m">3452</span> <span class="m">30682</span> <span class="m">113874</span> <span class="m">57</span> <span class="m">22</span> <span class="m">21</span>  <span class="m">0</span>  <span class="m">0</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>top sees that si% is roughly 20%, which means that 25000 interrupts for a core consume 20% of the CPU, indicating that these soft interrupts consume 200 milliseconds.</p>
+<p>200*1000 microseconds/25000 = 200/25 = 8 microseconds, 8000 nanoseconds - on the high side.</p>
+<p>Reducing the pressure on the CPU runs to 55% si consumes 12%.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----
+</span></span><span class="line"><span class="cl"> r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
+</span></span><span class="line"><span class="cl"> 6  0      0 174180 152076 3884360    0    0     0     0 25314 119681 40 17 43  0  0
+</span></span><span class="line"><span class="cl"> 1  0      0 172600 152080 3884308    0    0     0   252 24971 116407 40 17 43  0  0
+</span></span><span class="line"><span class="cl"> 4  0      0 174664 152080 3884540    0    0     0  3536 25164 118175 39 18 42  0  0
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>120*1000 microseconds/(21000) = 5.7 microseconds, 5700 nanoseconds - on the high side.</p>
+<p>Reduced pressure (4 core CPU only pressed to 15%)</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----
+</span></span><span class="line"><span class="cl"> r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
+</span></span><span class="line"><span class="cl"> 0  0      0 183228 151788 3876288    0    0     0     0 15603 42460  6  3 91  0  0
+</span></span><span class="line"><span class="cl"> 0  0      0 181312 151788 3876032    0    0     0     0 15943 43129  7  2 91  0  0
+</span></span><span class="line"><span class="cl"> 1  0      0 181728 151788 3876544    0    0     0  3232 15790 42409  7  3 90  0  0
+</span></span><span class="line"><span class="cl"> 0  0      0 181584 151788 3875956    0    0     0     0 15728 42641  7  3 90  0  0
+</span></span><span class="line"><span class="cl"> 1  0      0 179276 151792 3876848    0    0     0   192 15862 42875  6  3 91  0  0
+</span></span><span class="line"><span class="cl"> 0  0      0 179508 151796 3876424    0    0     0     0 15404 41899  7  2 91  0  0
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Single core 11000 interrupt, corresponding to si CPU 2.2%</p>
+<p>22*1000/11000= 2 microseconds 2000 nanoseconds Slightly more reliable</p>
+<h2 id="hyperthreading-switching-overhead">Hyperthreading switching overhead</h2>
+<p>Minimal, basically negligible, within 1ns</p>
+<h2 id="testing-tools">Testing tools</h2>
+<p>lmbench&rsquo;s lat_ctx, etc., in microseconds, the context of a process is 1540 nanoseconds when the pressure is low</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="o">[</span>root@plantegg 13:19 /root/lmbench3<span class="o">]</span>
+</span></span><span class="line"><span class="cl"><span class="c1">#taskset -c 4 ./bin/lat_ctx -P 2 -W warmup -s 64 2  //CPU 打满</span>
+</span></span><span class="line"><span class="cl"><span class="s2">&#34;size=64k ovr=3.47
+</span></span></span><span class="line"><span class="cl"><span class="s2">2 7.88
+</span></span></span><span class="line"><span class="cl"><span class="s2">#taskset -c 4 ./bin/lat_ctx -P 1 -W warmup -s 64 2
+</span></span></span><span class="line"><span class="cl"><span class="s2">&#34;</span><span class="nv">size</span><span class="o">=</span>64k <span class="nv">ovr</span><span class="o">=</span>3.46
+</span></span><span class="line"><span class="cl"><span class="m">2</span> 1.54
+</span></span><span class="line"><span class="cl"><span class="c1">#taskset -c 4-5 ./bin/lat_ctx  -W warmup -s 64 2</span>
+</span></span><span class="line"><span class="cl"><span class="s2">&#34;size=64k ovr=3.44
+</span></span></span><span class="line"><span class="cl"><span class="s2">2 3.11
+</span></span></span><span class="line"><span class="cl"><span class="s2">#taskset -c 4-7 ./bin/lat_ctx -P 2 -W warmup -s 64 2  //CPU 打到50%
+</span></span></span><span class="line"><span class="cl"><span class="s2">&#34;</span><span class="nv">size</span><span class="o">=</span>64k <span class="nv">ovr</span><span class="o">=</span>3.48
+</span></span><span class="line"><span class="cl"><span class="m">2</span> 3.14
+</span></span><span class="line"><span class="cl"><span class="c1">#taskset -c 4-15 ./bin/lat_ctx -P 3 -W warmup -s 64 2</span>
+</span></span><span class="line"><span class="cl"><span class="s2">&#34;size=64k ovr=3.46
+</span></span></span><span class="line"><span class="cl"><span class="s2">2 3.18
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><h2 id="coroutine-impact-on-performance">coroutine impact on performance</h2>
+<p>After changing the WEB service to coroutine scheduling, the TPS increased by 50% (30,000 to 45,000), while the number of contextswitch decreased from 110,000 to 8,000 (and 4,500 for stress-free cs)</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">procs -----------memory---------- ---swap-- -----io---- -system-- ------cpu-----
+</span></span><span class="line"><span class="cl"> r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
+</span></span><span class="line"><span class="cl"> <span class="m">5</span>  <span class="m">0</span>      <span class="m">0</span> <span class="m">3831480</span> <span class="m">153136</span> <span class="m">3819244</span>    <span class="m">0</span>    <span class="m">0</span>     <span class="m">0</span>     <span class="m">0</span> <span class="m">23599</span> <span class="m">6065</span> <span class="m">79</span> <span class="m">19</span>  <span class="m">2</span>  <span class="m">0</span>  <span class="m">0</span>
+</span></span><span class="line"><span class="cl"> <span class="m">4</span>  <span class="m">0</span>      <span class="m">0</span> <span class="m">3829208</span> <span class="m">153136</span> <span class="m">3818824</span>    <span class="m">0</span>    <span class="m">0</span>     <span class="m">0</span>   <span class="m">160</span> <span class="m">23324</span> <span class="m">7349</span> <span class="m">80</span> <span class="m">18</span>  <span class="m">2</span>  <span class="m">0</span>  <span class="m">0</span>
+</span></span><span class="line"><span class="cl"> <span class="m">4</span>  <span class="m">0</span>      <span class="m">0</span> <span class="m">3833320</span> <span class="m">153140</span> <span class="m">3818672</span>    <span class="m">0</span>    <span class="m">0</span>     <span class="m">0</span>     <span class="m">0</span> <span class="m">24567</span> <span class="m">8213</span> <span class="m">80</span> <span class="m">19</span>  <span class="m">2</span>  <span class="m">0</span>  <span class="m">0</span>
+</span></span><span class="line"><span class="cl"> <span class="m">4</span>  <span class="m">0</span>      <span class="m">0</span> <span class="m">3831880</span> <span class="m">153140</span> <span class="m">3818532</span>    <span class="m">0</span>    <span class="m">0</span>     <span class="m">0</span>     <span class="m">0</span> <span class="m">24339</span> <span class="m">8350</span> <span class="m">78</span> <span class="m">20</span>  <span class="m">2</span>  <span class="m">0</span>  <span class="m">0</span>
+</span></span><span class="line"><span class="cl"> 
+</span></span><span class="line"><span class="cl"><span class="o">[</span>  99s<span class="o">]</span> threads: 60, tps: 0.00, reads/s: 44609.77, writes/s: 0.00, response time: 2.05ms <span class="o">(</span>95%<span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span> 100s<span class="o">]</span> threads: 60, tps: 0.00, reads/s: 46538.27, writes/s: 0.00, response time: 1.99ms <span class="o">(</span>95%<span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span> 101s<span class="o">]</span> threads: 60, tps: 0.00, reads/s: 46061.84, writes/s: 0.00, response time: 2.01ms <span class="o">(</span>95%<span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span> 102s<span class="o">]</span> threads: 60, tps: 0.00, reads/s: 46961.05, writes/s: 0.00, response time: 1.94ms <span class="o">(</span>95%<span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span> 103s<span class="o">]</span> threads: 60, tps: 0.00, reads/s: 46224.15, writes/s: 0.00, response time: 2.00ms <span class="o">(</span>95%<span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span> 104s<span class="o">]</span> threads: 60, tps: 0.00, reads/s: 46556.93, writes/s: 0.00, response time: 1.98ms <span class="o">(</span>95%<span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span> 105s<span class="o">]</span> threads: 60, tps: 0.00, reads/s: 45965.12, writes/s: 0.00, response time: 1.97ms <span class="o">(</span>95%<span class="o">)</span>
+</span></span><span class="line"><span class="cl"><span class="o">[</span> 106s<span class="o">]</span> threads: 60, tps: 0.00, reads/s: 46369.96, writes/s: 0.00, response time: 2.01ms <span class="o">(</span>95%<span class="o">)</span>
+</span></span><span class="line"><span class="cl">//4core
+</span></span><span class="line"><span class="cl"> PID USER      PR  NI    VIRT    RES    SHR S %CPU %MEM     TIME+ COMMAND
+</span></span><span class="line"><span class="cl"> <span class="m">11588</span> admin     <span class="m">20</span>   <span class="m">0</span>   12.9g   6.9g  <span class="m">22976</span> R 95.7 45.6   0:33.07 Root-Worke //Four coroutines to run the CPU basically full
+</span></span><span class="line"><span class="cl"> <span class="m">11586</span> admin     <span class="m">20</span>   <span class="m">0</span>   12.9g   6.9g  <span class="m">22976</span> R 93.7 45.6   0:34.29 Root-Worke
+</span></span><span class="line"><span class="cl"> <span class="m">11587</span> admin     <span class="m">20</span>   <span class="m">0</span>   12.9g   6.9g  <span class="m">22976</span> R 93.7 45.6   0:32.58 Root-Worke
+</span></span><span class="line"><span class="cl"> <span class="m">11585</span> admin     <span class="m">20</span>   <span class="m">0</span>   12.9g   6.9g  <span class="m">22976</span> R 92.0 45.6   0:33.25 Root-Worke
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Without coroutine, the CPU was 20% idle and could not be hit, after using coroutine, the CPU ran to 95%.</p>
+<h2 id="conclusion">Conclusion</h2>
+<ul>
+<li>Process context switch takes several thousand nanoseconds (varies by CPU model)</li>
+<li>If you do taskset then context switching will reduce the time by 50% (avoiding L1, L2 Miss, etc.)</li>
+<li>Threads are slightly faster than process context switching by about 10%</li>
+<li>Test data and the actual operation of the scene is very relevant, it is difficult to control, CPU competition is too fierce to wait for the scheduling time; if the CPU is relatively idle to reflect the cache miss, etc., resulting in increased latency</li>
+<li>System calls are very light compared to process context switching, about 100ns or less</li>
+<li>function calls are even lighter, about a few ns, stack jumping</li>
+<li>CPU&rsquo;s hyperthreading scheduling and function calls are similar, both can be done in a few ns</li>
+</ul>
+<p>After looking at these data and thinking about what coroutine is doing and why it is efficient, it is natural.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/linux/">linux</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-06/os-switch/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">How much overhead is actually required for process/thread context switching?</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-06/multiple-clocks-snowflake/">
+            <span class="next-text nav-default">Multi-clock solves the time redirection problem of snowflake algorithm</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  <script type="text/javascript" src="/lib/jquery/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="/lib/slideout/slideout-1.0.1.min.js"></script>
+  <script type="text/javascript" src="/lib/fancybox/jquery.fancybox-3.1.20.min.js"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
