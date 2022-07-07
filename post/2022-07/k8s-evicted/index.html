@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How Pod Eviction Happens in kubernetes - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Learn how Pod eviction happens in Kubernetes." /><meta name="keywords" content="k8s, Evicted" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-07/k8s-evicted/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link href="/lib/fancybox/jquery.fancybox-3.1.20.min.css" rel="stylesheet">
+
+
+<meta property="og:title" content="How Pod Eviction Happens in kubernetes" />
+<meta property="og:description" content="Learn how Pod eviction happens in Kubernetes." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-07/k8s-evicted/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-07-07T12:13:20+08:00" />
+<meta property="article:modified_time" content="2022-07-07T12:13:20+08:00" />
+
+<meta itemprop="name" content="How Pod Eviction Happens in kubernetes">
+<meta itemprop="description" content="Learn how Pod eviction happens in Kubernetes."><meta itemprop="datePublished" content="2022-07-07T12:13:20+08:00" />
+<meta itemprop="dateModified" content="2022-07-07T12:13:20+08:00" />
+<meta itemprop="wordCount" content="1451">
+<meta itemprop="keywords" content="k8s," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How Pod Eviction Happens in kubernetes"/>
+<meta name="twitter:description" content="Learn how Pod eviction happens in Kubernetes."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How Pod Eviction Happens in kubernetes</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-07-07 12:13:20 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1451 words </span>
+          <span class="more-meta"> 7 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#reasons-for-instance-eviction">Reasons for instance eviction</a>
+          <ul>
+            <li><a href="#insufficient-node-resources-lead-to-instance-eviction">Insufficient node resources lead to instance eviction</a></li>
+          </ul>
+        </li>
+        <li><a href="#known-issues-related-to-resource-handling-when-evicting-instances-of-kubelet">Known issues related to resource handling when evicting instances of kubelet</a>
+          <ul>
+            <li><a href="#1-kubelet-does-not-perceive-changes-in-node-memory-data-in-real-time">1. kubelet does not perceive changes in node memory data in real time</a></li>
+            <li><a href="#2-kubelet-memoryavailable-does-not-count-active-pages">2. kubelet memory.available does not count active pages</a></li>
+          </ul>
+        </li>
+        <li><a href="#analysis-of-why-evicted-instances-are-not-deleted">Analysis of why evicted instances are not deleted</a></li>
+        <li><a href="#solution">Solution</a></li>
+        <li><a href="#summary">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Recently, we found that many instances on our network are in Evicted state. Through pod yaml, we can see that the instances are being evicted because of insufficient node resources. However, these instances are not automatically cleaned up, and most users of the platform will think that there is a problem with the service or the platform when they see Evicted instances under the service, which affects the user experience. The Pods in the Evicted state have been destroyed in the underlying container, which has no impact on the user&rsquo;s service. In other words, there is only an empty shell of Pod in k8s, but it needs to be cleaned up manually. In this article, we will analyze why Evicted instances are created, why they are not automatically cleaned up, and how to do so.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">$ kubectl get pod <span class="p">|</span> grep -i Evicted
+</span></span><span class="line"><span class="cl">cloud-1023955-84421-49604-5-deploy-c-7748f8fd8-hjqsh        0/1     Evicted   <span class="m">0</span>          73d
+</span></span><span class="line"><span class="cl">cloud-1023955-84421-49604-5-deploy-c-7748f8fd8-mzd8x        0/1     Evicted   <span class="m">0</span>          81d
+</span></span><span class="line"><span class="cl">cloud-1237162-276467-199844-2-deploy-7bdc7c98b6-26r2r       0/1     Evicted   <span class="m">0</span>          18d
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Evicted Instance status.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-yml" data-lang="yml"><span class="line"><span class="cl"><span class="nt">status</span><span class="p">:</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">message: &#39;Pod The node had condition</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="l">DiskPressure]. &#39;</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">phase</span><span class="p">:</span><span class="w"> </span><span class="l">Failed</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">reason</span><span class="p">:</span><span class="w"> </span><span class="l">Evicted</span><span class="w">
+</span></span></span><span class="line"><span class="cl"><span class="w">  </span><span class="nt">startTime</span><span class="p">:</span><span class="w"> </span><span class="s2">&#34;2021-09-14T10:42:32Z&#34;</span><span class="w">
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><h2 id="reasons-for-instance-eviction">Reasons for instance eviction</h2>
+<p>By default, kubelet configures a policy to evict instances when a node is low on resources. k8s will stop the instance on that node and start a new one on another node when the node is low on resources. The eviction policy can also be disabled in some cases by configuring the <code>--eviction-hard=</code> parameter to be empty, which we did in our previous production environment.</p>
+<h3 id="insufficient-node-resources-lead-to-instance-eviction">Insufficient node resources lead to instance eviction</h3>
+<p>The Evicted state in k8s is mainly caused by the eviction of the instance due to insufficient node resources. The kubelet eviction_manager module periodically checks the node memory usage, inode usage, disk usage, pid and other resources, and according to the kubelet configuration, when the usage reaches a certain threshold, it will first recycle the resources that can be recycled. If the resource usage still exceeds the threshold after eviction, the instance will be evicted.</p>
+<table>
+<thead>
+<tr>
+<th>Eviction Signal</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>memory.available</td>
+<td>memory.available := node.status.capacity[memory] - node.stats.memory.workingSet</td>
+</tr>
+<tr>
+<td>nodefs.available</td>
+<td>nodefs.available := node.stats.fs.available</td>
+</tr>
+<tr>
+<td>nodefs.inodesFree</td>
+<td>nodefs.inodesFree := node.stats.fs.inodesFree</td>
+</tr>
+<tr>
+<td>imagefs.available</td>
+<td>imagefs.available := node.stats.runtime.imagefs.available</td>
+</tr>
+<tr>
+<td>imagefs.inodesFree</td>
+<td>imagefs.inodesFree := node.stats.runtime.imagefs.inodesFree</td>
+</tr>
+<tr>
+<td>pid.available</td>
+<td>pid.available := node.stats.rlimit.maxpid - node.stats.rlimit.curproc</td>
+</tr>
+</tbody>
+</table>
+<p>The stats data of the pods in the kubelet is partly obtained through the cAdvisor interface and partly through the CRI runtimes interface.</p>
+<ul>
+<li><strong>memory.available</strong>: the available memory of the current node, calculated as the value of memory.usage_in_bytes in the cgroup memory subsystem minus the value of total_inactive_file in memory.stat.</li>
+<li><strong>nodefs.available</strong>: nodefs contains the file partition specified by <code>-root-dir</code> in the kubelet configuration and the disk usage of the partition where /var/lib/kubelet/ is located.</li>
+<li><strong>nodefs.inodesFree</strong>: inode usage of the nodefs.available partition.</li>
+<li><strong>imagefs.available:</strong> disk usage of the partition where the image is located.</li>
+<li><strong>imagefs.inodesFree:</strong> inode usage of the partition where the mirror is located.</li>
+<li><strong>pid.available:</strong> the value in <code>/proc/sys/kernel/pid_max</code> is the maximum number of pid available to the system.</li>
+</ul>
+<p>The kubelet can configure the thresholds for the above parameters with the parameter <code>-eviction-hard</code>, which defaults to <code>imagefs.available&lt;15%,memory.available&lt;100Mi,nodefs.available&lt;10%,nodefs. inodesFree&lt;5%</code> , which will evict containers on the node when the threshold is reached.</p>
+<h2 id="known-issues-related-to-resource-handling-when-evicting-instances-of-kubelet">Known issues related to resource handling when evicting instances of kubelet</h2>
+<h3 id="1-kubelet-does-not-perceive-changes-in-node-memory-data-in-real-time">1. kubelet does not perceive changes in node memory data in real time</h3>
+<p>kubelet regularly collects node memory usage data through the cadvisor interface. When a node has a sudden increase in memory usage within a short period of time, kubelet does not sense or have MemoryPressure related events, but still calls OOMKiller to stop the container. The memcg api can be enabled by configuring the <code>-kernel-memcg-notification</code> parameter for the kubelet, so that memcg will proactively notify when a memory usage threshold is triggered.</p>
+<p>The memcg active notification feature is already in the cgroup. kubelet will write the threshold value of memory.available in the <code>/sys/fs/cgroup/memory/cgroup.event_control</code> file, which is related to the size of the inactive_file file. The kubelet will also update the threshold periodically, and will proactively notify the kubelet when the memcg usage reaches the configured threshold, and the kubelet will receive notifications through the epoll mechanism.</p>
+<h3 id="2-kubelet-memoryavailable-does-not-count-active-pages">2. kubelet memory.available does not count active pages</h3>
+<p>When kubelet evicts an instance by memory usage, the memory usage data includes the active_file data in the page cache, and in some scenarios, the instance will be evicted because the memory usage exceeds the threshold due to high page cache.</p>
+<p>Since inactive_file will be reclaimed first by the kernel when memory is tight, but active_file will also be reclaimed by the kernel when memory is insufficient, the community has some questions about this mechanism, and the community has not yet responded to the complicated situation of memory reclaiming by the kernel, for details see <a href="https://github.com/kubernetes/kubernetes/issues/43916">kubelet counts active page cache against memory.available (maybe it shouldn&rsquo;t?)</a>.</p>
+<p>The kubelet calculates the memory available to a node in the following way.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl"><span class="cp">#!/bin/bash
+</span></span></span><span class="line"><span class="cl"><span class="cp"></span><span class="c1">#!/usr/bin/env bash</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># This script reproduces what the kubelet does</span>
+</span></span><span class="line"><span class="cl"><span class="c1"># to calculate memory.available relative to root cgroup.</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1"># current memory usage</span>
+</span></span><span class="line"><span class="cl"><span class="nv">memory_capacity_in_kb</span><span class="o">=</span><span class="k">$(</span>cat /proc/meminfo <span class="p">|</span> grep MemTotal <span class="p">|</span> awk <span class="s1">&#39;{print $2}&#39;</span><span class="k">)</span>
+</span></span><span class="line"><span class="cl"><span class="nv">memory_capacity_in_bytes</span><span class="o">=</span><span class="k">$((</span>memory_capacity_in_kb <span class="o">*</span> <span class="m">1024</span><span class="k">))</span>
+</span></span><span class="line"><span class="cl"><span class="nv">memory_usage_in_bytes</span><span class="o">=</span><span class="k">$(</span>cat /sys/fs/cgroup/memory/memory.usage_in_bytes<span class="k">)</span>
+</span></span><span class="line"><span class="cl"><span class="nv">memory_total_inactive_file</span><span class="o">=</span><span class="k">$(</span>cat /sys/fs/cgroup/memory/memory.stat <span class="p">|</span> grep total_inactive_file <span class="p">|</span> awk <span class="s1">&#39;{print $2}&#39;</span><span class="k">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nv">memory_working_set</span><span class="o">=</span><span class="si">${</span><span class="nv">memory_usage_in_bytes</span><span class="si">}</span>
+</span></span><span class="line"><span class="cl"><span class="k">if</span> <span class="o">[</span> <span class="s2">&#34;</span><span class="nv">$memory_working_set</span><span class="s2">&#34;</span> -lt <span class="s2">&#34;</span><span class="nv">$memory_total_inactive_file</span><span class="s2">&#34;</span> <span class="o">]</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="k">then</span>
+</span></span><span class="line"><span class="cl">    <span class="nv">memory_working_set</span><span class="o">=</span><span class="m">0</span>
+</span></span><span class="line"><span class="cl"><span class="k">else</span>
+</span></span><span class="line"><span class="cl">    <span class="nv">memory_working_set</span><span class="o">=</span><span class="k">$((</span>memory_usage_in_bytes <span class="o">-</span> memory_total_inactive_file<span class="k">))</span>
+</span></span><span class="line"><span class="cl"><span class="k">fi</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nv">memory_available_in_bytes</span><span class="o">=</span><span class="k">$((</span>memory_capacity_in_bytes <span class="o">-</span> memory_working_set<span class="k">))</span>
+</span></span><span class="line"><span class="cl"><span class="nv">memory_available_in_kb</span><span class="o">=</span><span class="k">$((</span>memory_available_in_bytes <span class="o">/</span> <span class="m">1024</span><span class="k">))</span>
+</span></span><span class="line"><span class="cl"><span class="nv">memory_available_in_mb</span><span class="o">=</span><span class="k">$((</span>memory_available_in_kb <span class="o">/</span> <span class="m">1024</span><span class="k">))</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;memory.capacity_in_bytes </span><span class="nv">$memory_capacity_in_bytes</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;memory.usage_in_bytes </span><span class="nv">$memory_usage_in_bytes</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;memory.total_inactive_file </span><span class="nv">$memory_total_inactive_file</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;memory.working_set </span><span class="nv">$memory_working_set</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;memory.available_in_bytes </span><span class="nv">$memory_available_in_bytes</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;memory.available_in_kb </span><span class="nv">$memory_available_in_kb</span><span class="s2">&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="nb">echo</span> <span class="s2">&#34;memory.available_in_mb </span><span class="nv">$memory_available_in_mb</span><span class="s2">&#34;</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h2 id="analysis-of-why-evicted-instances-are-not-deleted">Analysis of why evicted instances are not deleted</h2>
+<p>Reading the source code, I found that Evicted instances are automatically deleted for Statefulset and DaemonSet, but not for Deployment. After reading some of the official documentation and issues, I have not found an official explanation for why Deployment Evicted instances are not deleted.</p>
+<p>statefulset</p>
+<p><code>pkg/controller/statefulset/stateful_set_control.go</code></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// Examine each replica with respect to its ordinal
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">replicas</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// delete and recreate failed pods
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span> <span class="nf">isFailed</span><span class="p">(</span><span class="nx">replicas</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">ssc</span><span class="p">.</span><span class="nx">recorder</span><span class="p">.</span><span class="nf">Eventf</span><span class="p">(</span><span class="nx">set</span><span class="p">,</span> <span class="nx">v1</span><span class="p">.</span><span class="nx">EventTypeWarning</span><span class="p">,</span> <span class="s">&#34;RecreatingFailedPod&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">            <span class="s">&#34;StatefulSet %s/%s is recreating failed Pod %s&#34;</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">set</span><span class="p">.</span><span class="nx">Namespace</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">set</span><span class="p">.</span><span class="nx">Name</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">replicas</span><span class="p">[</span><span class="nx">i</span><span class="p">].</span><span class="nx">Name</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">ssc</span><span class="p">.</span><span class="nx">podControl</span><span class="p">.</span><span class="nf">DeleteStatefulPod</span><span class="p">(</span><span class="nx">set</span><span class="p">,</span> <span class="nx">replicas</span><span class="p">[</span><span class="nx">i</span><span class="p">]);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="o">&amp;</span><span class="nx">status</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nf">getPodRevision</span><span class="p">(</span><span class="nx">replicas</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span> <span class="o">==</span> <span class="nx">currentRevision</span><span class="p">.</span><span class="nx">Name</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">status</span><span class="p">.</span><span class="nx">CurrentReplicas</span><span class="o">--</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nf">getPodRevision</span><span class="p">(</span><span class="nx">replicas</span><span class="p">[</span><span class="nx">i</span><span class="p">])</span> <span class="o">==</span> <span class="nx">updateRevision</span><span class="p">.</span><span class="nx">Name</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">status</span><span class="p">.</span><span class="nx">UpdatedReplicas</span><span class="o">--</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="o">......</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>daemonset</p>
+<p><code>pkg/controller/daemon/daemon_controller.go</code></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">dsc</span> <span class="o">*</span><span class="nx">DaemonSetsController</span><span class="p">)</span> <span class="nf">podsShouldBeOnNode</span><span class="p">(</span>
+</span></span><span class="line"><span class="cl">		<span class="o">......</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span> <span class="p">(</span><span class="nx">nodesNeedingDaemonPods</span><span class="p">,</span> <span class="nx">podsToDelete</span> <span class="p">[]</span><span class="kt">string</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">		<span class="o">......</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">switch</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="o">......</span>
+</span></span><span class="line"><span class="cl">    <span class="k">case</span> <span class="nx">shouldContinueRunning</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">				<span class="o">......</span>
+</span></span><span class="line"><span class="cl">        <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">pod</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">daemonPods</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">DeletionTimestamp</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="k">continue</span>
+</span></span><span class="line"><span class="cl">            <span class="p">}</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Status</span><span class="p">.</span><span class="nx">Phase</span> <span class="o">==</span> <span class="nx">v1</span><span class="p">.</span><span class="nx">PodFailed</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">                <span class="c1">// This is a critical place where DS is often fighting with kubelet that rejects pods.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>                <span class="c1">// We need to avoid hot looping and backoff.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>                <span class="nx">backoffKey</span> <span class="o">:=</span> <span class="nf">failedPodsBackoffKey</span><span class="p">(</span><span class="nx">ds</span><span class="p">,</span> <span class="nx">node</span><span class="p">.</span><span class="nx">Name</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">                <span class="o">......</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h2 id="solution">Solution</h2>
+<ol>
+<li>
+<p>Our team has a set of services to collect k8s cluster events. We process by consuming events related to pods in k8s, filtering the events related to Evicted instances in pods when consuming events and then processing them.</p>
+<p>Evicted instance judgment logic.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span><span class="lnt">9
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">const</span> <span class="p">(</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">podEvictedStatus</span> <span class="p">=</span> <span class="s">&#34;Evicted&#34;</span>
+</span></span><span class="line"><span class="cl"><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Deleting a pod directly if it is an instance of Evicted state and the number of containers in the pod is 0
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">if</span> <span class="nx">strings</span><span class="p">.</span><span class="nf">ToLower</span><span class="p">(</span><span class="nx">pod</span><span class="p">.</span><span class="nx">Status</span><span class="p">.</span><span class="nx">Reason</span><span class="p">)</span> <span class="o">==</span> <span class="nx">strings</span><span class="p">.</span><span class="nf">ToLower</span><span class="p">(</span><span class="nx">podEvictedStatus</span><span class="p">)</span> <span class="o">&amp;&amp;</span> <span class="nx">pod</span><span class="p">.</span><span class="nx">Status</span><span class="p">.</span><span class="nx">Phase</span> <span class="o">==</span> <span class="nx">v1</span><span class="p">.</span><span class="nx">PodFailed</span> <span class="o">&amp;&amp;</span>
+</span></span><span class="line"><span class="cl">        <span class="nb">len</span><span class="p">(</span><span class="nx">pod</span><span class="p">.</span><span class="nx">Status</span><span class="p">.</span><span class="nx">ContainerStatuses</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div></li>
+<li>
+<p>Some people in the community provide automatic cleanup by configuring the podgc controller -terminated-pod-gc-threshold parameter in kube-controller-manager.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">Podgc controller flags:
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    --terminated-pod-gc-threshold int32
+</span></span><span class="line"><span class="cl">                Number of terminated pods that can exist before the terminated pod garbage collector starts deleting terminated pods. If
+</span></span><span class="line"><span class="cl">                &lt;<span class="o">=</span> 0, the terminated pod garbage collector is disabled. <span class="o">(</span>default 12500<span class="o">)</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>This parameter configures the number of exception instances to keep, and the default value is 12500, but the podgc controller does not support graceful exit of instances when recycling pods using the forced kill mode, so do not consider using it yet.</p>
+</li>
+<li>
+<p>Other ways to handle this can be found in <a href="https://github.com/kubernetes/kubernetes/issues/55051">Kubelet does not delete evicted pods</a> provided in the community.</p>
+</li>
+</ol>
+<h2 id="summary">Summary</h2>
+<p>Due to the high importance attached to stability in the previous company, the online nodes did not open the function of eviction instances, so there will not be instances of Evicted state, when the node resources are seriously insufficient, there will be an alarm manual intervention, as well as some secondary scheduling, failure self-healing and other auxiliary processing measures. The analysis of the Evicted instance reveals that there are many connections between k8s and the operating system, and if we want to understand some mechanisms thoroughly, we need to have some understanding of the principles of the operating system.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/k8s/">k8s</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-07/blkio-cgroup/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Blkio Cgroup</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-07/go-func-return/">
+            <span class="next-text nav-default">The difference between function return values and pointers in Golang</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  <script type="text/javascript" src="/lib/jquery/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="/lib/slideout/slideout-1.0.1.min.js"></script>
+  <script type="text/javascript" src="/lib/fancybox/jquery.fancybox-3.1.20.min.js"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
