@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How kubernetes Controller Manager works - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Explore how kube-controller-manager and its core component informer can effectively manage cluster state." /><meta name="keywords" content="k8s, Controller Manager" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-07/k8s-controller-manager/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link href="/lib/fancybox/jquery.fancybox-3.1.20.min.css" rel="stylesheet">
+
+
+<meta property="og:title" content="How kubernetes Controller Manager works" />
+<meta property="og:description" content="Explore how kube-controller-manager and its core component informer can effectively manage cluster state." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-07/k8s-controller-manager/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-07-16T13:04:17+08:00" />
+<meta property="article:modified_time" content="2022-07-16T13:04:17+08:00" />
+
+<meta itemprop="name" content="How kubernetes Controller Manager works">
+<meta itemprop="description" content="Explore how kube-controller-manager and its core component informer can effectively manage cluster state."><meta itemprop="datePublished" content="2022-07-16T13:04:17+08:00" />
+<meta itemprop="dateModified" content="2022-07-16T13:04:17+08:00" />
+<meta itemprop="wordCount" content="1284">
+<meta itemprop="keywords" content="k8s," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How kubernetes Controller Manager works"/>
+<meta name="twitter:description" content="Explore how kube-controller-manager and its core component informer can effectively manage cluster state."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How kubernetes Controller Manager works</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-07-16 13:04:17 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1284 words </span>
+          <span class="more-meta"> 7 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#overview-of-how-controller-manager--controller-works">Overview of how Controller Manager &amp; Controller works</a></li>
+        <li><a href="#client-go">client-go</a>
+          <ul>
+            <li><a href="#client-go-working-mechanism">client-go working mechanism</a></li>
+          </ul>
+        </li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>The three most important components of the kubernetes master node are kube-apiserver, kube-controller-manager, and kube-scheduler, which are responsible for resource access portal, cluster state management, and resource scheduling of the kubernetes cluster respectively.</p>
+<p>This article focuses on the kube-controller-manager component and analyzes how it and its core component informer effectively manage cluster state.</p>
+<h2 id="overview-of-how-controller-manager--controller-works">Overview of how Controller Manager &amp; Controller works</h2>
+<p>We all know that managing resources in kubernetes is relatively simple, usually by writing a YAML manifest, which can be solved directly with the kubectl command. The spec field in the YAML of Deployment may define the desired replicas, where we expect the cluster to maintain a certain number of replicas of a pod, and when we submit the manifest to the cluster, kubernetes will adjust some of the resources in the cluster to our desired state over time; or another scenario, where a pod in the cluster hangs, or we evict a pod from a Worker Node, and then we don&rsquo;t do anything about it, the Pod automatically rebuilds itself and reaches the specified number of copies, which is a very common scenario.</p>
+<p>Who implements the state management of these resources mentioned above? Yes, it is <strong>Controller Manager</strong>, which is one of the soul components of Kubernetes. It can be said that the idea of achieving cluster resource orchestration management by defining the expected state of resources relies on the Controller Manager component at the bottom.</p>
+<p>The role of the Controller Manager is, in short, to ensure that the actual status of the resources in the cluster is consistent with the user-defined desired status.</p>
+<p>As officially defined: kube-controller-manager runs the controllers, which are background threads that handle the regular tasks in the cluster.</p>
+<p>The Controller Manager is the management control center inside the cluster. The role of the Controller Manager is to ensure that the actual state of various resources in the cluster is consistent with the desired state defined by the user, but what if there is inconsistency? Is it up to the Controller Manager itself to adjust the various resources?</p>
+<p>The reason why it is called Controller Manager is that Controller Manager is composed of multiple Controllers responsible for different resources, such as Deployment Controller, Node Controller, Namespace Controller, Service Controller, etc. These Controllers have their own clear division of labor and are responsible for the management of resources within the cluster.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/07/16/4e365bf2574f4d058b67ed9f061161ea.png" alt="Controller Manager"></p>
+<p>As shown in the figure, when the Controller Manager finds that the actual state of a resource deviates from the desired state, it will trigger the Event Handler registered by the corresponding Controller and let them adjust to the characteristics of the resource itself.</p>
+<p>For example, when a Pod created by Deployment abnormally exits, the Deployment Controller will accept and handle the exiting Event and create a new Pod to maintain the expected number of copies. The reason for this design is well understood, as it decouples the Controller Manager from the specific state management work, because different resources have different state management, Deployment Controller is concerned with the number of Pod copies, while Service is concerned with the IP, Port, etc. of the Service.</p>
+<h2 id="client-go">client-go</h2>
+<p>A key part of the Controller Manager is client-go, which plays a role in distributing events to controllers in the controller manager. Currently, client-go has been extracted as a separate project, and is often used in kubernetes, as well as in the secondary development of kubernetes, such as developing custom controllers through client-go.</p>
+<p>One of the core tools in the client-go package is informer, which allows for more elegant interaction with the kube-apiserver.</p>
+<p>The main functions of informer can be summarized in two points.</p>
+<ul>
+<li>Resource data caching function, which relieves the pressure of accessing the kube-apiserver.</li>
+<li>Resource event distribution, which triggers a pre-registered ResourceEventHandler.</li>
+</ul>
+<p>Another piece of Informer is that it provides an event handler mechanism that triggers callbacks so that the Controller can handle specific business logic based on the callbacks. Because Informer can monitor all events of all resources through List, Watch mechanism, so just add a ResourceEventHandler instance to Informer with callback function instances to implement <code>OnAdd(obj interface{})</code>, <code>OnUpdate(oldObj, newObj interface{})</code> and <code>OnDelete(obj interface{})</code>, you can handle the creation, update and deletion of resources.</p>
+<h3 id="client-go-working-mechanism">client-go working mechanism</h3>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/07/16/6f1e9b45e0f94b088724a9e09d20071e.png" alt="client-go working mechanism"></p>
+<p>The above diagram shows the principle of client-go and custom controller implementation (from the official).</p>
+<h4 id="reflactor">Reflactor</h4>
+<p>Reflactor, with the following functions.</p>
+<ul>
+<li>Use List, Watch mechanism to interact with kube-apiserver, List short connection to get full data, Watch long connection to get incremental data.</li>
+<li>Can Watch any resource including CRD.</li>
+<li>The incremental objects from Watch are added to the Delta FIFO queue, and then Informer will fetch the data from the queue;</li>
+</ul>
+<h4 id="informer">Informer</h4>
+<p>Informer is one of the core modules in client-go, its main role includes the following two aspects.</p>
+<ul>
+<li>
+<p>Synchronize data to the local cache. informer continuously reads the Object in the Delta FIFO queue, updates the local store before triggering the event callback, and if it is a new Object, and if the event type is Added, then Informer saves the incremented API object to the local cache through the Indexer library. The Informer saves the API object in this increment to the local cache and creates an index for it. Later, the local store cache will be read directly when List / Get operations are performed on the resources via Lister, thus avoiding a lot of unnecessary requests to the kube-apiserver and relieving its access pressure.</p>
+</li>
+<li>
+<p>The client-go informer module will create a shardProcessor when it starts, and the events of various controllers (e.g. Deployment Controller, Custom Controller, etc.) will be triggered according to the corresponding event types. The event handler of various controllers (e.g. Deployment Controller, Custom Controller&hellip;) is converted into a processorListener instance when it is registered to the informer, and the processorListener is appended to the Listeners slice of the shardProcessor. The shardProcessor manages these listeners.</p>
+</li>
+</ul>
+<p>The important role of the processorListener is to trigger the corresponding handler when the event arrives, so it keeps getting the event from nextCh and executing the corresponding handler. <code>sharedProcessor</code> is responsible for managing all the Handlers and distributing the events, but the real distribution is done by the <code>distribute</code> method.</p>
+<p>Let&rsquo;s sort out the process in between.</p>
+<ul>
+<li>The Controller registers the Handler with the Informer.</li>
+<li>Informer maintains all Handlers that are converted to processorListener through <code>sharedProcessor</code>.</li>
+<li>When the Informer receives an event, it distributes the event through <code>sharedProcessor.distribute</code>.</li>
+<li>The Controller is triggered with the corresponding Handler to handle its own logic.</li>
+</ul>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/07/16/ee03bc3c218a4eb4a8e90c8d499bb302.png" alt="process"></p>
+<p>When the Reflactor starts, it executes a processLoop dead loop, which keeps popping the events from the Delta FIFO queue, and when it pops, it takes all the events from the resource and gives them to the <code>HandleDeltas</code> method of the <code>sharedIndexInformer</code>. (The <code>controller</code> is assigned to <code>config.Process</code> when it is created and passed to the Pop parameter&rsquo;s handler function <code>Pop(PopProcessFunc(c.config.Process))</code>), and <code>HandleDeltas</code> calls <code>processor.distribute</code> to finish distributing the events.</p>
+<p>In the registered ResourceEventHandler callback function, it just does some very simple filtering and then puts the Object that cares about the change into the workqueue. After that, the Controller takes out the Object from the workqueue and starts a worker to execute its business logic, usually comparing the current running state of the resource with the desired state, and making corresponding processing to achieve the convergence of the running state to the desired state.</p>
+<p>Note that the worker can use the lister to get the resource, so there is no need to access the kube-apiserver frequently, and the list/get of resources will directly access the informer local store cache, and the changes of resources in the apiserver will be reflected in this cache. At the same time, the LocalStore will periodically put all Pod information back into DeltaFIFO.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/k8s/">k8s</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-07/k8s-rbac/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Kubernetes&#39; RBAC mechanism</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-07/k8s-flannel/">
+            <span class="next-text nav-default">CNI mechanism and how Flannel works</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  <script type="text/javascript" src="/lib/jquery/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="/lib/slideout/slideout-1.0.1.min.js"></script>
+  <script type="text/javascript" src="/lib/fancybox/jquery.fancybox-3.1.20.min.js"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
