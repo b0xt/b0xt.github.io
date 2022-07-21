@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Building a Zero-Copy File Web Server in Golang - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article starts with Golang&#39;s file server, then explores what the sendfile system call is, and finally summarizes the usage scenarios for zero-copy." /><meta name="keywords" content="golang, Zerocopy" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-07/go-zerocopy/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link href="/lib/fancybox/jquery.fancybox-3.1.20.min.css" rel="stylesheet">
+
+
+<meta property="og:title" content="Building a Zero-Copy File Web Server in Golang" />
+<meta property="og:description" content="This article starts with Golang&#39;s file server, then explores what the sendfile system call is, and finally summarizes the usage scenarios for zero-copy." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-07/go-zerocopy/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-07-21T10:29:52+08:00" />
+<meta property="article:modified_time" content="2022-07-21T10:29:52+08:00" />
+
+<meta itemprop="name" content="Building a Zero-Copy File Web Server in Golang">
+<meta itemprop="description" content="This article starts with Golang&#39;s file server, then explores what the sendfile system call is, and finally summarizes the usage scenarios for zero-copy."><meta itemprop="datePublished" content="2022-07-21T10:29:52+08:00" />
+<meta itemprop="dateModified" content="2022-07-21T10:29:52+08:00" />
+<meta itemprop="wordCount" content="644">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Building a Zero-Copy File Web Server in Golang"/>
+<meta name="twitter:description" content="This article starts with Golang&#39;s file server, then explores what the sendfile system call is, and finally summarizes the usage scenarios for zero-copy."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Building a Zero-Copy File Web Server in Golang</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-07-21 10:29:52 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 644 words </span>
+          <span class="more-meta"> 4 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#build-a-file-server">Build a file server</a>
+          <ul>
+            <li><a href="#how-is-the-fileserver-handler-implemented">How is the FileServer Handler implemented?</a></li>
+          </ul>
+        </li>
+        <li><a href="#whats-so-special-about-sendfile-that-readwrite-isnt-good">What&rsquo;s so special about sendfile that read/Write isn&rsquo;t good?</a>
+          <ul>
+            <li><a href="#how-it-works">How it works</a></li>
+          </ul>
+        </li>
+        <li><a href="#cautions">Cautions</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>This article starts with Golang&rsquo;s file server, then explores what the sendfile system call is, and finally summarizes the usage scenarios for zero-copy.</p>
+<h2 id="build-a-file-server">Build a file server</h2>
+<p>How to build a zero-copy file server in Golang, here is the complete code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kn">package</span> <span class="nx">main</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kn">import</span> <span class="s">&#34;net/http&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">http</span><span class="p">.</span><span class="nf">Handle</span><span class="p">(</span><span class="s">&#34;/&#34;</span><span class="p">,</span> <span class="nx">http</span><span class="p">.</span><span class="nf">StripPrefix</span><span class="p">(</span><span class="s">&#34;/static/&#34;</span><span class="p">,</span> <span class="nx">http</span><span class="p">.</span><span class="nf">FileServer</span><span class="p">(</span><span class="nx">http</span><span class="p">.</span><span class="nf">Dir</span><span class="p">(</span><span class="s">&#34;./output&#34;</span><span class="p">))))</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">http</span><span class="p">.</span><span class="nf">ListenAndServe</span><span class="p">(</span><span class="s">&#34;:8000&#34;</span><span class="p">,</span> <span class="kc">nil</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Well, yes. Two lines of code to implement a file server.</p>
+<h3 id="how-is-the-fileserver-handler-implemented">How is the FileServer Handler implemented?</h3>
+<p>For the Handler that handles file requests, the implementation will be very simple according to our idea: determine the file type: if the request is for a directory, return the directory list; if the request is for a file; then copy the file data to the client via <code>io.Copy</code>.</p>
+<p>But the real implementation is slightly more complicated than I thought.</p>
+<p>By tracing the code, a simple flowchart was drawn as follows.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/07/21/303fdc1e451645aca3fc423cb26bba46.png" alt="Handler handling file requests"></p>
+<p>In the last step tcp Write, that is, write the data to the tcp stream. serveFile uses <code>io.CopyN(w, sendContent, sendSize)</code>
+When the code is seen here, I feel very satisfied. Because the implementation does not seem to be too different from what we thought.</p>
+<p>Next, take a look at the <code>io.CopyN</code> method.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">CopyN</span><span class="p">(</span><span class="nx">dst</span> <span class="nx">Writer</span><span class="p">,</span> <span class="nx">src</span> <span class="nx">Reader</span><span class="p">,</span> <span class="nx">n</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">(</span><span class="nx">written</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">written</span><span class="p">,</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">Copy</span><span class="p">(</span><span class="nx">dst</span><span class="p">,</span> <span class="nf">LimitReader</span><span class="p">(</span><span class="nx">src</span><span class="p">,</span> <span class="nx">n</span><span class="p">))</span> 
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">written</span> <span class="o">==</span> <span class="nx">n</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="nx">n</span><span class="p">,</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">written</span> <span class="p">&lt;</span> <span class="nx">n</span> <span class="o">&amp;&amp;</span> <span class="nx">err</span> <span class="o">==</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// src stopped early; must have been EOF.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="nx">err</span> <span class="p">=</span> <span class="nx">EOF</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Let&rsquo;s look at the familiar <code>io.Copy</code> method.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">copyBuffer</span><span class="p">(</span><span class="nx">dst</span> <span class="nx">Writer</span><span class="p">,</span> <span class="nx">src</span> <span class="nx">Reader</span><span class="p">,</span> <span class="nx">buf</span> <span class="p">[]</span><span class="kt">byte</span><span class="p">)</span> <span class="p">(</span><span class="nx">written</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">wt</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">src</span><span class="p">.(</span><span class="nx">WriterTo</span><span class="p">);</span> <span class="nx">ok</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="nx">wt</span><span class="p">.</span><span class="nf">WriteTo</span><span class="p">(</span><span class="nx">dst</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">rt</span><span class="p">,</span> <span class="nx">ok</span> <span class="o">:=</span> <span class="nx">dst</span><span class="p">.(</span><span class="nx">ReaderFrom</span><span class="p">);</span> <span class="nx">ok</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="nx">rt</span><span class="p">.</span><span class="nf">ReadFrom</span><span class="p">(</span><span class="nx">src</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// ...
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// create buffer
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// for {
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">//    read
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">//    write
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="c1">// }
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Read from src, write to dst. all together the way we want. No problem.</p>
+<p><strong>Wait, I think I&rsquo;ve seen the ReaderFrom interface somewhere?</strong></p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">type</span> <span class="nx">ReaderFrom</span> <span class="kd">interface</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nf">ReadFrom</span><span class="p">(</span><span class="nx">r</span> <span class="nx">Reader</span><span class="p">)</span> <span class="p">(</span><span class="nx">n</span> <span class="kt">int64</span><span class="p">,</span> <span class="nx">err</span> <span class="kt">error</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">TCPConn</span><span class="p">)</span> <span class="nf">ReadFrom</span><span class="p">(</span><span class="nx">r</span> <span class="nx">io</span><span class="p">.</span><span class="nx">Reader</span><span class="p">)</span> <span class="p">(</span><span class="kt">int64</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">!</span><span class="nx">c</span><span class="p">.</span><span class="nf">ok</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="mi">0</span><span class="p">,</span> <span class="nx">syscall</span><span class="p">.</span><span class="nx">EINVAL</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">n</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">c</span><span class="p">.</span><span class="nf">readFrom</span><span class="p">(</span><span class="nx">r</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="o">&amp;&amp;</span> <span class="nx">err</span> <span class="o">!=</span> <span class="nx">io</span><span class="p">.</span><span class="nx">EOF</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">err</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">OpError</span><span class="p">{</span><span class="nx">Op</span><span class="p">:</span> <span class="s">&#34;readfrom&#34;</span><span class="p">,</span> <span class="nx">Net</span><span class="p">:</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">net</span><span class="p">,</span> <span class="nx">Source</span><span class="p">:</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">laddr</span><span class="p">,</span> <span class="nx">Addr</span><span class="p">:</span> <span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">.</span><span class="nx">raddr</span><span class="p">,</span> <span class="nx">Err</span><span class="p">:</span> <span class="nx">err</span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The tcp connection implements the ReadFrom interface. What exactly does this implementation do?</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">c</span> <span class="o">*</span><span class="nx">TCPConn</span><span class="p">)</span> <span class="nf">readFrom</span><span class="p">(</span><span class="nx">r</span> <span class="nx">io</span><span class="p">.</span><span class="nx">Reader</span><span class="p">)</span> <span class="p">(</span><span class="kt">int64</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">err</span><span class="p">,</span> <span class="nx">handled</span> <span class="o">:=</span> <span class="nf">splice</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">,</span> <span class="nx">r</span><span class="p">);</span> <span class="nx">handled</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">err</span><span class="p">,</span> <span class="nx">handled</span> <span class="o">:=</span> <span class="nf">sendFile</span><span class="p">(</span><span class="nx">c</span><span class="p">.</span><span class="nx">fd</span><span class="p">,</span> <span class="nx">r</span><span class="p">);</span> <span class="nx">handled</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="nx">n</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="nf">genericReadFrom</span><span class="p">(</span><span class="nx">c</span><span class="p">,</span> <span class="nx">r</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>If the linux binary is compiled, the system call slice is called in the slice method.</p>
+<p>If sendfile is called, the internal implementation calls the system call method Sendfile.</p>
+<h2 id="whats-so-special-about-sendfile-that-readwrite-isnt-good">What&rsquo;s so special about sendfile that read/Write isn&rsquo;t good?</h2>
+<p>The answer is found in man.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-txt" data-lang="txt"><span class="line"><span class="cl">sendfile()  copies  data between one file descriptor and another.  Because this copying is done within the kernel,
+</span></span><span class="line"><span class="cl">sendfile() is more efficient than the combination of read(2) and write(2), which would require  transferring  data
+</span></span><span class="line"><span class="cl">to and from user space.
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>sendfile is used to copy data between two file descriptors. Since the data operation is done in the kernel state, it avoids copying data between the kernel buffer and the user buffer, so it is called the zero-copy technique. It is much more efficient than the read/write method, which requires a buffered copy.</p>
+<h3 id="how-it-works">How it works</h3>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/07/21/6ac1b6d2edb946ef946253243a92a24a.png" alt="How sendfile works">
+<img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/07/21/5b33d5177f194961963c122bf9fa5446.png" alt="How sendfile works">
+<img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/07/21/f0fbe25532c74657bd8cf929b9d136ab.png" alt="How sendfile works"></p>
+<h2 id="cautions">Cautions</h2>
+<p>sendfile must be a file descriptor that supports the mmap function; the target fd must be a socket.</p>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-07/go-atomic/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Ensuring Concurrency Safety with Atomic Operations in Golang</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-07/carbon/">
+            <span class="next-text nav-default">Google has open sourced an alternative programming language to C&#43;&#43;: Carbon</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  <script type="text/javascript" src="/lib/jquery/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="/lib/slideout/slideout-1.0.1.min.js"></script>
+  <script type="text/javascript" src="/lib/fancybox/jquery.fancybox-3.1.20.min.js"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
