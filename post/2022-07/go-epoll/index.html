@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>In-depth understanding of the implementation of epoll in Golang - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Explore the implementation of epoll in Golang." /><meta name="keywords" content="golang, Epoll" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.96.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-07/go-epoll/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link href="/lib/fancybox/jquery.fancybox-3.1.20.min.css" rel="stylesheet">
+
+
+<meta property="og:title" content="In-depth understanding of the implementation of epoll in Golang" />
+<meta property="og:description" content="Explore the implementation of epoll in Golang." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-07/go-epoll/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-07-23T11:35:59+08:00" />
+<meta property="article:modified_time" content="2022-07-23T11:35:59+08:00" />
+
+<meta itemprop="name" content="In-depth understanding of the implementation of epoll in Golang">
+<meta itemprop="description" content="Explore the implementation of epoll in Golang."><meta itemprop="datePublished" content="2022-07-23T11:35:59+08:00" />
+<meta itemprop="dateModified" content="2022-07-23T11:35:59+08:00" />
+<meta itemprop="wordCount" content="1638">
+<meta itemprop="keywords" content="golang," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="In-depth understanding of the implementation of epoll in Golang"/>
+<meta name="twitter:description" content="Explore the implementation of epoll in Golang."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">In-depth understanding of the implementation of epoll in Golang</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-07-23 11:35:59 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1638 words </span>
+          <span class="more-meta"> 4 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#1-data-reception-process">1. Data reception process</a></li>
+        <li><a href="#2-the-overall-soft-and-hard-interaction-process-of-epoll">2. The overall soft and hard interaction process of epoll</a></li>
+        <li><a href="#3-initialize-epfd">3. Initialize epfd</a>
+          <ul>
+            <li><a href="#epollcreate"><code>epollcreate</code></a></li>
+            <li><a href="#nonblockingpipe"><code>nonblockingPipe</code></a></li>
+            <li><a href="#epollctl"><code>epollctl</code></a></li>
+          </ul>
+        </li>
+        <li><a href="#4-bind-events-to-user-fd">4. Bind events to user fd</a></li>
+        <li><a href="#5-unbind-event-to-user-fd">5. Unbind event to user fd</a></li>
+        <li><a href="#6-listening-for-events">6. Listening for events</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <h2 id="1-data-reception-process">1. Data reception process</h2>
+<p>The process of external data from a computer system is relatively long from the time it enters the NIC to the time it is finally received by the application. The approximate flow is as follows.</p>
+<ul>
+<li>The NIC receives the data, copies it to the kernel space through the DMA controller, and at the same time initiates a hard interrupt to the CPU.</li>
+<li>The CPU receives the hard interrupt and simply processes it, then hands it over to the ksoftirqd process, a process called soft interrupt.</li>
+<li>The ksoftirqd process is used to interact with IO multiplexing, such as select, epoll, etc. It will trigger poll().</li>
+<li>After the copy is done by IO model (epoll for example), the data will be added to one of the fd in the ready list.</li>
+<li>By callback (epoll) as an example) the corresponding process is woken up to access the data.</li>
+</ul>
+<p>Regarding the ksoftirqd process, it is used to handle soft interrupts and call the registered poll method to start receiving packets.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">➜  ps -aux <span class="p">|</span> grep ksoft
+</span></span><span class="line"><span class="cl">root          <span class="m">12</span>  0.0  0.0      <span class="m">0</span>     <span class="m">0</span> ?        S    9月6   0:01 <span class="o">[</span>ksoftirqd/0<span class="o">]</span>
+</span></span><span class="line"><span class="cl">root          <span class="m">20</span>  0.0  0.0      <span class="m">0</span>     <span class="m">0</span> ?        S    9月6   0:00 <span class="o">[</span>ksoftirqd/1<span class="o">]</span>
+</span></span><span class="line"><span class="cl">root          <span class="m">26</span>  0.0  0.0      <span class="m">0</span>     <span class="m">0</span> ?        S    9月6   0:00 <span class="o">[</span>ksoftirqd/2<span class="o">]</span>
+</span></span><span class="line"><span class="cl">root          <span class="m">32</span>  0.0  0.0      <span class="m">0</span>     <span class="m">0</span> ?        S    9月6   0:02 <span class="o">[</span>ksoftirqd/3<span class="o">]</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h2 id="2-the-overall-soft-and-hard-interaction-process-of-epoll">2. The overall soft and hard interaction process of epoll</h2>
+<p>The interaction logic between the kernel and external devices and applications is roughly as follows.</p>
+<ul>
+<li>The OS will create a call to <code>epoll_create</code> at startup to create an epoll management object.</li>
+<li>The application will bind and listen to layer 7 data via http/rpc etc. at startup.</li>
+<li>Register listen events with the kernel and call <code>epoll_wait</code> to block and wait for the data to be ready.</li>
+<li>When the data is ready it is copied from kernel to user space and wakes up for execution.</li>
+</ul>
+<h2 id="3-initialize-epfd">3. Initialize epfd</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// runtime/netpoll.go
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl"><span class="kd">var</span> <span class="nx">netpollInited</span>   <span class="kt">uint32</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">netpollGenericInit</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Load</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">netpollInited</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nf">lockInit</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">netpollInitLock</span><span class="p">,</span> <span class="nx">lockRankNetpollInit</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="nf">lock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">netpollInitLock</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">netpollInited</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nf">netpollinit</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">netpollInited</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="nf">unlock</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">netpollInitLock</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>First use <code>atomic</code> to implement the singleton pattern to prevent being initialized multiple times. The specific instantiation is in <code>netpollinit()</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// runtime/netpoll.go
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">netpollinit</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// 尝试epollcreate1
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>	<span class="nx">epfd</span> <span class="p">=</span> <span class="nf">epollcreate1</span><span class="p">(</span><span class="nx">_EPOLL_CLOEXEC</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">epfd</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// 尝试epollcreate
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="nx">epfd</span> <span class="p">=</span> <span class="nf">epollcreate</span><span class="p">(</span><span class="mi">1024</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">epfd</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nb">println</span><span class="p">(</span><span class="s">&#34;runtime: epollcreate failed with&#34;</span><span class="p">,</span> <span class="o">-</span><span class="nx">epfd</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">			<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;runtime: netpollinit failed&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="nf">closeonexec</span><span class="p">(</span><span class="nx">epfd</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">r</span><span class="p">,</span> <span class="nx">w</span><span class="p">,</span> <span class="nx">errno</span> <span class="o">:=</span> <span class="nf">nonblockingPipe</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">errno</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nb">println</span><span class="p">(</span><span class="s">&#34;runtime: pipe failed with&#34;</span><span class="p">,</span> <span class="o">-</span><span class="nx">errno</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;runtime: pipe failed&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">ev</span> <span class="o">:=</span> <span class="nx">epollevent</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">events</span><span class="p">:</span> <span class="nx">_EPOLLIN</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="o">*</span><span class="p">(</span><span class="o">**</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ev</span><span class="p">.</span><span class="nx">data</span><span class="p">))</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">netpollBreakRd</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">errno</span> <span class="p">=</span> <span class="nf">epollctl</span><span class="p">(</span><span class="nx">epfd</span><span class="p">,</span> <span class="nx">_EPOLL_CTL_ADD</span><span class="p">,</span> <span class="nx">r</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">ev</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">errno</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nb">println</span><span class="p">(</span><span class="s">&#34;runtime: epollctl failed with&#34;</span><span class="p">,</span> <span class="o">-</span><span class="nx">errno</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;runtime: epollctl failed&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">netpollBreakRd</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">r</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">netpollBreakWr</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">w</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h3 id="epollcreate"><code>epollcreate</code></h3>
+<p>Due to the Cow mechanism, before the child process executes, it has the same data space, stack and fd list as its parent process. When the child process executes new code, the fd of the parent process will also be overwritten, which will lead to the inability to maintain the fd of the parent process, so the child process needs to turn off the useless fd first and then execute the corresponding code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">epollcreate</span><span class="p">(</span><span class="nx">size</span> <span class="kt">int32</span><span class="p">)</span> <span class="kt">int32</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">epollcreate1</span><span class="p">(</span><span class="nx">flags</span> <span class="kt">int32</span><span class="p">)</span> <span class="kt">int32</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// When flags=_EPOLL_CLOEXEC, it will automatically call closeonexec() when netpoll is closed.
+</span></span></span></code></pre></td></tr></table>
+</div>
+</div><h3 id="nonblockingpipe"><code>nonblockingPipe</code></h3>
+<p>By IO multiplexing, we mean that all threads multiplex a connection. <code>netpoll</code> plays a top-down role.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="nx">r</span><span class="p">,</span> <span class="nx">w</span><span class="p">,</span> <span class="nx">errno</span> <span class="o">:=</span> <span class="nf">nonblockingPipe</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl"><span class="nx">netpollBreakRd</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">r</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="nx">netpollBreakWr</span> <span class="p">=</span> <span class="nb">uintptr</span><span class="p">(</span><span class="nx">w</span><span class="p">)</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>r and w are the lowest level read and write fd&rsquo;s. They are also the fd&rsquo;s to be reused, after which all fd&rsquo;s registered to listen in netpoll are reused for this <code>netpollBreakRd</code> and <code>netpollBreakWr</code>.</p>
+<h3 id="epollctl"><code>epollctl</code></h3>
+<p>In the <code>netpoll</code> model, all modifications to the <code>netpoll</code> object are implemented through <code>epollctl</code>. The <code>netpoll</code> object itself is also a file descriptor. It is also known as <code>epfd</code> in the code.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="nx">errno</span> <span class="p">=</span> <span class="nf">epollctl</span><span class="p">(</span><span class="nx">epfd</span><span class="p">,</span> <span class="nx">_EPOLL_CTL_ADD</span><span class="p">,</span> <span class="nx">r</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">ev</span><span class="p">)</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Here the readable event is bound to the underlying netpollBreakRd, i.e. data coming from external network connections are written to the kernel via netpollBreakRd and then distributed to different fd&rsquo;s.</p>
+<h2 id="4-bind-events-to-user-fd">4. Bind events to user fd</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// runtime/netpoll_epoll.go
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">netpollopen</span><span class="p">(</span><span class="nx">fd</span> <span class="kt">uintptr</span><span class="p">,</span> <span class="nx">pd</span> <span class="o">*</span><span class="nx">pollDesc</span><span class="p">)</span> <span class="kt">int32</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="kd">var</span> <span class="nx">ev</span> <span class="nx">epollevent</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">ev</span><span class="p">.</span><span class="nx">events</span> <span class="p">=</span> <span class="nx">_EPOLLIN</span> <span class="p">|</span> <span class="nx">_EPOLLOUT</span> <span class="p">|</span> <span class="nx">_EPOLLRDHUP</span> <span class="p">|</span> <span class="nx">_EPOLLET</span>
+</span></span><span class="line"><span class="cl">	<span class="o">*</span><span class="p">(</span><span class="o">**</span><span class="nx">pollDesc</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ev</span><span class="p">.</span><span class="nx">data</span><span class="p">))</span> <span class="p">=</span> <span class="nx">pd</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="o">-</span><span class="nf">epollctl</span><span class="p">(</span><span class="nx">epfd</span><span class="p">,</span> <span class="nx">_EPOLL_CTL_ADD</span><span class="p">,</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">fd</span><span class="p">),</span> <span class="o">&amp;</span><span class="nx">ev</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>It&rsquo;s relatively simple here. You call <code>epollctl</code> to bind the readable, writable, pending and edge trigger events. This way the corresponding fd can be invoked immediately when ready to read and write data.</p>
+<h2 id="5-unbind-event-to-user-fd">5. Unbind event to user fd</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// runtime/netpoll_epoll.go
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">netpollclose</span><span class="p">(</span><span class="nx">fd</span> <span class="kt">uintptr</span><span class="p">)</span> <span class="kt">int32</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="kd">var</span> <span class="nx">ev</span> <span class="nx">epollevent</span>
+</span></span><span class="line"><span class="cl">	<span class="k">return</span> <span class="o">-</span><span class="nf">epollctl</span><span class="p">(</span><span class="nx">epfd</span><span class="p">,</span> <span class="nx">_EPOLL_CTL_DEL</span><span class="p">,</span> <span class="nb">int32</span><span class="p">(</span><span class="nx">fd</span><span class="p">),</span> <span class="o">&amp;</span><span class="nx">ev</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Similarly, call <code>epollctl</code> and specify the operation as <code>_EPOLL_CTL_DEL</code>.</p>
+<h2 id="6-listening-for-events">6. Listening for events</h2>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">  1
+</span><span class="lnt">  2
+</span><span class="lnt">  3
+</span><span class="lnt">  4
+</span><span class="lnt">  5
+</span><span class="lnt">  6
+</span><span class="lnt">  7
+</span><span class="lnt">  8
+</span><span class="lnt">  9
+</span><span class="lnt"> 10
+</span><span class="lnt"> 11
+</span><span class="lnt"> 12
+</span><span class="lnt"> 13
+</span><span class="lnt"> 14
+</span><span class="lnt"> 15
+</span><span class="lnt"> 16
+</span><span class="lnt"> 17
+</span><span class="lnt"> 18
+</span><span class="lnt"> 19
+</span><span class="lnt"> 20
+</span><span class="lnt"> 21
+</span><span class="lnt"> 22
+</span><span class="lnt"> 23
+</span><span class="lnt"> 24
+</span><span class="lnt"> 25
+</span><span class="lnt"> 26
+</span><span class="lnt"> 27
+</span><span class="lnt"> 28
+</span><span class="lnt"> 29
+</span><span class="lnt"> 30
+</span><span class="lnt"> 31
+</span><span class="lnt"> 32
+</span><span class="lnt"> 33
+</span><span class="lnt"> 34
+</span><span class="lnt"> 35
+</span><span class="lnt"> 36
+</span><span class="lnt"> 37
+</span><span class="lnt"> 38
+</span><span class="lnt"> 39
+</span><span class="lnt"> 40
+</span><span class="lnt"> 41
+</span><span class="lnt"> 42
+</span><span class="lnt"> 43
+</span><span class="lnt"> 44
+</span><span class="lnt"> 45
+</span><span class="lnt"> 46
+</span><span class="lnt"> 47
+</span><span class="lnt"> 48
+</span><span class="lnt"> 49
+</span><span class="lnt"> 50
+</span><span class="lnt"> 51
+</span><span class="lnt"> 52
+</span><span class="lnt"> 53
+</span><span class="lnt"> 54
+</span><span class="lnt"> 55
+</span><span class="lnt"> 56
+</span><span class="lnt"> 57
+</span><span class="lnt"> 58
+</span><span class="lnt"> 59
+</span><span class="lnt"> 60
+</span><span class="lnt"> 61
+</span><span class="lnt"> 62
+</span><span class="lnt"> 63
+</span><span class="lnt"> 64
+</span><span class="lnt"> 65
+</span><span class="lnt"> 66
+</span><span class="lnt"> 67
+</span><span class="lnt"> 68
+</span><span class="lnt"> 69
+</span><span class="lnt"> 70
+</span><span class="lnt"> 71
+</span><span class="lnt"> 72
+</span><span class="lnt"> 73
+</span><span class="lnt"> 74
+</span><span class="lnt"> 75
+</span><span class="lnt"> 76
+</span><span class="lnt"> 77
+</span><span class="lnt"> 78
+</span><span class="lnt"> 79
+</span><span class="lnt"> 80
+</span><span class="lnt"> 81
+</span><span class="lnt"> 82
+</span><span class="lnt"> 83
+</span><span class="lnt"> 84
+</span><span class="lnt"> 85
+</span><span class="lnt"> 86
+</span><span class="lnt"> 87
+</span><span class="lnt"> 88
+</span><span class="lnt"> 89
+</span><span class="lnt"> 90
+</span><span class="lnt"> 91
+</span><span class="lnt"> 92
+</span><span class="lnt"> 93
+</span><span class="lnt"> 94
+</span><span class="lnt"> 95
+</span><span class="lnt"> 96
+</span><span class="lnt"> 97
+</span><span class="lnt"> 98
+</span><span class="lnt"> 99
+</span><span class="lnt">100
+</span><span class="lnt">101
+</span><span class="lnt">102
+</span><span class="lnt">103
+</span><span class="lnt">104
+</span><span class="lnt">105
+</span><span class="lnt">106
+</span><span class="lnt">107
+</span><span class="lnt">108
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// runtime/netpoll_epoll.go
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>
+</span></span><span class="line"><span class="cl"><span class="c1">// `delay` indicates how long to block, and then returns a list of Goroutines that need to be notified `gList`
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="nf">netpoll</span><span class="p">(</span><span class="nx">delay</span> <span class="kt">int64</span><span class="p">)</span> <span class="nx">gList</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// If `epfd` is closed, then it just returns, because there is no fd to listen to.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span> <span class="nx">epfd</span> <span class="o">==</span> <span class="o">-</span><span class="mi">1</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="k">return</span> <span class="nx">gList</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="o">...</span>
+</span></span><span class="line"><span class="cl">    	<span class="kd">var</span> <span class="nx">events</span> <span class="p">[</span><span class="mi">128</span><span class="p">]</span><span class="nx">epollevent</span>
+</span></span><span class="line"><span class="cl"><span class="nx">retry</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">n</span> <span class="o">:=</span> <span class="nf">epollwait</span><span class="p">(</span><span class="nx">epfd</span><span class="p">,</span> <span class="o">&amp;</span><span class="nx">events</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="nb">int32</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">events</span><span class="p">)),</span> <span class="nx">waitms</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">n</span> <span class="p">&lt;</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="o">...</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// Timeout
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="k">if</span> <span class="nx">waitms</span> <span class="p">&gt;</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">return</span> <span class="nx">gList</span><span class="p">{}</span>
+</span></span><span class="line"><span class="cl">	    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">goto</span> <span class="nx">retry</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="kd">var</span> <span class="nx">toRun</span> <span class="nx">gList</span>
+</span></span><span class="line"><span class="cl">    <span class="k">for</span> <span class="nx">i</span> <span class="o">:=</span> <span class="nb">int32</span><span class="p">(</span><span class="mi">0</span><span class="p">);</span> <span class="nx">i</span> <span class="p">&lt;</span> <span class="nx">n</span><span class="p">;</span> <span class="nx">i</span><span class="o">++</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">ev</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">events</span><span class="p">[</span><span class="nx">i</span><span class="p">]</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// Listening events without binding
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="k">if</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">events</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">continue</span>
+</span></span><span class="line"><span class="cl">	    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// Bottom readable event: netpollBreakRd, receive data, write to kernel data space
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="k">if</span> <span class="o">*</span><span class="p">(</span><span class="o">**</span><span class="kt">uintptr</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ev</span><span class="p">.</span><span class="nx">data</span><span class="p">))</span> <span class="o">==</span> <span class="o">&amp;</span><span class="nx">netpollBreakRd</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">events</span> <span class="o">!=</span> <span class="nx">_EPOLLIN</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="nb">println</span><span class="p">(</span><span class="s">&#34;runtime: netpoll: break fd ready for&#34;</span><span class="p">,</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">events</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">				<span class="nf">throw</span><span class="p">(</span><span class="s">&#34;runtime: netpoll: break fd ready for something unexpected&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">            <span class="k">if</span> <span class="nx">delay</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="c1">// Write to
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>				<span class="kd">var</span> <span class="nx">tmp</span> <span class="p">[</span><span class="mi">16</span><span class="p">]</span><span class="kt">byte</span>                
+</span></span><span class="line"><span class="cl">				<span class="nf">read</span><span class="p">(</span><span class="nb">int32</span><span class="p">(</span><span class="nx">netpollBreakRd</span><span class="p">),</span> <span class="nf">noescape</span><span class="p">(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">tmp</span><span class="p">[</span><span class="mi">0</span><span class="p">])),</span> <span class="nb">int32</span><span class="p">(</span><span class="nb">len</span><span class="p">(</span><span class="nx">tmp</span><span class="p">)))</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">atomic</span><span class="p">.</span><span class="nf">Store</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">netpollWakeSig</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="k">continue</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="kd">var</span> <span class="nx">mode</span> <span class="kt">int32</span>
+</span></span><span class="line"><span class="cl">         <span class="c1">// As long as the _EPOLLIN readable event is registered, it is read mode
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">if</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">events</span><span class="o">&amp;</span><span class="p">(</span><span class="nx">_EPOLLIN</span><span class="p">|</span><span class="nx">_EPOLLRDHUP</span><span class="p">|</span><span class="nx">_EPOLLHUP</span><span class="p">|</span><span class="nx">_EPOLLERR</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">mode</span> <span class="o">+=</span> <span class="sc">&#39;r&#39;</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">         <span class="c1">// As long as the _EPOLLOUT writable event is registered, it is write mode
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="k">if</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">events</span><span class="o">&amp;</span><span class="p">(</span><span class="nx">_EPOLLOUT</span><span class="p">|</span><span class="nx">_EPOLLHUP</span><span class="p">|</span><span class="nx">_EPOLLERR</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">mode</span> <span class="o">+=</span> <span class="sc">&#39;w&#39;</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">mode</span> <span class="o">!=</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">pd</span> <span class="o">:=</span> <span class="o">*</span><span class="p">(</span><span class="o">**</span><span class="nx">pollDesc</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">ev</span><span class="p">.</span><span class="nx">data</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">pd</span><span class="p">.</span><span class="nx">everr</span> <span class="p">=</span> <span class="kc">false</span>
+</span></span><span class="line"><span class="cl">			<span class="k">if</span> <span class="nx">ev</span><span class="p">.</span><span class="nx">events</span> <span class="o">==</span> <span class="nx">_EPOLLERR</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">pd</span><span class="p">.</span><span class="nx">everr</span> <span class="p">=</span> <span class="kc">true</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">             <span class="c1">// The gorotine corresponding to the notification-ready fd
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>			<span class="nf">netpollready</span><span class="p">(</span><span class="o">&amp;</span><span class="nx">toRun</span><span class="p">,</span> <span class="nx">pd</span><span class="p">,</span> <span class="nx">mode</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">netpollready</span><span class="p">(</span><span class="nx">toRun</span> <span class="o">*</span><span class="nx">gList</span><span class="p">,</span> <span class="nx">pd</span> <span class="o">*</span><span class="nx">pollDesc</span><span class="p">,</span> <span class="nx">mode</span> <span class="kt">int32</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="kd">var</span> <span class="nx">rg</span><span class="p">,</span> <span class="nx">wg</span> <span class="o">*</span><span class="nx">g</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;r&#39;</span> <span class="o">||</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;r&#39;</span><span class="o">+</span><span class="sc">&#39;w&#39;</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">rg</span> <span class="p">=</span> <span class="nf">netpollunblock</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="sc">&#39;r&#39;</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;w&#39;</span> <span class="o">||</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;r&#39;</span><span class="o">+</span><span class="sc">&#39;w&#39;</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">wg</span> <span class="p">=</span> <span class="nf">netpollunblock</span><span class="p">(</span><span class="nx">pd</span><span class="p">,</span> <span class="sc">&#39;w&#39;</span><span class="p">,</span> <span class="kc">true</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">rg</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// Wakeup Readable Concurrent
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="nx">toRun</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="nx">rg</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">wg</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="c1">// Wakeup Writable Concurrent
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>		<span class="nx">toRun</span><span class="p">.</span><span class="nf">push</span><span class="p">(</span><span class="nx">wg</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">netpollunblock</span><span class="p">(</span><span class="nx">pd</span> <span class="o">*</span><span class="nx">pollDesc</span><span class="p">,</span> <span class="nx">mode</span> <span class="kt">int32</span><span class="p">,</span> <span class="nx">ioready</span> <span class="kt">bool</span><span class="p">)</span> <span class="o">*</span><span class="nx">g</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">	<span class="nx">gpp</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">rg</span>
+</span></span><span class="line"><span class="cl">	<span class="k">if</span> <span class="nx">mode</span> <span class="o">==</span> <span class="sc">&#39;w&#39;</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">gpp</span> <span class="p">=</span> <span class="o">&amp;</span><span class="nx">pd</span><span class="p">.</span><span class="nx">wg</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">	<span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">		<span class="nx">old</span> <span class="o">:=</span> <span class="o">*</span><span class="nx">gpp</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">old</span> <span class="o">==</span> <span class="nx">pdReady</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">return</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">old</span> <span class="o">==</span> <span class="mi">0</span> <span class="o">&amp;&amp;</span> <span class="p">!</span><span class="nx">ioready</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="c1">// Only set pdReady for ioready. runtime_pollWait
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>			<span class="c1">// will check for timeout/cancel before waiting.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>			<span class="k">return</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="kd">var</span> <span class="nx">new</span> <span class="kt">uintptr</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">ioready</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="nx">new</span> <span class="p">=</span> <span class="nx">pdReady</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">		<span class="k">if</span> <span class="nx">atomic</span><span class="p">.</span><span class="nf">Casuintptr</span><span class="p">(</span><span class="nx">gpp</span><span class="p">,</span> <span class="nx">old</span><span class="p">,</span> <span class="nx">new</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">			<span class="k">if</span> <span class="nx">old</span> <span class="o">==</span> <span class="nx">pdWait</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">				<span class="nx">old</span> <span class="p">=</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">			<span class="p">}</span>
+</span></span><span class="line"><span class="cl">			<span class="k">return</span> <span class="p">(</span><span class="o">*</span><span class="nx">g</span><span class="p">)(</span><span class="nx">unsafe</span><span class="p">.</span><span class="nf">Pointer</span><span class="p">(</span><span class="nx">old</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">		<span class="p">}</span>
+</span></span><span class="line"><span class="cl">	<span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The listening part is a constant loop for the events registered via <code>netpoll_ctx</code>, and when the multiplexed connections (<code>netpollBreakRd</code> and <code>netpollBreakWd</code>) are ready for reading and writing, it wakes up the corresponding event-bound Goroutine.</p>
+<p>The main processes are as follows.</p>
+<ol>
+<li><code>initialize</code> i.e. get the underlying connections <code>netpollBreakRd</code> and <code>netpollBreakWr</code>. These two are external read/write connection streams, which are themselves a socket object. <code>epoll</code> multiplexes these two fd&rsquo;s.</li>
+<li><code>Initialization</code> Initialize <code>eventpollfd</code>, through which the read and write events of other sockets are managed. <code>epfd</code> is the core structure of the <code>epoll</code> model.</li>
+<li><code>Registered events</code> A Goroutine initiates an IO request through a system call, the kernel registers the <code>fd</code> to <code>epfd</code> and calls <code>epollctl</code> to bind the required events, such as read events, write events, hang events, etc. Then Goroutine enters a blocking state and waits to be woken up.</li>
+<li><code>Listening events</code> The kernel constantly listens for the underlying connection <code>netpollBreadRd</code> and <code>netpollBreakWr</code>. When the underlying connection is readable, <code>netpollBreadRd</code> is read and then cached on the kernel data space.</li>
+<li><code>Listen to events</code> The kernel keeps looping according to various events registered by <code>epfd</code>, and when a registered event appears, such as readable, writable, etc. it wakes up the Goroutine corresponding to the bound event, i.e. the <code>toRun</code> list above.</li>
+<li><code>Goroutine ready</code>, Goroutine receives the notification and starts reading and writing data to <code>fd</code>. After it finishes, it closes <code>fd</code>. The kernel removes its bound events from <code>epfd</code>.</li>
+</ol>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/golang/">golang</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-07/go-rpc-server/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">In-depth understanding of the implementation of rpc.Server in Golang</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-07/go-channel/">
+            <span class="next-text nav-default">In-depth understanding of Golang channel implementation</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  <script type="text/javascript" src="/lib/jquery/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="/lib/slideout/slideout-1.0.1.min.js"></script>
+  <script type="text/javascript" src="/lib/fancybox/jquery.fancybox-3.1.20.min.js"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.64437849d125a2d603b3e71d6de5225d641a32d17168a58106e0b61852079683.js"></script>
+  <script type="text/javascript">
+    window.MathJax = {
+      tex: {
+        inlineMath: [['$','$'], ['\\(','\\)']],
+        tags: 'ams',
+        }
+    };
+  </script>
+  <script async src="https://cdn.jsdelivr.net/npm/mathjax@3.0.5/es5/tex-mml-chtml.js" integrity="sha256-HGLuEfFcsUJGhvB8cQ8nr0gai9EucOOaIxFw7qxmd+w=" crossorigin="anonymous"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
