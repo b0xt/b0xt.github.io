@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Talking about distributed lock implementation - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Learn how common distributed locks such as Redlock and etcd are implemented and how Google Chubby is designed, and what scenarios they are applicable to." /><meta name="keywords" content="Distributed Lock, Redlock, etcd, Chubby" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.101.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-08/distributed-lock/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link href="/lib/fancybox/jquery.fancybox-3.1.20.min.css" rel="stylesheet">
+
+
+<meta property="og:title" content="Talking about distributed lock implementation" />
+<meta property="og:description" content="Learn how common distributed locks such as Redlock and etcd are implemented and how Google Chubby is designed, and what scenarios they are applicable to." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-08/distributed-lock/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-08-14T10:33:15+08:00" />
+<meta property="article:modified_time" content="2022-08-14T10:33:15+08:00" />
+
+<meta itemprop="name" content="Talking about distributed lock implementation">
+<meta itemprop="description" content="Learn how common distributed locks such as Redlock and etcd are implemented and how Google Chubby is designed, and what scenarios they are applicable to."><meta itemprop="datePublished" content="2022-08-14T10:33:15+08:00" />
+<meta itemprop="dateModified" content="2022-08-14T10:33:15+08:00" />
+<meta itemprop="wordCount" content="4535">
+<meta itemprop="keywords" content="" /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Talking about distributed lock implementation"/>
+<meta name="twitter:description" content="Learn how common distributed locks such as Redlock and etcd are implemented and how Google Chubby is designed, and what scenarios they are applicable to."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Talking about distributed lock implementation</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-08-14 10:33:15 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 4535 words </span>
+          <span class="more-meta"> 22 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#redis-distributed-locks">Redis Distributed Locks</a>
+          <ul>
+            <li><a href="#redis-standalone-locks">Redis Standalone Locks</a></li>
+          </ul>
+        </li>
+        <li><a href="#etcd-distributed-locks">etcd Distributed Locks</a>
+          <ul>
+            <li><a href="#etcd-lock-usage">etcd lock usage</a></li>
+            <li><a href="#etcd-locking-mechanism">etcd Locking Mechanism</a></li>
+            <li><a href="#etcd-lock-implementation">etcd lock implementation</a></li>
+            <li><a href="#summary-1">Summary</a></li>
+          </ul>
+        </li>
+        <li><a href="#chubby">Chubby</a>
+          <ul>
+            <li><a href="#program-stalls">program stalls</a></li>
+            <li><a href="#summary-2">Summary</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary-3">Summary</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>In distributed systems and microservice architectures, different systems or different nodes of the same system share the same or a set of resources, then access to these resources often requires mutual exclusion to prevent interference with each other and ensure consistency.</p>
+<p>Distributed locks provide mutually exclusive access to shared resources in a distributed environment, and businesses rely on distributed locks to pursue efficiency gains or rely on distributed locks to pursue absolute mutual exclusivity of access. At the same time, in the process of accessing distributed lock service, the cost of integration, service reliability, distributed lock switching accuracy and correctness should be considered, and the correct and reasonable use of distributed locks is something that needs to be continuously thought about and optimized.</p>
+<h2 id="overview">Overview</h2>
+<p>In general, distributed locks need to satisfy the following properties.</p>
+<ol>
+<li>exclusivity: at any given moment, only one client can hold the lock.</li>
+<li>Deadlock-free: even if one client crashes while holding a lock and does not actively unlock it, other subsequent clients are guaranteed access to the lock.</li>
+<li>locking and unlocking must be the same client, and the client cannot release the lock added by other clients.</li>
+<li>fault tolerance: a few nodes fail, the lock service can still provide external unlocking services.</li>
+</ol>
+<p>Among them, the deadlock of distributed locking is different from the concept of deadlock of programming language to provide locking, the latter deadlock describes the situation where multiple threads are blocked forever due to waiting for each other, the deadlock of distributed locking means that if the request execution is unexpectedly exited for some reason, resulting in the creation of a lock but not releasing it, then the lock will always exist to the extent that subsequent lock requests are blocked. The TTL policy has some drawbacks, because if the process executing the task is not finished, but the lock is automatically released because of the TTL expiration, it may be re-locked by other processes, which causes multiple processes to get the lock at the same time.</p>
+<h2 id="redis-distributed-locks">Redis Distributed Locks</h2>
+<h3 id="redis-standalone-locks">Redis Standalone Locks</h3>
+<p>Redis standalone locks are very simple to implement, just execute the command <code>SET key random_value NX PX 60000</code> to get a lock with a TTL of 60s. The Redis lock requires the client to implement an algorithm that ensures that all lock requests generate a random unique value, and that the value is stored so that when the client finishes executing the code to release the lock, it first obtains the Redis value and compares it to the locally stored value. Only when the two match will the lock be released by the <code>DEL</code> operation.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-rb" data-lang="rb"><span class="line"><span class="cl"><span class="k">if</span> <span class="n">redis</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="s2">&#34;GET&#34;</span><span class="p">,</span> <span class="no">KEYS</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span> <span class="o">==</span> <span class="no">ARGV</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span> <span class="k">then</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="n">redis</span><span class="o">.</span><span class="n">call</span><span class="p">(</span><span class="s2">&#34;DEL&#34;</span><span class="p">,</span> <span class="no">KEYS</span><span class="o">[</span><span class="mi">1</span><span class="o">]</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="k">else</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl"><span class="k">end</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The random value is to ensure that a lock held by a client is not incorrectly released by another client. Imagine a scenario where client A gets a lock on key1, but some time-consuming operation blocks it for a long time, and Redis automatically releases the lock after the timeout period is reached; then client B gets a lock on key1, and client A finishes its operation and tries to delete the lock on key1 that is already held by client B. Using the above atomic operation script ensures that each client uses a random string as a &ldquo;signature&rdquo; and that each lock can only be removed and released by the client that obtained it.</p>
+<p>Thanks to Redis&rsquo;s memory-based data storage and excellent programming, standalone Redis can support 10w+ QPS requests, which can satisfy most scenarios. The problem with standalone locks is that, first, they are not fault-tolerant. If Redis has a single point of failure, all services that need to obtain a distributed lock will block, and second, even if Redis uses a master-slave replication architecture, the latest data is not replicated to the slave node when the master node crashes, making the slave node lose some data when it takes over the master node, which violates the exclusivity of locks.</p>
+<h4 id="redlock-distributed-locks">Redlock Distributed Locks</h4>
+<p>Redlock is a cluster-mode Redis distributed lock given by Redis author antirez, and can be seen as an extension of the single-computer locking implementation. It is based on an implementation of N completely independent Redis Master nodes that do not replicate data or use any implicit distributed coordination algorithm between them. For a client to obtain a lock, the following steps are performed.</p>
+<ol>
+<li>the client obtains the current time in milliseconds.</li>
+<li>the client requests locks on N nodes sequentially with the same key and random_value. In this step, the client requests a lock on each Master with a timeout that is much smaller than the total lock TTL, e.g. if the lock auto-release time is 10s, the timeout for each node lock request may be in the range of 5 to 50ms. The timeout prevents the client from blocking on a downed Master node for too long, and if a Master node is unavailable, the client will try the next Master node as soon as possible.</li>
+<li>the client calculates the time taken to acquire the lock in the second step, and if the client successfully acquires the lock on more than N/2 + 1 Master nodes and the total time consumed does not exceed the TTL, then the lock is considered to be successfully acquired.</li>
+<li>if the lock acquisition is successful, then the true TTL of the lock is the original TTL - the total time consumed.</li>
+<li>if the lock acquisition fails, either because no more than half of the locks were successfully acquired (N/2+1) or because the total time consumed exceeds the lock release time, the client releases the lock to each Master node, including those that did not acquire the lock.</li>
+</ol>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/14/9edb3e08e7a14c7f9d3425b214fb7bc4.png" alt="Redlock"></p>
+<p>When Redlock fails to acquire a lock, it will keep retrying after a random delay until the maximum number of times. The random delay is used to avoid the situation where different clients retry at the same time, resulting in no one getting the lock.</p>
+<p>Although Redlock uses a half-write policy to guarantee the mutual exclusivity of the lock, it relies heavily on the client to repeatedly request the lock service. If our node does not have data persistence enabled, suppose there are 5 Redis nodes: A, B, C, D, E, and the following sequence of events occurs.</p>
+<ol>
+<li>Client1 successfully locks A, B, and C and obtains locks successfully, but D and E are not locked.</li>
+<li>node C crashes and goes down, and the lock Client1 put on C is lost.</li>
+<li>after node C reboots, Client2 locks C, D and E, and obtains locks successfully.</li>
+</ol>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/14/46113cbd284c451a8781fdf41d6f4a67.png" alt="redlock node crash"></p>
+<p>Thus, Client1 and Client2 both acquire locks at the same moment. To solve this problem, Redis author antirez offers two solutions.</p>
+<ul>
+<li>
+<p>Enabling AOF persistence: Because the expiration mechanism of Redis keys is timestamp-based, time still passes during node downtime, and the lock state is not contaminated after restart. However, AOF data is written back to disk once per second by default, so some data may be lost before it is written to disk. So we need to configure the policy to fsnyc = always, but this will slow down the performance of Redis.</p>
+</li>
+<li>
+<p>Another way to solve this problem is to specify a Max TTL for the Redis lock service. When a node is restarted, the node is unavailable during the Max TTL, so that it does not interfere with the locks that have been applied, and the node will rejoin the cluster only when all the historical locks before it crashes have expired. The disadvantage of this scheme is that if the Max TTL is set too long, the restarted node will be unavailable for several hours, even if the node is normal.</p>
+</li>
+</ul>
+<h4 id="controversy">Controversy</h4>
+<p>Redlock is a distributed lock that does not use a consensus algorithm and is implemented based on time, which has led many people to doubt its reliability. Martin Kleppmann, author of DDIA, published an article <a href="https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html">How to do distributed locking</a> that critiqued Redlock&rsquo;s security from two perspectives.</p>
+<ul>
+<li>Redlock is built on a timestamp-based system model, and it is difficult for multiple servers to guarantee consistent timing, which makes the actual expiration times of locks different.</li>
+<li>distributed locks with automatic expiration must provide some fencing token (uniqueness constraint) mechanism, such as monotonically increasing IDs, to guarantee mutual exclusivity over shared resources, and Redlock does not provide such a mechanism.</li>
+</ul>
+<blockquote>
+<p>The fencing token mechanism mentioned in the second point will be discussed in more detail in the section on Chubby below.</p>
+</blockquote>
+<p>Subsequently antirez also responded in <em><a href="http://antirez.com/news/101">Is Redlock safe?</a></em>. The first case is discussed here first: when the clock jumps, the time of the current server can suddenly become larger or smaller, which can affect the lock expiration time. For example, Client1 successfully locks A, B, and C, but the time of node C suddenly jumps forward by 5 seconds to expire early, and then Client2 successfully locks C, D, and E. In this case, the mutual exclusivity of locks is violated.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/14/e57db9c050e44988927d18124e497599.png" alt="clock jumps"></p>
+<p>antirez believes that the first case can be avoided by reasonable operation and maintenance means: replace a large clock jump in a clock synchronization process with multiple small clock jumps, and ensure that the time difference between the servers is kept as low as possible. In fact, from antirez&rsquo;s response, we can see that redlock is not able to solve the problem of clock desynchronization between servers.</p>
+<p>For the second point, antirez argues that the order of lock IDs is independent of the order in which operations are actually executed, and that it is sufficient to guarantee mutually exclusive access. Therefore, it does not matter whether the lock ID is incremental or a random string. Redlock does not provide an incremental fencing token, but the same effect can be achieved with the random value generated by Redlock. This random string is not incremental, but it is unique. So Redlock can guarantee the uniqueness constraint of the lock.</p>
+<h4 id="summary">Summary</h4>
+<p>In summary, Redlock is a spin-based distributed locking implementation, which is an asynchronous replication-based distributed system that requires clients to repeatedly request locking services to determine whether a lock can be obtained.</p>
+<p>Redlock assumes a fine-grained lock service through a TTL mechanism, and is suitable for services that are time-sensitive, expect to set a short validity period, and have a relatively manageable impact on the business when a lock is lost.</p>
+<h2 id="etcd-distributed-locks">etcd Distributed Locks</h2>
+<p>etcd is a distributed key-value storage service based on the Raft consensus algorithm, and provides distributed locking capabilities. A etcd cluster contains several server nodes, and a Leader is elected through a &rsquo;leader election mechanism&rsquo;. All write requests are forwarded to the Leader, which manages log replication for consistency. The other nodes are actually copies of the current node, they only maintain a copy of the data and update the database they hold when the master node is updated, and only respond to read requests from clients.</p>
+<p>A distributed system based on consensus algorithms has built-in measures to prevent brain-fractured and expired data copies, thus enabling linear data storage, <strong>i.e., the entire cluster behaves as if there is only one copy of the data and all operations on it are atomic</strong>. The client ends up with the same result no matter which node it sends the request to.</p>
+<h3 id="etcd-lock-usage">etcd lock usage</h3>
+<p>etcd can set a lease for a stored key-value pair, which will expire and be deleted when the lease expires. Clients can renew the lease before it expires. While a client is holding the lock, other clients can only wait. To avoid the expiration of the lease while waiting, clients need to create a timed task KeepAlive as a &ldquo;heartbeat&rdquo; to keep renewing the lease to avoid the lock expiring before the processing is completed.</p>
+<p>If the client crashes while holding the lock, the heartbeat will stop and the key will be deleted due to lease expiration, thus releasing the lock and avoiding deadlock.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">NewSession</span><span class="p">(</span><span class="nx">client</span> <span class="o">*</span><span class="nx">v3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">opts</span> <span class="o">...</span><span class="nx">SessionOption</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">Session</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">ops</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">sessionOptions</span><span class="p">{</span><span class="nx">ttl</span><span class="p">:</span> <span class="nx">defaultSessionTTL</span><span class="p">,</span> <span class="nx">ctx</span><span class="p">:</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Ctx</span><span class="p">()}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">for</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">opt</span> <span class="o">:=</span> <span class="k">range</span> <span class="nx">opts</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nf">opt</span><span class="p">(</span><span class="nx">ops</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nx">id</span> <span class="o">:=</span> <span class="nx">ops</span><span class="p">.</span><span class="nx">leaseID</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nx">ctx</span><span class="p">,</span> <span class="nx">cancel</span> <span class="o">:=</span> <span class="nx">context</span><span class="p">.</span><span class="nf">WithCancel</span><span class="p">(</span><span class="nx">ops</span><span class="p">.</span><span class="nx">ctx</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">keepAlive</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">KeepAlive</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">id</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nx">donec</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kd">struct</span><span class="p">{})</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">s</span> <span class="o">:=</span> <span class="o">&amp;</span><span class="nx">Session</span><span class="p">{</span><span class="nx">client</span><span class="p">:</span> <span class="nx">client</span><span class="p">,</span> <span class="nx">opts</span><span class="p">:</span> <span class="nx">ops</span><span class="p">,</span> <span class="nx">id</span><span class="p">:</span> <span class="nx">id</span><span class="p">,</span> <span class="nx">cancel</span><span class="p">:</span> <span class="nx">cancel</span><span class="p">,</span> <span class="nx">donec</span><span class="p">:</span> <span class="nx">donec</span><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="c1">// keep the lease alive until client error or cancelled context
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">defer</span> <span class="nb">close</span><span class="p">(</span><span class="nx">donec</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="k">for</span> <span class="k">range</span> <span class="nx">keepAlive</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="c1">// eat messages until keep alive channel closes
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="nx">s</span><span class="p">,</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>To make it easier to understand the use of etcd locks, a simple example program is posted below, where go1 and go2 occupy the same lock. Even if go1 only sets a TTL of 2s and releases the lock after 5s, the client can automatically renew the lock to ensure its exclusivity.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span><span class="lnt">34
+</span><span class="lnt">35
+</span><span class="lnt">36
+</span><span class="lnt">37
+</span><span class="lnt">38
+</span><span class="lnt">39
+</span><span class="lnt">40
+</span><span class="lnt">41
+</span><span class="lnt">42
+</span><span class="lnt">43
+</span><span class="lnt">44
+</span><span class="lnt">45
+</span><span class="lnt">46
+</span><span class="lnt">47
+</span><span class="lnt">48
+</span><span class="lnt">49
+</span><span class="lnt">50
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">main</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">c</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="kd">chan</span> <span class="kt">int</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nx">client</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">clientv3</span><span class="p">.</span><span class="nf">New</span><span class="p">(</span><span class="nx">clientv3</span><span class="p">.</span><span class="nx">Config</span><span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">Endpoints</span><span class="p">:</span>   <span class="p">[]</span><span class="kt">string</span><span class="p">{</span><span class="s">&#34;9.135.90.44:2379&#34;</span><span class="p">},</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">DialTimeout</span><span class="p">:</span> <span class="mi">5</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">    <span class="p">})</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">defer</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Close</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nx">lockKey</span> <span class="o">:=</span> <span class="s">&#34;/test_lock&#34;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">session</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">NewSession</span><span class="p">(</span><span class="nx">client</span><span class="p">,</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">WithTTL</span><span class="p">(</span><span class="mi">2</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">m</span> <span class="o">:=</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">NewMutex</span><span class="p">(</span><span class="nx">session</span><span class="p">,</span> <span class="nx">lockKey</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">Lock</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">());</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="s">&#34;go1 get mutex failed &#34;</span> <span class="o">+</span> <span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;go1 get mutex key: %s\n&#34;</span><span class="p">,</span> <span class="nx">m</span><span class="p">.</span><span class="nf">Key</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">5</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">m</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;go1 release lock\n&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="k">go</span> <span class="kd">func</span><span class="p">()</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="mi">1</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">session</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">NewSession</span><span class="p">(</span><span class="nx">client</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="nx">err</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">m</span> <span class="o">:=</span> <span class="nx">concurrency</span><span class="p">.</span><span class="nf">NewMutex</span><span class="p">(</span><span class="nx">session</span><span class="p">,</span> <span class="nx">lockKey</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">log</span><span class="p">.</span><span class="nf">Print</span><span class="p">(</span><span class="s">&#34;go2 try to get mutex&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nf">Lock</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">());</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="nx">log</span><span class="p">.</span><span class="nf">Fatal</span><span class="p">(</span><span class="s">&#34;go2 get mutex failed &#34;</span> <span class="o">+</span> <span class="nx">err</span><span class="p">.</span><span class="nf">Error</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;go2 get mutex key: %s\n&#34;</span><span class="p">,</span> <span class="nx">m</span><span class="p">.</span><span class="nf">Key</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">time</span><span class="p">.</span><span class="nf">Sleep</span><span class="p">(</span><span class="nx">time</span><span class="p">.</span><span class="nf">Duration</span><span class="p">(</span><span class="mi">2</span><span class="p">)</span> <span class="o">*</span> <span class="nx">time</span><span class="p">.</span><span class="nx">Second</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">m</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nf">TODO</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">log</span><span class="p">.</span><span class="nf">Printf</span><span class="p">(</span><span class="s">&#34;go2 release lock\n&#34;</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">c</span> <span class="o">&lt;-</span> <span class="mi">0</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}()</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="nx">os</span><span class="p">.</span><span class="nf">Exit</span><span class="p">(</span><span class="o">&lt;-</span><span class="nx">c</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h3 id="etcd-locking-mechanism">etcd Locking Mechanism</h3>
+<p>In addition to the lease mechanism mentioned above, etcd also provides the following three features to secure distributed locks.</p>
+<h4 id="unified-prefix">unified prefix</h4>
+<p>In the above example program, two Goroutines compete for a lock named <code>/test_lock</code>, and the actual keys written by etcd are key1<code>/test_lock/LeaseID1</code> and key2<code>/test_lock/LeaseID2</code> respectively. The LeaseID is a global UUID generated by the raft protocol broadcast to ensure the uniqueness of the two keys.</p>
+<p>The unified prefix serves the same purpose as the random value generated by the client in Redlock, ensuring that the lock will not be erroneously deleted by other clients.</p>
+<h4 id="revision">Revision</h4>
+<p>etcd generates a 64-bit Revision version number for each key, which is incremented by one for each data write operation, so Revision is globally unique and incremental. The size of the Revision gives an idea of the order in which etcd Server processes writes.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/14/92e89107e6bb4a3cb8b46b10a26133c2.png" alt="etcd key Revision"></p>
+<p>In the above program example, both keys will be written successfully, but their Revision information is different. The client needs to obtain the Revision number of all keys prefixed with <code>/test_lock</code> by interval query, and determine whether it has obtained the lock by the Revision size.</p>
+<p>When implementing distributed locking, if more than one client is competing for the lock at the same time, they can get the lock in order according to the Revision number size to avoid &ldquo;Thundering herd problem&rdquo; and achieve fair locking.</p>
+<h4 id="watch">Watch</h4>
+<p>The Watch mechanism supports Watching a fixed key and Watching a range of intervals. When the key being watched changes, the client will receive a notification.</p>
+<p>When implementing distributed locking, if the locking fails, the pre-key with the smallest difference in Revision can be obtained from the Key-Value list returned by the interval query and listened to it. When the DELETE event of the pre-key is watched, it means that the pre-key has been released and the lock can be held at this time.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/14/10c8bf08bdd14907a69e551b7b7442f3.png" alt="etcd lock Watch"></p>
+<h3 id="etcd-lock-implementation">etcd lock implementation</h3>
+<p>After understanding the concept of the four mechanisms described above, it is simple to look at the process of locking and unlocking etcd:</p>
+<ol>
+<li>assemble the lock name and LeaseID that needs to be held as the actual key written to etcd.</li>
+<li>perform a put operation to write the created key binding lease to etcd, and the client needs to record the Revision so that it can determine whether it has obtained the lock in the next step.</li>
+<li>query the list of key-value pairs by prefix, if its Revision is the smallest in the current list, it is considered to have obtained the lock; otherwise, listen to the delete event of the previous key in the list whose Revision is smaller than its own, and once it listens to the pre-key, it obtains the lock.</li>
+<li>After completing the business process, delete the corresponding key and release the lock.</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span><span class="lnt">29
+</span><span class="lnt">30
+</span><span class="lnt">31
+</span><span class="lnt">32
+</span><span class="lnt">33
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="c1">// Code redacted
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Mutex</span><span class="p">)</span> <span class="nf">Lock</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">m</span><span class="p">.</span><span class="nx">myKey</span> <span class="p">=</span> <span class="nx">fmt</span><span class="p">.</span><span class="nf">Sprintf</span><span class="p">(</span><span class="s">&#34;%s%x&#34;</span><span class="p">,</span> <span class="nx">m</span><span class="p">.</span><span class="nx">pfx</span><span class="p">,</span> <span class="nx">s</span><span class="p">.</span><span class="nf">Lease</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">  
+</span></span><span class="line"><span class="cl">    <span class="nx">cmp</span> <span class="o">:=</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">Compare</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">CreateRevision</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">myKey</span><span class="p">),</span> <span class="s">&#34;=&#34;</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// put self in lock waiters via myKey; oldest waiter holds lock
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">put</span> <span class="o">:=</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">OpPut</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">myKey</span><span class="p">,</span> <span class="s">&#34;&#34;</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithLease</span><span class="p">(</span><span class="nx">s</span><span class="p">.</span><span class="nf">Lease</span><span class="p">()))</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// reuse key in case this session already holds the lock
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">get</span> <span class="o">:=</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">OpGet</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">myKey</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// fetch current holder to complete uncontended path with only one RPC
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">getOwner</span> <span class="o">:=</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">OpGet</span><span class="p">(</span><span class="nx">m</span><span class="p">.</span><span class="nx">pfx</span><span class="p">,</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithFirstCreate</span><span class="p">()</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Txn</span><span class="p">(</span><span class="nx">ctx</span><span class="p">).</span><span class="nf">If</span><span class="p">(</span><span class="nx">cmp</span><span class="p">).</span><span class="nf">Then</span><span class="p">(</span><span class="nx">put</span><span class="p">,</span> <span class="nx">getOwner</span><span class="p">).</span><span class="nf">Else</span><span class="p">(</span><span class="nx">get</span><span class="p">,</span> <span class="nx">getOwner</span><span class="p">).</span><span class="nf">Commit</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">  
+</span></span><span class="line"><span class="cl">    <span class="nx">m</span><span class="p">.</span><span class="nx">myRev</span> <span class="p">=</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Revision</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="c1">// wait for deletion revisions prior to myKey
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="nx">hdr</span><span class="p">,</span> <span class="nx">werr</span> <span class="o">:=</span> <span class="nf">waitDeletes</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">client</span><span class="p">,</span> <span class="nx">m</span><span class="p">.</span><span class="nx">pfx</span><span class="p">,</span> <span class="nx">m</span><span class="p">.</span><span class="nx">myRev</span><span class="o">-</span><span class="mi">1</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// release lock key if wait failed
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span> <span class="nx">werr</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">m</span><span class="p">.</span><span class="nf">Unlock</span><span class="p">(</span><span class="nx">client</span><span class="p">.</span><span class="nf">Ctx</span><span class="p">())</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="nx">werr</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kd">func</span> <span class="p">(</span><span class="nx">m</span> <span class="o">*</span><span class="nx">Mutex</span><span class="p">)</span> <span class="nf">Unlock</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">)</span> <span class="kt">error</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">client</span> <span class="o">:=</span> <span class="nx">m</span><span class="p">.</span><span class="nx">s</span><span class="p">.</span><span class="nf">Client</span><span class="p">()</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="nx">_</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Delete</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">m</span><span class="p">.</span><span class="nx">myKey</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">m</span><span class="p">.</span><span class="nx">myKey</span> <span class="p">=</span> <span class="s">&#34;\x00&#34;</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">m</span><span class="p">.</span><span class="nx">myRev</span> <span class="p">=</span> <span class="o">-</span><span class="mi">1</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>As you can see, a Context is passed in when locking, which allows etcd to actively release the lock if the overall request times out during locking or if the higher-level logic actively exits, reducing the idle period of the lock.</p>
+<p>Similarly, although only the pre-key with the smallest difference in Revision is watched when locking, the exclusivity of the lock is broken if the client of the pre-key releases the lock while other clients are still holding it. Therefore, the waitDeletes() function, after listening to the pre-key&rsquo;s deletion event, will still visit etcd to determine if there are other clients ahead of it that still hold the lock and listen for their deletion events.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-go" data-lang="go"><span class="line"><span class="cl"><span class="kd">func</span> <span class="nf">waitDeletes</span><span class="p">(</span><span class="nx">ctx</span> <span class="nx">context</span><span class="p">.</span><span class="nx">Context</span><span class="p">,</span> <span class="nx">client</span> <span class="o">*</span><span class="nx">v3</span><span class="p">.</span><span class="nx">Client</span><span class="p">,</span> <span class="nx">pfx</span> <span class="kt">string</span><span class="p">,</span> <span class="nx">maxCreateRev</span> <span class="kt">int64</span><span class="p">)</span> <span class="p">(</span><span class="o">*</span><span class="nx">pb</span><span class="p">.</span><span class="nx">ResponseHeader</span><span class="p">,</span> <span class="kt">error</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="nx">getOpts</span> <span class="o">:=</span> <span class="nb">append</span><span class="p">(</span><span class="nx">v3</span><span class="p">.</span><span class="nf">WithLastCreate</span><span class="p">(),</span> <span class="nx">v3</span><span class="p">.</span><span class="nf">WithMaxCreateRev</span><span class="p">(</span><span class="nx">maxCreateRev</span><span class="p">))</span>
+</span></span><span class="line"><span class="cl">    <span class="k">for</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">resp</span><span class="p">,</span> <span class="nx">err</span> <span class="o">:=</span> <span class="nx">client</span><span class="p">.</span><span class="nf">Get</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">pfx</span><span class="p">,</span> <span class="nx">getOpts</span><span class="o">...</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">)</span> <span class="o">==</span> <span class="mi">0</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">,</span> <span class="kc">nil</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="nx">lastKey</span> <span class="o">:=</span> <span class="nb">string</span><span class="p">(</span><span class="nx">resp</span><span class="p">.</span><span class="nx">Kvs</span><span class="p">[</span><span class="mi">0</span><span class="p">].</span><span class="nx">Key</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="nx">err</span> <span class="p">=</span> <span class="nf">waitDelete</span><span class="p">(</span><span class="nx">ctx</span><span class="p">,</span> <span class="nx">client</span><span class="p">,</span> <span class="nx">lastKey</span><span class="p">,</span> <span class="nx">resp</span><span class="p">.</span><span class="nx">Header</span><span class="p">.</span><span class="nx">Revision</span><span class="p">);</span> <span class="nx">err</span> <span class="o">!=</span> <span class="kc">nil</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">            <span class="k">return</span> <span class="kc">nil</span><span class="p">,</span> <span class="nx">err</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h3 id="summary-1">Summary</h3>
+<p>Distributed locks based on ZooKeeper or etcd implementations are listening distributed locks, where the client only needs to watch a key and the lock server notifies the client when the lock is available. The more complex consensus logic is done on the server side, without the need for the client to keep requesting lock services.</p>
+<p>Comparing redlock and etcd lock implementations, we can see that redis itself does not have a consensus process, and relies more on the client&rsquo;s constant rotation of requests, and cannot solve the problem of clock synchronization and clock jumps between different machines. etcd, on the other hand, uses a globally unique and incremental Revision to rank the order of lock acquisition and a consensus algorithm to guarantee data consistency between nodes, solving the problem of different key expiration times between different nodes of redlock.</p>
+<p>Distributed locking is a more complex application scenario for etcd. Its drawback is that Grant (generate lease ID), Unlock, Expire and other operations have to go through a raft protocol consensus, Lock process may require multiple query operations, which is costly, and watch multiple keys at the same time will also affect the performance of the cluster. In a specific test environment <em><a href="https://etcd.io/docs/v3.5/op-guide/performance/">Performance | etcd</a></em>, etcd can handle 50,000 write requests per second, but for complex distributed lock implementations, it usually cannot support QPS over 10,000. for complex distributed lock implementations.</p>
+<p>On the whole, etccd implementations are more secure, but their performance is not outstanding. These locks often assume coarse-grained locking services through a lease/session mechanism, and are suitable for services that are sensitive to security, want to hold locks for a long time, and do not expect lock loss to occur.</p>
+<h2 id="chubby">Chubby</h2>
+<p>Chubby is a distributed locking service designed by Google to provide coarse-grained locks, and is used by both GFS and Bigtable to solve problems such as the election of master nodes. Since Chubby is an internal Google service, we can only get a glimpse of it from this 2006 paper <em><a href="https://ai.google/research/pubs/pub27897">The Chubby lock service for loosely-coupled distributed systems</a></em> to get a glimpse of its design ideas.</p>
+<p>Similar to etcd and zookeeper, Chubby uses the Paxos algorithm to ensure data consistency. In a Chubby cluster, only the master node provides read and write services to the outside world. The client gets the location of the master node by sending requests to the replicas, and once it gets the location of the master node, it sends all read and write requests to the master node until it no longer responds. Write requests are propagated to all replicas through the consistency protocol, and the current write is considered to be acknowledged when most nodes in the cluster have synchronized the request.</p>
+<h3 id="program-stalls">program stalls</h3>
+<p>The difference is that Chubby goes a step further in lock reliability guarantees on top of them.</p>
+<p>Regardless of the programming language our program is written in, it is possible for a long program stall to occur due to GC, system scheduling, network latency, etc., resulting in the timeout and automatic release of an already held distributed lock, which can then be acquired by other instances and enter the critical zone again, breaking the exclusivity of the lock. To this end Martin also gives an example of a Redlock failure triggered by a client-side GC pause:</p>
+<ol>
+<li>Client1 initiates a lock request to the Redis cluster.</li>
+<li>each Redis node has returned the result of the lock acquisition to Client1, but Client1 enters a long GC pause before receiving the result of the request.</li>
+<li>the lock has expired on all Redis nodes.</li>
+<li>Client2 has obtained a lock after</li>
+<li>Client1 recovers from the GC pause and receives the request result from each Redis node in step 2; Client1 thinks it has successfully acquired the lock.</li>
+<li>both Client1 and Client2 are holding the same lock.</li>
+</ol>
+<p>Martin&rsquo;s example is not only applicable to Redis, but also to distributed locks based on zookeeper, etcd and other implementations. If the heartbeat message does not reach the etcd server in time due to network latency or GC, the lock will fail prematurely, resulting in multiple clients holding the lock at the same time.</p>
+<h4 id="sequencer">sequencer</h4>
+<p>For this scenario, to ensure that locks can eventually be dispatched, Chubby gives a mechanism to alleviate this problem called a sequencer. the holder of a lock can always request a sequencer, a three-part byte string consisting of</p>
+<ul>
+<li>The name of the lock.</li>
+<li>the mode of acquisition of the lock: exclusive or shared lock.</li>
+<li>the lock generation number, a 64-bit monotonically increasing number equivalent to a unique identification ID.</li>
+</ul>
+<p>After the client gets the sequencer, it passes it to the resource server when it operates on the resource. Then, the resource server is responsible for checking the validity of the sequencer. The check can be done in two ways.</p>
+<ol>
+<li>calling the API <code>CheckSequencer()</code> provided by Chubby and passing the sequencer to Chubby for validity checking to ensure that the lock held by the client is still valid for resource access.</li>
+<li>compare the size of the sequencer from the client with the latest sequencer currently observed by the resource server, and deny it to operate on the resource if the lock generation number is smaller.</li>
+</ol>
+<p>The second of these is similar to the fencing token uniqueness constraint described by Martin, which artificially sorts the order of client operations and acquires locks in that order. Even if the exclusivity of the lock is broken for various reasons, if a client with version number 34 has updated the resource, then any operation with a version number smaller than his is not legal.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/14/e291dbbe73024e9787900e60c7dc8564.png" alt="Chubby"></p>
+<p>The disadvantage of the above two Chubby solutions is that they are intrusive to the requested resource system, and if the resource service itself is not easily modified, Chubby also provides a lock-delay mechanism: Chubby allows a client to specify a lock-delay time value for the lock it holds, and when Chubby finds that the client is passively disconnected, it does not When Chubby discovers that a client has been passively disconnected, it does not immediately release the lock, but prevents other clients from acquiring it for the time specified in the lock-delay.</p>
+<p>The lock-delay mechanism is designed to give the client that previously held the lock sufficient time to complete operations on the resource before assigning the lock to a new client.</p>
+<h3 id="summary-2">Summary</h3>
+<p>To deal with lock failures, Chubby provides three handling options: CheckSequencer() checksum, comparison with the latest sequencer at the last processing, and the lock-delay mechanism, which allows the resource server to use it to provide stronger security guarantees when needed.</p>
+<p>The drawbacks of Chubby are also obvious. The first two options require the resource server to customize the function to check if the lock is still valid, and such a modification is not necessary for many systems unless the system requires a high level of mutual exclusivity.</p>
+<h2 id="summary-3">Summary</h2>
+<p>This article first discusses some of the features that distributed locks must have, then introduces specific implementations of Redlock and etcd distributed locks, and finally discusses Google Chuby&rsquo;s solution in the case of exclusive lock failure due to program stalls, and references Martin and antirez&rsquo;s discussion of distributed locks.</p>
+<p>So far, there is no solution for distributed locks that guarantees complete security, and even Chubby requires a third-party service to double-check the validity of locks. In Martin&rsquo;s critique of Redlock, he also makes the insightful point that there are two uses for locks.</p>
+<ul>
+<li>For efficiency: to coordinate clients to avoid duplication of work, even if the lock occasionally fails, it just does some operations one more time without other undesirable consequences, such as sending the same email over and over again; if a distributed lock is used for efficiency, allowing for occasional lock failures, then using a Redis standalone lock is sufficient, simple and efficient, and Redlock is an overweight implementation (Redlock also improves the availability of locking services; Redis standalone locks cannot avoid single points of failure).</li>
+<li>For correctness: similar to common in-memory locks, lock failures should not be allowed under any circumstances, as they can mean data inconsistency, data loss, file corruption, or other serious problems; if distributed locks are used in very strict situations for correctness, then do not use Redlock, which is not an algorithm that can strictly Instead, consider something like Zookeeper/etcd.</li>
+</ul>
+
+    </div>
+
+    
+<footer class="post-footer">
+      
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-08/radix-tree-gin/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Radix Tree and Gin Implementation</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-08/js-esm/">
+            <span class="next-text nav-default">JavaScript ESM is great, but it might not be so great right now</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  <script type="text/javascript" src="/lib/jquery/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="/lib/slideout/slideout-1.0.1.min.js"></script>
+  <script type="text/javascript" src="/lib/fancybox/jquery.fancybox-3.1.20.min.js"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.4ae89da218555efa0e7093a20b92017d2e1202b66fff9fc2edf4cb8d44b44c6e.js"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
