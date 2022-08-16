@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Principle and Implementation of LSM-Tree and LevelDB  - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This paper introduces the design idea of LSM-Tree, and analyzes how LevelDB using LSM-Tree is implemented and optimized for performance." /><meta name="keywords" content="LSM-Tree, LevelDB" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.101.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-08/lsm-tree-leveldb/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link href="/lib/fancybox/jquery.fancybox-3.1.20.min.css" rel="stylesheet">
+
+
+<meta property="og:title" content="Principle and Implementation of LSM-Tree and LevelDB " />
+<meta property="og:description" content="This paper introduces the design idea of LSM-Tree, and analyzes how LevelDB using LSM-Tree is implemented and optimized for performance." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-08/lsm-tree-leveldb/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-08-16T12:28:30+08:00" />
+<meta property="article:modified_time" content="2022-08-16T12:28:30+08:00" />
+
+<meta itemprop="name" content="Principle and Implementation of LSM-Tree and LevelDB ">
+<meta itemprop="description" content="This paper introduces the design idea of LSM-Tree, and analyzes how LevelDB using LSM-Tree is implemented and optimized for performance."><meta itemprop="datePublished" content="2022-08-16T12:28:30+08:00" />
+<meta itemprop="dateModified" content="2022-08-16T12:28:30+08:00" />
+<meta itemprop="wordCount" content="7212">
+<meta itemprop="keywords" content="" /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Principle and Implementation of LSM-Tree and LevelDB "/>
+<meta name="twitter:description" content="This paper introduces the design idea of LSM-Tree, and analyzes how LevelDB using LSM-Tree is implemented and optimized for performance."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Principle and Implementation of LSM-Tree and LevelDB </h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-08-16 12:28:30 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 7212 words </span>
+          <span class="more-meta"> 15 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#lsm-tree">LSM-Tree</a>
+          <ul>
+            <li><a href="#two-component-lsm-tree">Two-Component LSM-Tree</a></li>
+            <li><a href="#rolling-merge">Rolling Merge</a></li>
+            <li><a href="#data-reading">Data Reading</a></li>
+            <li><a href="#multi-component-lsm-tree">Multi-Component LSM-Tree</a></li>
+            <li><a href="#summary">Summary</a></li>
+          </ul>
+        </li>
+        <li><a href="#leveldb">LevelDB</a>
+          <ul>
+            <li><a href="#writebatch">WriteBatch</a></li>
+            <li><a href="#pre-write-log">Pre-write log</a></li>
+            <li><a href="#memtable">MemTable</a></li>
+            <li><a href="#summary-1">Summary</a></li>
+          </ul>
+        </li>
+        <li><a href="#sstable">SSTable</a>
+          <ul>
+            <li><a href="#minor-compaction">Minor Compaction</a></li>
+            <li><a href="#major-compaction">Major Compaction</a></li>
+            <li><a href="#file-format">File Format</a></li>
+            <li><a href="#bloom-filter">Bloom Filter</a></li>
+            <li><a href="#tablecache">TableCache</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary-2">Summary</a></li>
+        <li><a href="#references">References</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>LSM-Tree is a data structure for write many read few application scenarios, which is adopted by powerful NoSQL databases such as Hbase and RocksDB as the underlying file organization method. In this paper, we will introduce the design idea of LSM-Tree, and analyze how LevelDB using LSM-Tree is implemented and optimized for performance.</p>
+<p>Before understanding LSM-Tree, the storage systems I have studied, such as MySQL and etcd, are all oriented towards read-more-write-less scenarios, and most of them use B-Tree and its variants as the underlying data structure. LSM-Tree solves the problem of another application scenario - <strong>write more read less</strong>. In the scenario of storing and retrieving massive data in billions, we usually choose powerful NoSQL databases, such as Hbase, RocksDB, etc., whose file organization is modeled after LSM-Tree.</p>
+<h2 id="lsm-tree">LSM-Tree</h2>
+<p>LSM-Tree, known as Log Structured Merge Tree, is a hierarchical, ordered, disk-oriented data structure, whose core idea is to <strong>leverage the fact that the sequential write performance of disk is much higher than the random write performance, converting bulk random writes into one-time sequential writes.</strong></p>
+<p>When we buy a disk, we are actually paying the selling price for two things: the disk capacity and the disk I/O capability. For any type of application, one of these will usually be the limiting factor. If we find that the disk spinner is fully used when adding data, but the disk has space left over, this means that the I/O capacity is a performance bottleneck for the program.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/f3cc50ea2114409787bc7b5e4d179f60.png" alt="Throughput of disk sequential IO and random IO"></p>
+<blockquote>
+<p>Image from <a href="http://www.benstopford.com/2015/02/14/log-structured-merge-trees/"><em>Log Structured Merge Trees</em></a></p>
+</blockquote>
+<p>As you can see visually from the graph above, sequential access to disk is at least three orders of magnitude faster than random I/O, and even sequential access to disk is faster than random access to main memory. This means that sequential access is well worth exploring and designing to avoid random I/O operations as much as possible.</p>
+<p>The LSM-Tree is designed and optimized around this principle by eliminating random update operations to optimize write performance and provide a low-cost indexing mechanism for files with high update frequency over time, reducing query overhead.</p>
+<h3 id="two-component-lsm-tree">Two-Component LSM-Tree</h3>
+<p>The LSM-Tree can be composed of two or more tree-like data structure components, and in this subsection we start with the simpler two-component case.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/ffd1947295004c278a21bebadd2ba7b9.png" alt="Two-Component LSM-Tree"></p>
+<blockquote>
+<p>The above figure is modified from the LSM-Tree paper: <a href="http://www.benstopford.com/2015/02/14/log-structured-merge-trees/"><em>Figure 2.1. Schematic picture of an LSM-tree of two components</em></a></p>
+</blockquote>
+<p>The Two-Component LSM-Tree has a C0 component in memory, which can be a structure such as AVL or SkipList, and all writes are first written to C0. There is a C1 component on disk, and when the size of the C0 component reaches a threshold, a Rolling Merge is performed to merge the in-memory contents into C1. The flow of the write operation of the two-component LSM-Tree is as follows.</p>
+<ol>
+<li>when there is a write operation, the data is first appended and written to the log file for recovery if necessary.</li>
+<li>the data is then written to the C0 component located in memory, keeping the Key in order through some data structure.</li>
+<li>the data in memory is flushed to disk at regular intervals or at a fixed size, and update operations are only written to memory and do not update existing files on disk.</li>
+<li>as more and more write operations are performed, more and more files are accumulated on the disk, which are not writable but ordered, so we regularly perform a merge (Compaction) operation on the files to eliminate redundant data and reduce the number of files.</li>
+</ol>
+<blockquote>
+<p>Similar to normal log writing, this data structure is written in an <code>Append</code> mode, with no deletions or modifications. Updating data that causes changes in index values is tedious and time-consuming for any application, but such updates can be easily solved by LSM-Tree by treating the update operation as a delete operation plus an insert operation.</p>
+</blockquote>
+<p>The C1 component is optimized for sequential disk access and can be a B-Tree type data structure (SSTable implementation in LevelDB), where all nodes are 100% populated and all single-page nodes under the root node are packed onto consecutive Multi-Page Blocks for efficient disk utilization. Multi-Page Block I/O is used for Rolling Merge and long interval retrieval, which effectively reduces disk spiral arm movement, while Single-Page I/O is used for matching lookups to minimize cache size. Usually the root node has only one single-page, while the other nodes use 256KB Multi-Page Blocks.</p>
+<p>In a two-component LSM-Tree, as long as the C0 component is large enough, then there is a batch processing effect. For example, if the size of a data record is 16 Bytes, there will be 250 records in a 4KB node; if the C0 component is 1/25 the size of C1, then for each new C1 node with 250 records resulting from a merge operation, there will be 10 new records merged from C0. This means that the user&rsquo;s newly written data is temporarily stored in C0 in memory and then written to disk in a batch delay, which is equivalent to merging the user&rsquo;s previous 10 writes into a single write. Obviously, the LSM-Tree is more efficient than a B-Tree structure because it only requires a single random write to write multiple pieces of data, and the Rolling Merge process is the key to this.</p>
+<h3 id="rolling-merge">Rolling Merge</h3>
+<p>The Rolling Merge process of a two-component LSM-Tree can be likened to a cursor with a certain step length cyclically traversing the key-value pairs of C0 and C1, continuously taking data from C0 and putting it into C1 on disk.</p>
+<p>The cursor has a logical location on both the leaf and index nodes of the C1 tree, and at each level, all the Multi-Page Blocks that are participating in the merge will be divided into two types: <code>Emptying Blocks</code> where the internal records are being moved out, but there is still some data that the cursor has not reached, and <code>Filling Blocks</code> that store the the result of the merge. Similarly, the cursor defines <code>Emptying Node</code> and <code>Filling Node</code>, both of which are cached in memory. To allow concurrent access, each Block at the hierarchy level contains an integer number of nodes, so that during the reorganization and merging of the executing nodes, access to the internal records of these nodes will be blocked, but other nodes in the same Block will still be accessible.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/72d7df7ce111457d813cf4b346198256.png" alt="Rolling Merge"></p>
+<blockquote>
+<p>The above figure is modified from the LSM-Tree paper: <a href="http://www.benstopford.com/2015/02/14/log-structured-merge-trees/"><em>Figure 2.2. Conceptual picture of rolling merge steps</em></a></p>
+</blockquote>
+<p>The merged new Blocks are written to a new disk location so that the old Blocks are not overwritten and data recovery can still be performed after a crash. At the same time, new index information needs to be created in the index node and a log record needs to be generated for the recovery. Old Blocks that may be needed in the recovery process are not deleted for the time being, and can only be declared invalid when subsequent writes provide sufficient information.</p>
+<p>The parent directory nodes in C1 are also cached in memory and updated in real time to reflect changes in the leaf nodes, while the parent nodes remain in memory for a period of time to minimize I/O. When the merge step is complete, the old leaf nodes in C1 become invalid and are subsequently removed from the C1 directory structure. To reduce data recovery time after a crash, the merge process requires a periodic checkpoint to force the cached information to be written to disk.</p>
+<p>To make the LSM read relatively fast, it is important to manage the number of files, so we have to merge and compress the files. In LevelDB, the merged large files will go to the next Level.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/fa9a6cc3b89f49e5bbf92375114d111a.png" alt="Compaction continues creating fewer, larger and larger files"></p>
+<blockquote>
+<p>Image source: <a href="https://en.wikipedia.org/wiki/Log-structured_merge-tree"><em>wikipedia: Log-structured merge-tree</em></a></p>
+</blockquote>
+<p>For example, we have 10 data in each file in Level-0, and every 5 Level-0 files are merged into 1 Level1 file, and there are 50 data in each single Level1 file (which may be slightly less). And every 5 Level1 files are merged into 1 Level2 file, and the process continues to create larger and larger files, and the older the data the higher the Level level will be.</p>
+<p>Since the files are sorted, the process of merging files is very fast, but the higher the level, the slower the data is queried. In the worst case, we need to search all files individually to read the results.</p>
+<h3 id="data-reading">Data Reading</h3>
+<p>When performing an exact match query or a range query on the LSM-Tree, it first goes to C0 to find the desired value, and if it is not found in C0, it then goes to C1. This means that there is some additional CPU overhead compared to the B-Tree, since it now needs to go to both directories to search. While each file is kept sorted, it is possible to determine if a search is needed by comparing the max/min key-value pairs for that file. However, as the number of files increases and each file needs to be checked, reading still becomes slower and slower.</p>
+<p>As a result, LSM-Tree is slower to read than other data structures. But we can use some indexing tricks to optimize it. LevelDB will keep block index at the end of each file to speed up the query, which is better than direct binary search because it allows to use variable-length fields and is more suitable for compressing data. The details will be described in the SSTable subsection.</p>
+<p>We can also perform some optimizations for deletion operations to update indexes efficiently. For example, through the Predicate Deletion process, a bulk delete operation can be performed by simply declaring an assertion. For example, deleting all index values with a timestamp of 20 days ago can be achieved by directly discarding the records located in the C1 component when they are loaded into memory through the normal data merge process.</p>
+<p>In addition, the concurrent access method for the LSM-Tree must resolve three types of physical conflicts, taking into account the following factors.</p>
+<ul>
+<li>Query operations cannot simultaneously access the node contents of a disk component being modified by another process&rsquo; Rolling Merge.</li>
+<li>query and insert operations against a C0 component also cannot access the same part of the tree at the same time as the Rolling Merge in progress.</li>
+<li>In a multi-component LSM-Tree, the Rolling Merge cursor from Ci-1 to Ci sometimes needs to leapfrog the Rolling Merge cursor from Ci to Ci+1, because the rate at which data is moved out of Ci-1 &gt;= the rate at which it is moved out of Ci, which means that the cursor associated with Ci-1 has a faster cycle time. Therefore, in any case, the concurrent access mechanism used must allow this interleaving to occur, and not force the thread moving data into Ci to block after the thread moving data out of Ci at the rendezvous point.</li>
+</ul>
+<h3 id="multi-component-lsm-tree">Multi-Component LSM-Tree</h3>
+<p>In order to keep the size of C0 within the threshold, this requires that Rolling Merge must merge data into C1 at a rate no slower than the user&rsquo;s write rate, where different sizes of C0 can have different results on overall performance.</p>
+<ul>
+<li><strong>C0 very small</strong>: At this point, a single data insertion will make C0 full, thus triggering Rolling Merge, and in the worst case, each insertion of C0 will result in all leaf nodes of C1 being read into memory and written back to disk, with very high I/O overhead.</li>
+<li><strong>C0 Very Large</strong>: There is basically no I/O overhead at this point, but it requires a lot of memory space and is not easy to perform data recovery.</li>
+</ul>
+<p>The paper <strong><a href="https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.44.2782&amp;rep=rep1&amp;type=pdf">The Log-Structured Merge-Tree (LSM-Tree)</a></strong> spends a considerable amount of time on the relationship between memory capacity cost and disk I/O cost, which I will not elaborate on here, but we need to find a balance between disk I/O cost and memory capacity cost. According to the <em>The Five-Minute Rule</em> principle, this value depends on the performance and price of the current hardware.</p>
+<p>In order to further reduce the overhead balance of the two-component LSM-Tree, the multi-component LSM-Tree introduces a new set of Components between C0 and C1 with sizes in between, growing step by step, so that C0 does not have to Rolling Merge with C1 each time, but first merges with the middle component, and then does Rolling Merge with C1 when the middle component reaches its size limit. This reduces the memory overhead of C0 and reduces the disk I/O overhead at the same time. This is somewhat similar to our multi-level cache structure.</p>
+<p>In order to further reduce the overhead balance of the two-component LSM-Tree, the multi-component LSM-Tree introduces a new set of Components between C0 and C1 with sizes in between, growing step by step, so that C0 does not have to Rolling Merge with C1 each time, but first merges with the middle component, and then does Rolling Merge with C1 when the middle component reaches its size limit. This reduces the memory overhead of C0 and reduces the disk I/O overhead at the same time. This is somewhat similar to our multi-level cache structure.</p>
+<h3 id="summary">Summary</h3>
+<p>The idea of LSM-Tree implementation is not quite the same as the measures taken by conventional storage systems. It converts random writes into sequential writes to try to maintain the write performance advantage of log-based databases and provide relatively good read performance. LSM-Tree is better than B-Tree and Hash in a large number of write scenarios due to two reasons.</p>
+<ol>
+<li><strong>Batch Write</strong>: Due to the delayed write, LSM-Tree can write multiple data to C1 in one I/O batch during the Rolling Merge process, and then the multiple data are shared equally between this I/O, reducing the I/O overhead on disk.</li>
+<li><strong>Multi-Page Block</strong>: The batch write of LSM-Tree can effectively use Multi-Page Block to read multiple consecutive data pages from C1 and merge them with C0 at one time during Rolling Merge, and then write back these consecutive pages to C1 at one time, so that only a single I/O is required to finish reading and writing multiple This allows multiple pages to be read and written in a single I/O.</li>
+</ol>
+<p>The original paper of LSM-Tree is rather obscure, and it is only after the implementation of the source code of LevelDB that I can understand the author&rsquo;s intention more clearly.</p>
+<h2 id="leveldb">LevelDB</h2>
+<p>LevelDB is a standalone implementation of the key-value storage system described in the Bigtable paper &ldquo;<a href="https://static.googleusercontent.com/media/research.google.com/en//archive/bigtable-osdi06.pdf">Bigtable: A Distributed Storage System for Structured Data</a>&rdquo;. It provides a high-speed key-value storage system and highly replicates the description in the paper, and many LSM-Tree implementations today refer to LevelDB.</p>
+<p>Before introducing LevelDB, we need to understand a few basic data structures of the internal implementation. In order to compress the space occupied by data, LevelDB designs variable-length integer encoding, in which varint32 format occupies a maximum of 5 bytes, varint64 format occupies a maximum of 10 bytes, and the document <a href="https://developers.google.com/protocol-buffers/docs/encoding#varints"><em>Protocol Buffers Encoding : varints</em></a> has a more detailed description of the format. Although the maximum number of bytes has increased, in most cases it is less than 4 bytes, reducing storage space overall. It also implements Slice, a wrapper type for strings, which reduces the data assignment overhead by referencing character arrays and provides C/C++ type character conversion.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="n">class</span> <span class="n">LEVELDB_EXPORT</span> <span class="n">Slice</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="nl">private</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="k">const</span> <span class="kt">char</span><span class="o">*</span> <span class="n">data_</span><span class="p">;</span> <span class="c1">// Data Pointer
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="n">size_t</span> <span class="n">size_</span><span class="p">;</span>      <span class="c1">// Data Length
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="p">};</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Similar to <em>BlotDB</em>, which I analyzed before, LevelDB is not a full-featured database, but a storage engine implemented in C++ programming language, providing a series of interfaces for external calling programs.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="c1">// Implementations of the DB interface
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="n">Status</span> <span class="nf">Put</span><span class="p">(</span><span class="k">const</span> <span class="n">WriteOptions</span><span class="o">&amp;</span><span class="p">,</span> <span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">key</span><span class="p">,</span> <span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">value</span><span class="p">)</span> <span class="n">override</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="n">Status</span> <span class="nf">Delete</span><span class="p">(</span><span class="k">const</span> <span class="n">WriteOptions</span><span class="o">&amp;</span><span class="p">,</span> <span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span> <span class="n">override</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="n">Status</span> <span class="nf">Write</span><span class="p">(</span><span class="k">const</span> <span class="n">WriteOptions</span><span class="o">&amp;</span> <span class="n">options</span><span class="p">,</span> <span class="n">WriteBatch</span><span class="o">*</span> <span class="n">updates</span><span class="p">)</span> <span class="n">override</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="n">Status</span> <span class="nf">Get</span><span class="p">(</span><span class="k">const</span> <span class="n">ReadOptions</span><span class="o">&amp;</span> <span class="n">options</span><span class="p">,</span> <span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">key</span><span class="p">,</span> <span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">*</span> <span class="n">value</span><span class="p">)</span> <span class="n">override</span><span class="p">;</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The API is called in a similar way, so we will focus on the specific implementation ideas.</p>
+<h3 id="writebatch">WriteBatch</h3>
+<p>Tracing the source code, we can see that the Put and Delete interfaces for key-value pairs are packaged into <code>WriteBatch</code> for batch processing, and finally the <code>write()</code> function is called to write to the MemTable in memory.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="n">Status</span> <span class="n">DB</span><span class="o">::</span><span class="n">Put</span><span class="p">(</span><span class="k">const</span> <span class="n">WriteOptions</span><span class="o">&amp;</span> <span class="n">opt</span><span class="p">,</span> <span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">key</span><span class="p">,</span> <span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">value</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">WriteBatch</span> <span class="n">batch</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="n">batch</span><span class="p">.</span><span class="n">Put</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="nf">Write</span><span class="p">(</span><span class="n">opt</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">batch</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="n">Status</span> <span class="n">DB</span><span class="o">::</span><span class="n">Delete</span><span class="p">(</span><span class="k">const</span> <span class="n">WriteOptions</span><span class="o">&amp;</span> <span class="n">opt</span><span class="p">,</span> <span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">WriteBatch</span> <span class="n">batch</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="n">batch</span><span class="p">.</span><span class="n">Delete</span><span class="p">(</span><span class="n">key</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="nf">Write</span><span class="p">(</span><span class="n">opt</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">batch</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p><code>WriteBatch</code> contains only a private std::string type string <code>rep_</code>, to which all modify and delete operations are added directly, and which provides the MemTable iteration interface. It contains a 12-byte Header, where the first 8-byte is the <code>sequence</code> of the first write operation in the WriteBatch, and the next 4-byte is the number of write operations <code>count</code>. Immediately after the Header is the Record array that holds the key-value pairs, each of which is formatted as a <code>Record</code> record inside the WriteBatch, containing the write operation type and key-value pair data.</p>
+<blockquote>
+<p>Note: The type of the Put operation is <code>kTypeValue</code> and the type of the Delete operation is <code>kTypeDeletion</code>.</p>
+</blockquote>
+<p>Here are some more details about constructing Record records. The Put operation writes the complete key-value pair data, while the Delete operation writes only one Key, and when querying and merging data, if you encounter a data record with operation type <code>kTypeDeletion</code>, you only need to discard it. This reduces the memory space occupied and speeds up the execution.</p>
+<p>Both the key and value are written through the <code>PutLengthPrefixedSlice()</code> function, which writes the length of the string first, then the content of the string, and the <code>size</code> field can be used to quickly locate the next key-value pair.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">void</span> <span class="nf">PutLengthPrefixedSlice</span><span class="p">(</span><span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">*</span> <span class="n">dst</span><span class="p">,</span> <span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">value</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">PutVarint32</span><span class="p">(</span><span class="n">dst</span><span class="p">,</span> <span class="n">value</span><span class="p">.</span><span class="n">size</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">  <span class="n">dst</span><span class="o">-&gt;</span><span class="n">append</span><span class="p">(</span><span class="n">value</span><span class="p">.</span><span class="n">data</span><span class="p">(),</span> <span class="n">value</span><span class="p">.</span><span class="n">size</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The iterative function <code>Iterate()</code> uses a while loop to sequentially transfer the write operations stored in the string to the MemTable for execution, the following code removes some unimportant check steps, and the core process is not difficult to understand, just remove the Header loop to take values.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span><span class="lnt">25
+</span><span class="lnt">26
+</span><span class="lnt">27
+</span><span class="lnt">28
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="n">Status</span> <span class="n">WriteBatch</span><span class="o">::</span><span class="n">Iterate</span><span class="p">(</span><span class="n">Handler</span><span class="o">*</span> <span class="n">handler</span><span class="p">)</span> <span class="k">const</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Slice</span> <span class="n">input</span><span class="p">(</span><span class="n">rep_</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">input</span><span class="p">.</span><span class="n">remove_prefix</span><span class="p">(</span><span class="n">kHeader</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Slice</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="k">while</span> <span class="p">(</span><span class="o">!</span><span class="n">input</span><span class="p">.</span><span class="n">empty</span><span class="p">())</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">char</span> <span class="n">tag</span> <span class="o">=</span> <span class="n">input</span><span class="p">[</span><span class="mi">0</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">    <span class="n">input</span><span class="p">.</span><span class="n">remove_prefix</span><span class="p">(</span><span class="mi">1</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="k">switch</span> <span class="p">(</span><span class="n">tag</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="k">case</span> <span class="nl">kTypeValue</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">GetLengthPrefixedSlice</span><span class="p">(</span><span class="o">&amp;</span><span class="n">input</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">key</span><span class="p">)</span> <span class="o">&amp;&amp;</span>
+</span></span><span class="line"><span class="cl">            <span class="n">GetLengthPrefixedSlice</span><span class="p">(</span><span class="o">&amp;</span><span class="n">input</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">value</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">          <span class="n">handler</span><span class="o">-&gt;</span><span class="n">Put</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">          <span class="k">return</span> <span class="n">Status</span><span class="o">::</span><span class="n">Corruption</span><span class="p">(</span><span class="s">&#34;bad WriteBatch Put&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">      <span class="k">case</span> <span class="nl">kTypeDeletion</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">        <span class="k">if</span> <span class="p">(</span><span class="n">GetLengthPrefixedSlice</span><span class="p">(</span><span class="o">&amp;</span><span class="n">input</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">key</span><span class="p">))</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">          <span class="n">handler</span><span class="o">-&gt;</span><span class="n">Delete</span><span class="p">(</span><span class="n">key</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span> <span class="k">else</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">          <span class="k">return</span> <span class="n">Status</span><span class="o">::</span><span class="n">Corruption</span><span class="p">(</span><span class="s">&#34;bad WriteBatch Delete&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">break</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">      <span class="k">default</span><span class="o">:</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="n">Status</span><span class="o">::</span><span class="n">Corruption</span><span class="p">(</span><span class="s">&#34;unknown WriteBatch tag&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>WriteBatch defines a friend class <code>WriteBatchInternal</code>, and operations on the private string <code>rep_</code> are implemented by this friend class, which shields implementation details for external callers and ensures data security.</p>
+<h3 id="pre-write-log">Pre-write log</h3>
+<p>LevelDB write operations will eventually call the <code>DBImpl::Write()</code> function, the core part of this function will first append the data in WriteBatch to the pre-written log <code>log_</code> and then write it to MemTable.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">mutex_</span><span class="p">.</span><span class="n">Unlock</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">    <span class="n">status</span> <span class="o">=</span> <span class="n">log_</span><span class="o">-&gt;</span><span class="n">AddRecord</span><span class="p">(</span><span class="n">WriteBatchInternal</span><span class="o">::</span><span class="n">Contents</span><span class="p">(</span><span class="n">write_batch</span><span class="p">));</span> <span class="c1">// Add to WAL
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">status</span><span class="p">.</span><span class="n">ok</span><span class="p">())</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">status</span> <span class="o">=</span> <span class="n">WriteBatchInternal</span><span class="o">::</span><span class="n">InsertInto</span><span class="p">(</span><span class="n">write_batch</span><span class="p">,</span> <span class="n">mem_</span><span class="p">);</span>  <span class="c1">// Write to MemTable
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="n">mutex_</span><span class="p">.</span><span class="n">Lock</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>In this section we first analyze the implementation of pre-written logs. WAL only provides an external AddRecord() interface to add data, which adds one Record each time it is called. Each record is composed of the following structure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/cf8b752fd2c04b2b82367feb0819e89d.png" alt="Structure of the record"></p>
+<p>In order to improve the reading speed of logs, LevelDB introduces the concept of Block, and will read and write files one by one according to Block, the default Block size is <code>kBlockSize = 32KB</code>. The end of log file may contain an incomplete block, a record will never start in the last 6 bytes, because <code>checksum</code>, <code>length</code>, <code>type</code> need 7 bytes in total, the remaining 6 bytes are not big enough. The remaining bytes form a <code>trailer</code>, which is filled with zeros and must be skipped when reading.</p>
+<blockquote>
+<p>Note: If there are exactly 7 bytes left in the current block and a new non-zero length record is added, Leveldb will fill the last 7 bytes of the block with a FIRST record and write all the user data in the later block afterwards.</p>
+</blockquote>
+<p>To accommodate extra-long records, each record may have the following types.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">enum</span> <span class="n">RecordType</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">kZeroType</span> <span class="o">=</span> <span class="mi">0</span><span class="p">,</span>    <span class="c1">// Reserved, indicating pre-allocated files
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>  <span class="n">kFullType</span> <span class="o">=</span> <span class="mi">1</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="n">kFirstType</span> <span class="o">=</span> <span class="mi">2</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="n">kMiddleType</span> <span class="o">=</span> <span class="mi">3</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">  <span class="n">kLastType</span> <span class="o">=</span> <span class="mi">4</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>FULL record means a complete user record is stored in the current Block, and FIRST, MIDDLE, and LAST are used to indicate that the user record is divided into multiple segments; FIRST is the first segment of the user record, LAST is the last segment of the record, and MIDDLE is the middle segment of all user data.</p>
+<p>If we have a user data of length 98277 Bytes, then it will be divided into three segments: the first segment takes up the rest of the first block, the second segment takes up the entire second block, and the third segment takes up the first part of the third block. This will leave a 6-byte space in the third block, which is left blank as a <code>trailer</code>, and the records that follow will be stored from the fourth block onwards.</p>
+<p>This record format has several advantages, one is that we do not need extra buffers for large records, and the other is that if there is an error in the reading process, we can jump directly to the next Block, which is more convenient to delimit data boundaries.</p>
+<h3 id="memtable">MemTable</h3>
+<p>MemTable is an in-memory component of LevelDB, but it is just an interface class that wraps the API of Skip list, so the key-value pairs in MemTable are stored in an orderly way according to the Key size.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/af5f2c5e96d4417b8722c910d51476b5.png" alt="Skip list"></p>
+<p>MemTable provides <code>MemTable::Add</code> and <code>MemTable::Get</code> interfaces externally, and we can see in the WriteBatch implementation that the <code>MemTable::Add</code> interface is called in the end, whether inserting or deleting data.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl">  <span class="kt">void</span> <span class="nf">Put</span><span class="p">(</span><span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">key</span><span class="p">,</span> <span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">value</span><span class="p">)</span> <span class="n">override</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">mem_</span><span class="o">-&gt;</span><span class="n">Add</span><span class="p">(</span><span class="n">sequence_</span><span class="p">,</span> <span class="n">kTypeValue</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">value</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="n">sequence_</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="kt">void</span> <span class="nf">Delete</span><span class="p">(</span><span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">key</span><span class="p">)</span> <span class="n">override</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">mem_</span><span class="o">-&gt;</span><span class="n">Add</span><span class="p">(</span><span class="n">sequence_</span><span class="p">,</span> <span class="n">kTypeDeletion</span><span class="p">,</span> <span class="n">key</span><span class="p">,</span> <span class="n">Slice</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">    <span class="n">sequence_</span><span class="o">++</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The Add interface encapsulates the key into a structure <code>ParsedInternalKey</code> and serializes it into a string. The structure <code>ParsedInternalKey</code> contains three fields, the <code>sequence</code> mentioned above is a uint64 type sequence number, but it is only 56 bits long at most, so that it can be combined with the 8-bit length <code>ValueType</code> to form an 8-byte composite sequence number and added after <code>user_key</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">struct</span> <span class="n">ParsedInternalKey</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Slice</span> <span class="n">user_key</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="n">SequenceNumber</span> <span class="n">sequence</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="n">ValueType</span> <span class="n">type</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Then the length and content of the key-value pairs are stored into the string <code>buf</code> in order, and finally the data is inserted by <code>table_.Insert(buf)</code> of the Skip list. A MemTable record has the following format.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/3a826202b06c49f58e1c62ca459b160c.png" alt="Format of MemTable records"></p>
+<p>When the Get interface finds the corresponding Key from MemTable, it not only compares whether the returned <code>key</code> is the same as <code>user_key</code>, but also determines the type of data, and if the key is identical and the value type is not <code>kTypeDeletion</code>, it reads the value from the record into the result.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span><span class="lnt">24
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">bool</span> <span class="n">MemTable</span><span class="o">::</span><span class="n">Get</span><span class="p">(</span><span class="k">const</span> <span class="n">LookupKey</span><span class="o">&amp;</span> <span class="n">key</span><span class="p">,</span> <span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">*</span> <span class="n">value</span><span class="p">,</span> <span class="n">Status</span><span class="o">*</span> <span class="n">s</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Slice</span> <span class="n">memkey</span> <span class="o">=</span> <span class="n">key</span><span class="p">.</span><span class="n">memtable_key</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Table</span><span class="o">::</span><span class="n">Iterator</span> <span class="n">iter</span><span class="p">(</span><span class="o">&amp;</span><span class="n">table_</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">iter</span><span class="p">.</span><span class="n">Seek</span><span class="p">(</span><span class="n">memkey</span><span class="p">.</span><span class="n">data</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">  <span class="k">if</span> <span class="p">(</span><span class="n">iter</span><span class="p">.</span><span class="n">Valid</span><span class="p">())</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="k">const</span> <span class="kt">char</span><span class="o">*</span> <span class="n">entry</span> <span class="o">=</span> <span class="n">iter</span><span class="p">.</span><span class="n">key</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">uint32_t</span> <span class="n">key_length</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">const</span> <span class="kt">char</span><span class="o">*</span> <span class="n">key_ptr</span> <span class="o">=</span> <span class="n">GetVarint32Ptr</span><span class="p">(</span><span class="n">entry</span><span class="p">,</span> <span class="n">entry</span> <span class="o">+</span> <span class="mi">5</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">key_length</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">(</span><span class="n">comparator_</span><span class="p">.</span><span class="n">comparator</span><span class="p">.</span><span class="n">user_comparator</span><span class="p">()</span><span class="o">-&gt;</span><span class="n">Compare</span><span class="p">(</span><span class="n">Slice</span><span class="p">(</span><span class="n">key_ptr</span><span class="p">,</span> <span class="n">key_length</span> <span class="o">-</span> <span class="mi">8</span><span class="p">),</span> <span class="n">key</span><span class="p">.</span><span class="n">user_key</span><span class="p">())</span> <span class="o">==</span><span class="mi">0</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">      <span class="k">const</span> <span class="kt">uint64_t</span> <span class="n">tag</span> <span class="o">=</span> <span class="n">DecodeFixed64</span><span class="p">(</span><span class="n">key_ptr</span> <span class="o">+</span> <span class="n">key_length</span> <span class="o">-</span> <span class="mi">8</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">      <span class="k">switch</span> <span class="p">(</span><span class="n">static_cast</span><span class="o">&lt;</span><span class="n">ValueType</span><span class="o">&gt;</span><span class="p">(</span><span class="n">tag</span> <span class="o">&amp;</span> <span class="mh">0xff</span><span class="p">))</span> <span class="p">{</span> <span class="c1">// Value type judgment
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="k">case</span> <span class="nl">kTypeValue</span><span class="p">:</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">          <span class="n">Slice</span> <span class="n">v</span> <span class="o">=</span> <span class="n">GetLengthPrefixedSlice</span><span class="p">(</span><span class="n">key_ptr</span> <span class="o">+</span> <span class="n">key_length</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">          <span class="n">value</span><span class="o">-&gt;</span><span class="n">assign</span><span class="p">(</span><span class="n">v</span><span class="p">.</span><span class="n">data</span><span class="p">(),</span> <span class="n">v</span><span class="p">.</span><span class="n">size</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">          <span class="k">return</span> <span class="nb">true</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">        <span class="p">}</span>
+</span></span><span class="line"><span class="cl">        <span class="k">case</span> <span class="nl">kTypeDeletion</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">          <span class="o">*</span><span class="n">s</span> <span class="o">=</span> <span class="n">Status</span><span class="o">::</span><span class="n">NotFound</span><span class="p">(</span><span class="n">Slice</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">          <span class="k">return</span> <span class="nb">true</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">      <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="nb">false</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>As data is written, when the MemTable fills up (the default <code>write_buffer_size</code> threshold is 4MB) and there is no space left to write new key-value pairs, it is frozen into an Immutable MemTable and a new MemTable object is created to write the data. structure is identical to the MemTable, except that it is read-only and waits for the merge thread to merge it into the SSTable.</p>
+<blockquote>
+<p>Note that MemTable uses reference counting for memory reclamation, which needs to be managed manually by the caller. <code>Ref()</code> is called when MemTable is used to increase the reference count, and <code>Unref()</code> is called when the reference ends to decrease the reference count, and is automatically destroyed when the reference count reaches 0.</p>
+</blockquote>
+<h3 id="summary-1">Summary</h3>
+<p>This section analyzes the implementation principle of WriteBatch and MemTable, through which you can learn how LevelDB converts batch random writes into one sequential write, and caches the data in memory in 4MB units and writes it to disk at the right time. The next section will introduce the disk component of LevelDB, SSTable, and how to merge data between different levels.</p>
+<h2 id="sstable">SSTable</h2>
+<p>Like Google BigTable, LevelDB internal data files are in SSTable format, stored as physical files with the suffix <code>.ldb</code>, each file has its own <code>file_number</code> as a unique identifier. SSTable, <strong>is a persistent, ordered, immutable Map structure</strong>, where Key and Value are arbitrary Byte strings.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/fd4adc8015604af484602b6847eaad17.png" alt="LevelDB Table"></p>
+<p>LevelDB can have 7 levels of SSTable at most, among which Level-0 is special, it is formed by dumping ImMemTable to disk directly, and each file size is about 4MB, while Level1 to Level6 are merged from the upper level, and each SSTable file size is 2MB, the total file size of Level1 is The total file size of Level1 is 10MB, then each level is 10 times larger than the previous one, and Level6 reaches 1TB.</p>
+<blockquote>
+<p>Unlike the LSM-Tree paper description, LevelDB increases the number and total size of files in each level without increasing the SSTable file size.</p>
+</blockquote>
+<h3 id="minor-compaction">Minor Compaction</h3>
+<p>When the MemTable is full and there are not many Level-0 files and there is no background merge thread to do the merge, it is frozen into ImMemTable and the function <code>MaybeScheduleCompaction()</code> is called to start a Detach thread to merge ImMemTable into SSTable. This process is called Minor Compaction. The effect of Detach is to separate the main thread from the child thread, both of which run at the same time, so that when the main thread ends, the process also ends, but the child thread continues to run in the background. This way, even if the main thread is aborted due to an error, it will not affect the merged thread in the background. When the child thread finishes running, the resources are reclaimed by the runtime library.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/d646355d7dc44e6d8f48a5249b993b27.png" alt="Level DB Minor Compaction"></p>
+<p>The background merge thread goes through a series of function calls and conditional judgments shown above, and will eventually enter <code>DBImpl::WriteLevel0Table()</code>, a function that first builds a new SSTable, maintains the file&rsquo;s metadata, and updates the maximum and minimum key-value pairs for this file. When we look for data, comparing the bounding key-value pairs of this file will determine if it contains the data for the query.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="n">Status</span> <span class="n">DBImpl</span><span class="o">::</span><span class="n">WriteLevel0Table</span><span class="p">(</span><span class="n">MemTable</span><span class="o">*</span> <span class="n">mem</span><span class="p">,</span> <span class="n">VersionEdit</span><span class="o">*</span> <span class="n">edit</span><span class="p">,</span> <span class="n">Version</span><span class="o">*</span> <span class="n">base</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">FileMetaData</span> <span class="n">meta</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="n">meta</span><span class="p">.</span><span class="n">number</span> <span class="o">=</span> <span class="n">versions_</span><span class="o">-&gt;</span><span class="n">NewFileNumber</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Iterator</span><span class="o">*</span> <span class="n">iter</span> <span class="o">=</span> <span class="n">mem</span><span class="o">-&gt;</span><span class="n">NewIterator</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">  <span class="n">BuildTable</span><span class="p">(</span><span class="n">dbname_</span><span class="p">,</span> <span class="n">env_</span><span class="p">,</span> <span class="n">options_</span><span class="p">,</span> <span class="n">table_cache_</span><span class="p">,</span> <span class="n">iter</span><span class="p">,</span> <span class="o">&amp;</span><span class="n">meta</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="k">const</span> <span class="n">Slice</span> <span class="n">min_user_key</span> <span class="o">=</span> <span class="n">meta</span><span class="p">.</span><span class="n">smallest</span><span class="p">.</span><span class="n">user_key</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">  <span class="k">const</span> <span class="n">Slice</span> <span class="n">max_user_key</span> <span class="o">=</span> <span class="n">meta</span><span class="p">.</span><span class="n">largest</span><span class="p">.</span><span class="n">user_key</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">  <span class="kt">int</span> <span class="n">level</span> <span class="o">=</span> <span class="n">base</span><span class="o">-&gt;</span><span class="n">PickLevelForMemTableOutput</span><span class="p">(</span><span class="n">min_user_key</span><span class="p">,</span> <span class="n">max_user_key</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">edit</span><span class="o">-&gt;</span><span class="n">AddFile</span><span class="p">(</span><span class="n">level</span><span class="p">,</span> <span class="n">meta</span><span class="p">.</span><span class="n">number</span><span class="p">,</span> <span class="n">meta</span><span class="p">.</span><span class="n">file_size</span><span class="p">,</span> <span class="n">meta</span><span class="p">.</span><span class="n">smallest</span><span class="p">,</span> <span class="n">meta</span><span class="p">.</span><span class="n">largest</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="n">Status</span><span class="o">::</span><span class="n">OK</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>At the end of the process, the <code>Version::PickLevelForMemTableOutput</code> function is called to calculate which level the new SSTable file should be written to, and the judgment process is shown in the following figure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/a2f332eb63f9423eaba0ffe7bcbd443c.png" alt="Pick level for memtable outout"></p>
+<p>After the ImMemTable drop generates a new ldb file, the current version information is updated and some useless files are deleted, and the run ends here with a complete Minor Compaction. As you can see, in most cases ImMemTable will be dumped directly to Level-0, and may be merged to Level-1 and Level-2.</p>
+<p>From the above figure, we can see that Level-0 does not consider the duplication of data between different files. So when we read the data, we always need to read all the files of Level-0, which is not friendly to read operation.</p>
+<p>LevelDB mitigates this problem by setting a series of limits on the number of files in Level-0.</p>
+<ol>
+<li>the number of Level-0 files exceeds 4, merged into Level-1.</li>
+<li>more than 8 Level-0 files will delay writing key-value pairs by 1ms, slowing down the writing speed.</li>
+<li>stop writing if the number of Level-0 files exceeds 12.</li>
+</ol>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="c1">// Level-0 compaction is started when we hit this many files.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">static</span> <span class="k">const</span> <span class="kt">int</span> <span class="n">kL0_CompactionTrigger</span> <span class="o">=</span> <span class="mi">4</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Soft limit on number of level-0 files.  We slow down writes at this point.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">static</span> <span class="k">const</span> <span class="kt">int</span> <span class="n">kL0_SlowdownWritesTrigger</span> <span class="o">=</span> <span class="mi">8</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="c1">// Maximum number of level-0 files.  We stop writes at this point.
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">static</span> <span class="k">const</span> <span class="kt">int</span> <span class="n">kL0_StopWritesTrigger</span> <span class="o">=</span> <span class="mi">12</span><span class="p">;</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h3 id="major-compaction">Major Compaction</h3>
+<p>When the number of files at a level exceeds a threshold, the SSTable files from that level are merged with the SSTable files from the higher level to become the new Level+1 files, a process called Major Compaction.</p>
+<p>There are two types of trigger conditions for this process.</p>
+<ul>
+<li>The number of Level-0 files exceeds 4 or the total file size at a level exceeds a threshold.</li>
+<li>Too many invalid accesses (seek) to a file. Except for Level-0, SSTable files at any level are ordered among themselves. However, the keys of two files in Level(N) and Level(N+1) may intersect. Because of this intersection, when we look for a certain Key value, the Level(N) lookup is unsuccessful, so we have to look for it in Level(N+1), so this lookup causes more time consuming due to the overlapping range of keys in different levels. Therefore, LevelDB sets up an <code>allowed_seeks</code> for each SSTable after it is created for 100 times, and when <code>allowed_seeks</code> is &lt; 0, it will trigger the merge with higher levels and merge the file to reduce the number of lookups for future queries.</li>
+</ul>
+<p>Due to the specificity of Level-0, the Major Compaction process is also divided into two main types.</p>
+<ol>
+<li>
+<p>Level-0 and Level-1</p>
+<p>Select a Level-0 file, find a Level-1 file with duplicate Key, then find all Level-0 files with duplicate Key, and finally merge all Level-0 files and Level-1 files into a new Level-1 file.</p>
+</li>
+<li>
+<p>Level-N and Level-(N+1)</p>
+<p>Select a Level-N file and find all the Level-(N+1) files with duplicate keys with that Level-N file to merge.</p>
+</li>
+</ol>
+<h3 id="file-format">File Format</h3>
+<p>The format of an SSTable file is described in the LevelDB document <a href="https://github.com/google/leveldb/blob/master/doc/table_format.md">table_format.md</a>. Internally, an SSTable file consists of a series of 4KB-sized data blocks. The SSTable uses an index to locate the data blocks: when the SSTable file is opened, the index is loaded into memory and the location of the data blocks is then located according to the index. Each lookup can be done with a single disk search, first finding the location of the block in the index in memory using a dichotomous lookup, and then reading the corresponding block from the hard disk. We can also choose to cache the entire SSTable in memory so that we don&rsquo;t have to access the hard disk.</p>
+<blockquote>
+<p>The size of a data block is not a fixed length, but a threshold value, and a key-value pair is not stored across blocks. When the total length of all key-value pairs in a Block exceeds the threshold, LevelDB will create a new Block for storage.</p>
+</blockquote>
+<p>For self-explanation of the file, the SSTable has an internal BlockHandle pointer to other locations in the file to indicate the start and end of a segment, and it has two member variables <code>offset_</code> and <code>size_</code> that record the start and length of a data block, respectively.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="n">class</span> <span class="n">BlockHandle</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="nl">private</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="kt">uint64_t</span> <span class="n">offset_</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="kt">uint64_t</span> <span class="n">size_</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The detailed format of the final SSTable file is shown above, with each section corresponding to the following meaning.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/5f5a0aa836dd46adb32723ad13022509.png" alt="SSTable format"></p>
+<ul>
+<li>The sequence of key-value pairs is stored in an ordered manner, divided into multiple data blocks, each of which is formatted and stored in a DataBlock.</li>
+<li>Each DataBlock corresponds to a MetaBlock, storing the Bloom Filter of the data block, and we can also customize our own filters for LevelDB.</li>
+<li>followed by a MetaIndexBlock, which is the entry point for other MetaBlocks, the stored Key is the name of this MetaBlock, and the value is a pointer BlockHandle to this MetaBlock.</li>
+<li>an index block IndexBlock, which contains the entry for each DataBlock, the Key is a string greater than or equal to the last key of the current DataBlock, before the first key of successive DataBlocks, and the value is a BlockHandle pointing to this DataBlock.</li>
+<li>At the end of the file is a filled-length Footer with a fixed length of 48 Bytes, containing the meta-index block and the BlockHandle of the index block, and a magic number.</li>
+</ul>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/b4e4fbfad30b4e1abd6ab157e2b89793.png" alt="Field Format"></p>
+<p>A uint64 integer encoded with varint64 takes up to 10 bytes, and a BlockHandle contains two varint64 types, so a BlockHandle can take up to 20 bytes. So the maximum size of MetaIndex_Handle and Index_Handle is 40 bytes. 8 bytes for Magic Number, which is a fixed value to check if the file is an SSTable file when reading, and Padding is used to fill in the variable length integer part to 40 bytes.</p>
+<p>The Footer of SSTable file can decode the BlockHandle of IndexBlock and MetaIndexBlock nearest to the Footer, so as to determine the position of these two components in the file, and then use these two index blocks to find out the position of other data blocks and filter blocks, so as to achieve the purpose of self-explanation of the file.</p>
+<blockquote>
+<p>In addition, each SSTable file has its own max/min key pair. When we query the data, we can quickly determine whether we need to load the SSTable file into memory for searching by the max/min key pair, reducing I/O overhead.</p>
+</blockquote>
+<h3 id="bloom-filter">Bloom Filter</h3>
+<p>A read operation must query the data of all SSTables at a given level. LevelDB reduces the number of hard disk accesses by allowing user programs to specify Bloom filters for SSTables of a particular locality group. We can use Bloom filters to determine whether an SSTable contains a particular key, significantly reducing the number of disk accesses for read operations at the cost of a small amount of memory capacity for storing Bloom filters. Using Bloom filters also implicitly achieves the goal of eliminating the need to access the hard disk most of the time when an application accesses a key-value pair that does not exist.</p>
+<p>Bloom Filter is a probabilistic random data structure that acts similar to a hash table, it uses a bitmap to represent a set and can determine whether an element belongs to this set or not. The Bloom Filter has a certain misjudgment rate, when determining whether an element belongs to a set, it may mistake an element that does not belong to the set as belonging to the set, that is, it may have the following two situations.</p>
+<ol>
+<li>the Bloom filter determines that a Key does not exist, then this Key must not exist in this set.</li>
+<li>the Bloom filter determines that a key exists, then the key may exist.</li>
+</ol>
+<p>The Bloom Filter is a bitmap structure with each bit being 0 at the beginning.</p>
+<p>When the value <code>X</code> is inserted, <code>X</code> is hashed using k hash functions. The value obtained from the hash is then remapped with the capacity of the Bloom Filter, and the value of the bit represented by the remainder is set to 1.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/e1c4cd309bec4e8fa0161a5d1296062d.png" alt="Bloom Filter"></p>
+<p>For example, in the above figure, we only inserted two values X1 and X2, although X3 is not inserted, but the query is Bloom filter will determine that it exists, which is the reason for the misjudgment.</p>
+<p>The search process of Bloom filter is similar to the insertion process, which also uses k hash functions to hash the values that need to be found, and only if the value of each bit of the hash is 1, it means that the value may exist, and if the value of any bit is 0, it means that the value must not exist. For example, in the following figure, Y2 must not exist, while Y1 may exist.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/16/c564c399671f498eb8abe0b39e7fcd9e.png" alt="Bloom Filter"></p>
+<p>LevelDB defines the filter base class <code>FilterPolicy</code>, according to which we can implement our own filters, or use the internal implementation of <code>BloomFilterPolicy</code>. The implementation of Bloom filter is relatively simple, and the main idea is to reduce the error rate.</p>
+<p>If the bitmap has a total of m bits, the number of elements in the set is n, and the number of hash functions is k, then the larger m is, the larger k is, and the smaller n is, the smaller the false positive rate is. If m and n are deterministic, then the optimal number of hash functions k = ln2 × m/n. The file format of SSTable shows that Bloom Filter is not global, but generates its own filter for each data block, which avoids the increase of conflict rate due to the large n.</p>
+<p>When we construct the new <code>BloomFilterPolicy</code>, the only parameter we need to pass is <code>bits_per_key</code>, which represents the ratio of the total length of the bitmap to the number of elements m/n, so that the optimal k value can be calculated.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl">  <span class="n">explicit</span> <span class="nf">BloomFilterPolicy</span><span class="p">(</span><span class="kt">int</span> <span class="n">bits_per_key</span><span class="p">)</span> <span class="o">:</span> <span class="n">bits_per_key_</span><span class="p">(</span><span class="n">bits_per_key</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">k_</span> <span class="o">=</span> <span class="n">static_cast</span><span class="o">&lt;</span><span class="n">size_t</span><span class="o">&gt;</span><span class="p">(</span><span class="n">bits_per_key</span> <span class="o">*</span> <span class="mf">0.69</span><span class="p">);</span>  <span class="c1">// 0.69 =~ ln(2)
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">k_</span> <span class="o">&lt;</span> <span class="mi">1</span><span class="p">)</span> <span class="n">k_</span> <span class="o">=</span> <span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">(</span><span class="n">k_</span> <span class="o">&gt;</span> <span class="mi">30</span><span class="p">)</span> <span class="n">k_</span> <span class="o">=</span> <span class="mi">30</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>Knowing the above, it is easy to understand the <code>CreateFilter()</code> and <code>KeyMayMatch()</code> interfaces provided by <code>BloomFilterPolicy</code>, which represent the creation and query processes respectively. Note that a Bloom filter has a minimum bitmap of 64bits.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">void</span> <span class="nf">CreateFilter</span><span class="p">(</span><span class="k">const</span> <span class="n">Slice</span><span class="o">*</span> <span class="n">keys</span><span class="p">,</span> <span class="kt">int</span> <span class="n">n</span><span class="p">,</span> <span class="n">std</span><span class="o">::</span><span class="n">string</span><span class="o">*</span> <span class="n">dst</span><span class="p">)</span> <span class="k">const</span> <span class="n">override</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"><span class="n">size_t</span> <span class="n">bits</span> <span class="o">=</span> <span class="n">n</span> <span class="o">*</span> <span class="n">bits_per_key_</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">if</span> <span class="p">(</span><span class="n">bits</span> <span class="o">&lt;</span> <span class="mi">64</span><span class="p">)</span> <span class="n">bits</span> <span class="o">=</span> <span class="mi">64</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="n">size_t</span> <span class="n">bytes</span> <span class="o">=</span> <span class="p">(</span><span class="n">bits</span> <span class="o">+</span> <span class="mi">7</span><span class="p">)</span> <span class="o">/</span> <span class="mi">8</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="n">bits</span> <span class="o">=</span> <span class="n">bytes</span> <span class="o">*</span> <span class="mi">8</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="n">n</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="kt">uint32_t</span> <span class="n">h</span> <span class="o">=</span> <span class="n">BloomHash</span><span class="p">(</span><span class="n">keys</span><span class="p">[</span><span class="n">i</span><span class="p">]);</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// write to dst
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h3 id="tablecache">TableCache</h3>
+<p>To improve the performance of read operations, LevelDB not only provides Bloom Filter to reduce the disk I/O of query process, but also uses cache to reside the frequently read SSTable in memory. Because of the localized nature of the program&rsquo;s access to memory at runtime, the program will request a certain piece of memory very frequently, and if this piece of memory is cached after the first request, it will greatly improve the speed of data read afterwards. <strong>Therefore, whether the cache design is reasonable and effective lies in the high hit rate of the cache.</strong></p>
+<p>LevelDB provides <code>TableCache</code> class to cache SSTable files. You only need to provide the <code>file_number</code> and <code>file_size</code> of the file to return the corresponding Sorted Table object and its iterator. The <code>TableCache</code> is actually a layer of wrapper around the <code>Cache</code> class, similarly, the <code>Cache</code> class is an abstract class, and callers can either customize their own cache implementation by inheriting from the <code>Cache</code> class or directly use the internal implementation of <code>LRUCache</code>.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="n">class</span> <span class="n">TableCache</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="nl">public</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Iterator</span><span class="o">*</span> <span class="n">NewIterator</span><span class="p">(</span><span class="k">const</span> <span class="n">ReadOptions</span><span class="o">&amp;</span> <span class="n">options</span><span class="p">,</span> <span class="kt">uint64_t</span> <span class="n">file_number</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                        <span class="kt">uint64_t</span> <span class="n">file_size</span><span class="p">,</span> <span class="n">Table</span><span class="o">**</span> <span class="n">tableptr</span> <span class="o">=</span> <span class="n">nullptr</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Status</span> <span class="nf">Get</span><span class="p">(</span><span class="k">const</span> <span class="n">ReadOptions</span><span class="o">&amp;</span> <span class="n">options</span><span class="p">,</span> <span class="kt">uint64_t</span> <span class="n">file_number</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">             <span class="kt">uint64_t</span> <span class="n">file_size</span><span class="p">,</span> <span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">k</span><span class="p">,</span> <span class="kt">void</span><span class="o">*</span> <span class="n">arg</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">             <span class="kt">void</span> <span class="p">(</span><span class="o">*</span><span class="n">handle_result</span><span class="p">)(</span><span class="kt">void</span><span class="o">*</span><span class="p">,</span> <span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span><span class="p">,</span> <span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span><span class="p">));</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"> <span class="nl">private</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Status</span> <span class="n">FindTable</span><span class="p">(</span><span class="kt">uint64_t</span> <span class="n">file_number</span><span class="p">,</span> <span class="kt">uint64_t</span> <span class="n">file_size</span><span class="p">,</span> <span class="n">Cache</span><span class="o">::</span><span class="n">Handle</span><span class="o">**</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="n">Env</span><span class="o">*</span> <span class="k">const</span> <span class="n">env_</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="k">const</span> <span class="n">std</span><span class="o">::</span><span class="n">string</span> <span class="n">dbname_</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="k">const</span> <span class="n">Options</span><span class="o">&amp;</span> <span class="n">options_</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="n">Cache</span><span class="o">*</span> <span class="n">cache_</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p><code>LRUCahce</code> uses the Least Recently Used (LRU) algorithm, <strong>if a piece of data has been used recently, the probability of it being used in the future is equally high</strong> . <code>LRUCahce</code> relies on the Doubly Circular Linked List and hash table implementation, where the node information for both the Linked List and the hash table is stored in the <code>LRUHandle</code> structure, and access is done with a mutual exclusion lock.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-sh" data-lang="sh"><span class="line"><span class="cl">class LRUCache <span class="o">{</span>
+</span></span><span class="line"><span class="cl"> private:
+</span></span><span class="line"><span class="cl">  void LRU_Remove<span class="o">(</span>LRUHandle* e<span class="o">)</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  void LRU_Append<span class="o">(</span>LRUHandle* list, LRUHandle* e<span class="o">)</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    
+</span></span><span class="line"><span class="cl">  void Ref<span class="o">(</span>LRUHandle* e<span class="o">)</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  void Unref<span class="o">(</span>LRUHandle* e<span class="o">)</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  
+</span></span><span class="line"><span class="cl">  mutable port::Mutex mutex_<span class="p">;</span>
+</span></span><span class="line"><span class="cl">  size_t usage_ GUARDED_BY<span class="o">(</span>mutex_<span class="o">)</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  LRUHandle lru_ GUARDED_BY<span class="o">(</span>mutex_<span class="o">)</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  LRUHandle in_use_ GUARDED_BY<span class="o">(</span>mutex_<span class="o">)</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  HandleTable table_ GUARDED_BY<span class="o">(</span>mutex_<span class="o">)</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="o">}</span><span class="p">;</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The linked list <code>in-use</code> stores the data currently being referenced by the application, and another linked list <code>lru</code> caches the data in the order of access time, with each data being added or removed by the Ref() and Unref() functions, respectively, and completing the node switching between <code>in-use</code> and <code>lru</code>. When we need to use the LRU algorithm to eliminate data, we only need to eliminate the data on the <code>lru</code> linked list that is sorted next.</p>
+<p>The hash table is used to quickly find out if a Key exists in the cache, and if it does, it returns a <code>LRUHandle*</code> pointer directly to the upper-level program. The hash table uses the classic array + linked list implementation with a load factor of 1. If the number of elements currently inserted exceeds the length of the array, it will be expanded, doubling the capacity each time.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span><span class="lnt">7
+</span><span class="lnt">8
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="n">Cache</span><span class="o">::</span><span class="n">Handle</span><span class="o">*</span> <span class="n">LRUCache</span><span class="o">::</span><span class="n">Lookup</span><span class="p">(</span><span class="k">const</span> <span class="n">Slice</span><span class="o">&amp;</span> <span class="n">key</span><span class="p">,</span> <span class="kt">uint32_t</span> <span class="n">hash</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">  <span class="n">MutexLock</span> <span class="n">l</span><span class="p">(</span><span class="o">&amp;</span><span class="n">mutex_</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="n">LRUHandle</span><span class="o">*</span> <span class="n">e</span> <span class="o">=</span> <span class="n">table_</span><span class="p">.</span><span class="n">Lookup</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">hash</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="k">if</span> <span class="p">(</span><span class="n">e</span> <span class="o">!=</span> <span class="n">nullptr</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">Ref</span><span class="p">(</span><span class="n">e</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">  <span class="p">}</span>
+</span></span><span class="line"><span class="cl">  <span class="k">return</span> <span class="n">reinterpret_cast</span><span class="o">&lt;</span><span class="n">Cache</span><span class="o">::</span><span class="n">Handle</span><span class="o">*&gt;</span><span class="p">(</span><span class="n">e</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>To avoid storing too much data in one LRUCahce, LevelDB uses a sharded LRUCache <code>ShardedLRUCache</code>, which is also simple to implement, creating 16 LRUCahce objects at the same time, and then placing specific cached data into the corresponding LRUCahce objects via the <code>Shard()</code> function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">static</span> <span class="k">const</span> <span class="kt">int</span> <span class="n">kNumShardBits</span> <span class="o">=</span> <span class="mi">4</span><span class="p">;</span> <span class="c1">// 用 4 个二进制位存储缓存片的数量，也就是 16 个缓存片
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span><span class="k">static</span> <span class="k">const</span> <span class="kt">int</span> <span class="n">kNumShards</span> <span class="o">=</span> <span class="mi">1</span> <span class="o">&lt;&lt;</span> <span class="n">kNumShardBits</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="n">class</span> <span class="nl">ShardedLRUCache</span> <span class="p">:</span> <span class="n">public</span> <span class="n">Cache</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl"> <span class="nl">private</span><span class="p">:</span>
+</span></span><span class="line"><span class="cl">  <span class="n">LRUCache</span> <span class="n">shard_</span><span class="p">[</span><span class="n">kNumShards</span><span class="p">];</span>
+</span></span><span class="line"><span class="cl">  <span class="n">port</span><span class="o">::</span><span class="n">Mutex</span> <span class="n">id_mutex_</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">  <span class="kt">uint64_t</span> <span class="n">last_id_</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">  <span class="k">static</span> <span class="kt">uint32_t</span> <span class="nf">Shard</span><span class="p">(</span><span class="kt">uint32_t</span> <span class="n">hash</span><span class="p">)</span> <span class="p">{</span> <span class="k">return</span> <span class="n">hash</span> <span class="o">&gt;&gt;</span> <span class="p">(</span><span class="mi">32</span> <span class="o">-</span> <span class="n">kNumShardBits</span><span class="p">);</span> <span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h2 id="summary-2">Summary</h2>
+<p>LSM-Tree and B-Tree and their variants are widely used in storage systems. Unlike the high read performance of B-Tree, LSM-Tree greatly improves the write ability of data, but at the expense of partial read performance, so this structure is usually suitable for scenarios with more writes and fewer reads.</p>
+<p>I have read and analyzed the source code of LevelDB to get a better understanding of the design of this data structure. This article covers MemTable, SSTable, pre-written log, etc., and analyzes Bloom Filter and TableCache used by LevelDB to improve readability, but does not introduce version control and data recovery related content.</p>
+<p>LevelDB is written by <a href="https://en.wikipedia.org/wiki/Jeff_Dean_%28computer_scientist%29">Jeff Dean</a>, the author of BigTable, and the code is very elegant and makes a lot of use of PImpl and OOP concepts. It is a very good project to learn C++ programming. There are more articles about LevelDB source code analysis on the web, you can Google to learn what is not covered or not clearly described in the article.</p>
+<h2 id="references">References</h2>
+<ul>
+<li><a href="https://wingsxdu.com/posts/database/leveldb/#major-compaction">https://wingsxdu.com/posts/database/leveldb/#major-compaction</a></li>
+<li><a href="https://citeseerx.ist.psu.edu/viewdoc/download?doi=10.1.1.44.2782&amp;rep=rep1&amp;type=pdf">The Log-Structured Merge-Tree (LSM-Tree)</a></li>
+<li><a href="https://static.googleusercontent.com/media/research.google.com/en//archive/bigtable-osdi06.pdf">Bigtable: A Distributed Storage System for Structured Data</a></li>
+<li><a href="http://www.benstopford.com/2015/02/14/log-structured-merge-trees/">Log Structured Merge Trees</a></li>
+<li><a href="https://sf-zhou.github.io/#/LevelDB">LevelDB Source Code Analysis</a></li>
+<li><a href="http://bean-li.github.io/leveldb-sstable/">SSTable in LevelDB</a></li>
+<li><a href="https://www.myway5.com/index.php/2017/08/20/leveldb%e6%ba%90%e4%bb%a3%e7%a0%81%e9%98%85%e8%af%bb%ef%bc%88%e5%9b%9b%ef%bc%89-table-cache%e7%9a%84%e5%ae%9e%e7%8e%b0/">leveldb source code reading (IV) - table cache implementation</a></li>
+</ul>
+
+    </div>
+
+    
+<footer class="post-footer">
+      
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-08/cpu-cache-and-memory-barriers/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">CPU Cache Coherence and Memory Barrier</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-08/cpp-std-uniform-int-distribution/">
+            <span class="next-text nav-default">Talk about the principle and optimization of std::uniform_int_distribution</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  <script type="text/javascript" src="/lib/jquery/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="/lib/slideout/slideout-1.0.1.min.js"></script>
+  <script type="text/javascript" src="/lib/fancybox/jquery.fancybox-3.1.20.min.js"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.4ae89da218555efa0e7093a20b92017d2e1202b66fff9fc2edf4cb8d44b44c6e.js"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
