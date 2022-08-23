@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Redis Slowlog - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="This article will analyze how Redis&#39; Slowlog feature is implemented." /><meta name="keywords" content="redis, Slowlog" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.101.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-08/redis-slowlog/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link href="/lib/fancybox/jquery.fancybox-3.1.20.min.css" rel="stylesheet">
+
+
+<meta property="og:title" content="Redis Slowlog" />
+<meta property="og:description" content="This article will analyze how Redis&#39; Slowlog feature is implemented." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-08/redis-slowlog/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-08-23T13:29:04+08:00" />
+<meta property="article:modified_time" content="2022-08-23T13:29:04+08:00" />
+
+<meta itemprop="name" content="Redis Slowlog">
+<meta itemprop="description" content="This article will analyze how Redis&#39; Slowlog feature is implemented."><meta itemprop="datePublished" content="2022-08-23T13:29:04+08:00" />
+<meta itemprop="dateModified" content="2022-08-23T13:29:04+08:00" />
+<meta itemprop="wordCount" content="910">
+<meta itemprop="keywords" content="redis," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Redis Slowlog"/>
+<meta name="twitter:description" content="This article will analyze how Redis&#39; Slowlog feature is implemented."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Redis Slowlog</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-08-23 13:29:04 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 910 words </span>
+          <span class="more-meta"> 5 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#data-structures">Data Structures</a></li>
+        <li><a href="#adding-logs">Adding Logs</a></li>
+        <li><a href="#reference">Reference</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Redis&rsquo; slow query logging feature is used to log command requests that take longer than a given amount of time to execute, which can be used to analyze and optimize query speed. In this article, we will analyze how Redis&rsquo; slow query logging feature is implemented.</p>
+<p>Redis provides two configuration options for slow logging.</p>
+<ul>
+<li><strong>slowlog-log-slower-than</strong>: specifies how many microseconds a command request will be logged if it takes longer than 10,000 microseconds to execute, the default is 10,000 microseconds.</li>
+<li><strong>slowlog-max-len</strong>: Specifies the maximum number of slow query logs that the server will keep. When the number of slow query logs stored by Redis reaches the specified value, the server will delete the oldest slow query log before adding a new one.</li>
+</ul>
+<p>We can use the CONFIG SET/GET command to set/get the values of these two options. Note that the <strong>slow query log is stored in memory and not in a log file</strong> , which ensures that the slow query log does not become a bottleneck for speed.</p>
+<h2 id="data-structures">Data Structures</h2>
+<p>The data structure of slowlog is defined in the <code>redisServer</code> structure.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">struct</span> <span class="n">redisServer</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="p">...</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// A linked list that holds all slow query logs
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="n">list</span> <span class="o">*</span><span class="n">slowlog</span><span class="p">;</span>                  <span class="cm">/* SLOWLOG list of commands */</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// ID of the next slow query log
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="kt">long</span> <span class="kt">long</span> <span class="n">slowlog_entry_id</span><span class="p">;</span>     <span class="cm">/* SLOWLOG current entry ID */</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// The server configures the value of the slowlog-log-slower-than option
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="kt">long</span> <span class="kt">long</span> <span class="n">slowlog_log_slower_than</span><span class="p">;</span> <span class="cm">/* SLOWLOG time limit (to get logged) */</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// The server configures the value of the slowlog-max-len option
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="p">...</span>
+</span></span><span class="line"><span class="cl"><span class="p">};</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>It can be seen that the slowlog is stored inside a doubly linked list to facilitate the insertion of new logs at the head of the table, and will be deleted from the end of the table when the amount of logs reaches the set storage limit.</p>
+<p>The data of a slowlog is stored in the structure <code>slowlogEntry</code>, which holds the parameters of the timeout command, duration, log ID, client and other information.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="k">typedef</span> <span class="k">struct</span> <span class="n">slowlogEntry</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// Commands and Parameters
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="n">robj</span> <span class="o">**</span><span class="n">argv</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// Number of commands and command parameters
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="kt">int</span> <span class="n">argc</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// Log ID
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="kt">long</span> <span class="kt">long</span> <span class="n">id</span><span class="p">;</span>       <span class="cm">/* Unique entry identifier. */</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// The time consumed to execute the command, in microseconds
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="kt">long</span> <span class="kt">long</span> <span class="n">duration</span><span class="p">;</span> <span class="cm">/* Time spent by the query, in microseconds. */</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// UNIX timestamp of the command execution
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="n">time_t</span> <span class="n">time</span><span class="p">;</span>        <span class="cm">/* Unix time at which the query was executed. */</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// Client Name
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="n">sds</span> <span class="n">cname</span><span class="p">;</span>          <span class="cm">/* Client name. */</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// Client Address
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="n">sds</span> <span class="n">peerid</span><span class="p">;</span>         <span class="cm">/* Client network address. */</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span> <span class="n">slowlogEntry</span><span class="p">;</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>The value of a <code>slowlog</code> linked list is a pointer to the log node <code>slowlogEntry</code>, which together form the data structure of the slow query log. When a new log needs to be added, the add new node function of the linked list is called and the pointer is added to the linked list header.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span><span class="lnt">6
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="n">slowlogEntry</span> <span class="o">*</span><span class="nf">slowlogCreateEntry</span><span class="p">(</span><span class="n">client</span> <span class="o">*</span><span class="n">c</span><span class="p">,</span> <span class="n">robj</span> <span class="o">**</span><span class="n">argv</span><span class="p">,</span> <span class="kt">int</span> <span class="n">argc</span><span class="p">,</span> <span class="kt">long</span> <span class="kt">long</span> <span class="n">duration</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">slowlogEntry</span> <span class="o">*</span><span class="n">se</span> <span class="o">=</span> <span class="n">zmalloc</span><span class="p">(</span><span class="k">sizeof</span><span class="p">(</span><span class="o">*</span><span class="n">se</span><span class="p">));</span>
+</span></span><span class="line"><span class="cl">    <span class="p">...</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="n">se</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl"><span class="n">listAddNodeHead</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">slowlog</span><span class="p">,</span><span class="n">slowlogCreateEntry</span><span class="p">(</span><span class="n">c</span><span class="p">,</span><span class="n">argv</span><span class="p">,</span><span class="n">argc</span><span class="p">,</span><span class="n">duration</span><span class="p">));</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>And why is <code>redisServer.slowlog_entry_id</code> the ID of the next log? This is a C syntax issue and the specific code used to set the log ID is as follows.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="n">se</span><span class="o">-&gt;</span><span class="n">id</span> <span class="o">=</span> <span class="n">server</span><span class="p">.</span><span class="n">slowlog_entry_id</span><span class="o">++</span><span class="p">;</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>This line of code will first assign the value of <code>server.slowlog_entry_id</code> to <code>se.id</code> and then add 1 to its own value (I always feel a little awkward writing this)</p>
+<h2 id="adding-logs">Adding Logs</h2>
+<p>During the initialization of the Redis service, the initialization function for the slow query function is also executed, creating an empty doubly linked list.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt">1
+</span><span class="lnt">2
+</span><span class="lnt">3
+</span><span class="lnt">4
+</span><span class="lnt">5
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">void</span> <span class="nf">slowlogInit</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">server</span><span class="p">.</span><span class="n">slowlog</span> <span class="o">=</span> <span class="n">listCreate</span><span class="p">();</span>
+</span></span><span class="line"><span class="cl">    <span class="n">server</span><span class="p">.</span><span class="n">slowlog_entry_id</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="n">listSetFreeMethod</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">slowlog</span><span class="p">,</span><span class="n">slowlogFreeEntry</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>When the client sends a command to the server, the control flow is handed over to <code>server.c/call</code>, which calls the command implementation function to execute the command and calculates the time taken to execute the command, which is handed over to the slowlog function.</p>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span><span class="lnt">15
+</span><span class="lnt">16
+</span><span class="lnt">17
+</span><span class="lnt">18
+</span><span class="lnt">19
+</span><span class="lnt">20
+</span><span class="lnt">21
+</span><span class="lnt">22
+</span><span class="lnt">23
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">void</span> <span class="nf">call</span><span class="p">(</span><span class="n">client</span> <span class="o">*</span><span class="n">c</span><span class="p">,</span> <span class="kt">int</span> <span class="n">flags</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">start</span> <span class="o">=</span> <span class="n">server</span><span class="p">.</span><span class="n">ustime</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="n">c</span><span class="o">-&gt;</span><span class="n">cmd</span><span class="o">-&gt;</span><span class="n">proc</span><span class="p">(</span><span class="n">c</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// Calculate the time taken for command execution
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="n">duration</span> <span class="o">=</span> <span class="n">ustime</span><span class="p">()</span><span class="o">-</span><span class="n">start</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="n">slowlogPushEntryIfNeeded</span><span class="p">(</span><span class="n">c</span><span class="p">,</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">argv</span><span class="p">,</span><span class="n">c</span><span class="o">-&gt;</span><span class="n">argc</span><span class="p">,</span><span class="n">duration</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">...</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl"><span class="kt">void</span> <span class="nf">slowlogPushEntryIfNeeded</span><span class="p">(</span><span class="n">client</span> <span class="o">*</span><span class="n">c</span><span class="p">,</span> <span class="n">robj</span> <span class="o">**</span><span class="n">argv</span><span class="p">,</span> <span class="kt">int</span> <span class="n">argc</span><span class="p">,</span> <span class="kt">long</span> <span class="kt">long</span> <span class="n">duration</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// Slow query function is not turned on, return directly
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">slowlog_log_slower_than</span> <span class="o">&lt;</span> <span class="mi">0</span><span class="p">)</span> <span class="k">return</span><span class="p">;</span> <span class="cm">/* Slowlog disabled */</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// If the execution time exceeds the limit set by the server, then the command is added to the slow query log
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">if</span> <span class="p">(</span><span class="n">duration</span> <span class="o">&gt;=</span> <span class="n">server</span><span class="p">.</span><span class="n">slowlog_log_slower_than</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="c1">// New log added to linked list header
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">listAddNodeHead</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">slowlog</span><span class="p">,</span>
+</span></span><span class="line"><span class="cl">                        <span class="n">slowlogCreateEntry</span><span class="p">(</span><span class="n">c</span><span class="p">,</span><span class="n">argv</span><span class="p">,</span><span class="n">argc</span><span class="p">,</span><span class="n">duration</span><span class="p">));</span>
+</span></span><span class="line"><span class="cl">
+</span></span><span class="line"><span class="cl">    <span class="cm">/* Remove old entries if needed. */</span>
+</span></span><span class="line"><span class="cl">    <span class="c1">// If the number of logs is too large, then delete
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>    <span class="k">while</span> <span class="p">(</span><span class="n">listLength</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">slowlog</span><span class="p">)</span> <span class="o">&gt;</span> <span class="n">server</span><span class="p">.</span><span class="n">slowlog_max_len</span><span class="p">)</span>
+</span></span><span class="line"><span class="cl">        <span class="n">listDelNode</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">slowlog</span><span class="p">,</span><span class="n">listLast</span><span class="p">(</span><span class="n">server</span><span class="p">.</span><span class="n">slowlog</span><span class="p">));</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><p>As you can see from the summary code above, the specific logic is left to the <code>slowlogPushEntryIfNeeded()</code> function, which adds a new log when the command times out and removes it if the number of logs reaches the limit.</p>
+<p>The logic of slowlog implementation is easy to understand. If the timeout is reached, a new element is added to the head of the linked list, and if the number of logs reaches the upper limit, an element is removed from the end of the linked list, probably due to the single-threaded design of Redis, which avoids concurrency problems.</p>
+<h2 id="reference">Reference</h2>
+<ul>
+<li><code>https://wingsxdu.com/posts/database/redis/slowlog/</code></li>
+</ul>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/redis/">redis</a>
+          </div>
+      <nav class="post-nav">
+        
+        <a class="next" href="/post/2022-08/redis-rdb-and-aof/">
+            <span class="next-text nav-default">Redis RDB and AOF Persistence</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  <script type="text/javascript" src="/lib/jquery/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="/lib/slideout/slideout-1.0.1.min.js"></script>
+  <script type="text/javascript" src="/lib/fancybox/jquery.fancybox-3.1.20.min.js"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.4ae89da218555efa0e7093a20b92017d2e1202b66fff9fc2edf4cb8d44b44c6e.js"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>

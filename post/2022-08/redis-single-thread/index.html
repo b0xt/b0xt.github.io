@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>How Redis achieves high performance with &#34;single thread&#34; - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Explore how Redis achieves high performance in a single thread." /><meta name="keywords" content="redis, Single Thread" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.101.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-08/redis-single-thread/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link href="/lib/fancybox/jquery.fancybox-3.1.20.min.css" rel="stylesheet">
+
+
+<meta property="og:title" content="How Redis achieves high performance with &#34;single thread&#34;" />
+<meta property="og:description" content="Explore how Redis achieves high performance in a single thread." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-08/redis-single-thread/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-08-23T12:49:26+08:00" />
+<meta property="article:modified_time" content="2022-08-23T12:49:26+08:00" />
+
+<meta itemprop="name" content="How Redis achieves high performance with &#34;single thread&#34;">
+<meta itemprop="description" content="Explore how Redis achieves high performance in a single thread."><meta itemprop="datePublished" content="2022-08-23T12:49:26+08:00" />
+<meta itemprop="dateModified" content="2022-08-23T12:49:26+08:00" />
+<meta itemprop="wordCount" content="1559">
+<meta itemprop="keywords" content="redis," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="How Redis achieves high performance with &#34;single thread&#34;"/>
+<meta name="twitter:description" content="Explore how Redis achieves high performance in a single thread."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">How Redis achieves high performance with &#34;single thread&#34;</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-08-23 12:49:26 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1559 words </span>
+          <span class="more-meta"> 4 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#single-threaded-advantages">Single-threaded advantages</a></li>
+        <li><a href="#io-multiplexing">I/O Multiplexing</a>
+          <ul>
+            <li><a href="#blocking-io">Blocking I/O</a></li>
+            <li><a href="#non-blocking-io">Non-blocking I/O</a></li>
+            <li><a href="#io-multiplexing-1">I/O Multiplexing</a></li>
+            <li><a href="#signaling-io">Signaling I/O</a></li>
+            <li><a href="#summary">Summary</a></li>
+          </ul>
+        </li>
+        <li><a href="#time-consuming-task-processing">Time-Consuming Task Processing</a></li>
+        <li><a href="#summary-1">Summary</a></li>
+        <li><a href="#reference">Reference</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p>Redis has long been known for its high performance, yet Redis runs as a single thread, which is often contrary to perception. So what mechanisms does Redis use to keep up with the huge volume of processing required? How to achieve high performance with &ldquo;single threadedness&rdquo; is the main question explored in this article.</p>
+<p>The word &ldquo;single-threaded&rdquo; is in quotes in the title because Redis is single-threaded in the sense that it uses a single thread for the network request module, and Redis uses the concept of thread closure to avoid multi-threaded safety issues by enclosing tasks in a single thread, while other modules still use multiple threads. In addition, Redis uses an I/O reuse model to handle client-side network requests more efficiently.</p>
+<h2 id="single-threaded-advantages">Single-threaded advantages</h2>
+<p>Using multiple threads often results in greater throughput rates and shorter response times, however, using multiple threads is not necessarily faster than single-threaded programs. the CPU executes only one thread in a time slice, and when the kernel threads switch, it needs to save the execution context of thread A and then load the execution context of thread B. The registers involved include.</p>
+<blockquote>
+<p>16 general purpose registers, PC (Program Counter), SP (Stack Pointer), segment registers, 16 XMM registers, FP coprocessor state, 16 AVX registers, all MSRs etc.</p>
+</blockquote>
+<p>As you can see the overhead of threads performing context switches is not low and should be minimized if not necessary. And using multiple threads tends to make the design more complex, requiring us to be more careful when accessing shared data - putting locks on the data is not a cost-effective option for Redis.</p>
+<p>On the other hand, the vast majority of Redis requests are purely in-memory operations, a process that is so fast that the CPU is not a performance bottleneck, and even with single-threaded instances a single instance can handle tens of thousands of data requests per second. For higher concurrency requirements, Redis also supports cluster deployments, where multiple instances are started on one or more servers to share access pressure.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/23/cf24f6a3ed754af1a575a4058c29ac49.png0" alt="memory read and write"></p>
+<p>Because Redis is not a CPU-intensive application, a single thread is sufficient to meet computing requirements, avoiding unnecessary context switching and data contention, and making operation more stable. Since the performance is sufficient, there is no need to over-engineer it to introduce multi-threading.</p>
+<h2 id="io-multiplexing">I/O Multiplexing</h2>
+<p>Unix-like systems contain five available I/O models: blocking I/O, non-blocking I/O, I/O multiplexing, signaling I/O, and asynchronous I/O. In the operating system, the kernel uses a File Descriptor (FD) to identify a file or other I/O resource, such as a network socket, that is being accessed by a particular process, and the different I/O models Different I/O models use FD to read and write to files.</p>
+<p>In Redis, when a client initiates communication, the server&rsquo;s acceptance of the data typically consists of two distinct phases.</p>
+<ol>
+<li>waiting for the data to arrive from the network, and when the waiting packet arrives, it is copied to some buffer in the kernel.</li>
+<li>copying the data from the kernel buffer to the application process buffer.</li>
+</ol>
+<p>Of the above five I/O models, the first four are called synchronous I/O. The difference between them lies in the state of the process during the first phase while waiting for data to arrive, and in the second phase, the processes all block due to data copying. The following is a brief description of these four types.</p>
+<h3 id="blocking-io">Blocking I/O</h3>
+<p>Blocking I/O is the most popular I/O model. By default, reading and writing to the FD is blocked, and the application process may block when the process calls <code>read</code> or <code>recvfrom</code> to read or write to the FD. As shown in the figure below, the application switches from user state to kernel state, the kernel checks if the corresponding file descriptor is ready, and when the OS kernel copies the data to the application process, it switches from kernel state to user state and the application process continues execution.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/23/90fc0379a5cb4db29c55b5478cced6a3.png" alt="Blocking I/O"></p>
+<p>Since thread execution is linear, when we call <code>recvfrom</code> on blocking I/O, the process is stuck waiting until the I/O operation is finished, during which time no other operation can be performed.</p>
+<h3 id="non-blocking-io">Non-blocking I/O</h3>
+<p>When a process sets a process descriptor to non-blocking, the kernel will return immediately when performing I/O operations such as <code>recvfrom</code>. If the socket is not ready, the kernel returns an <code>EWOULDBLOCK</code> error. Since the process has not received the data, it initiates a polling operation and keeps calling I/O functions until the datagram is ready and copied to the process buffer and the kernel returns a success indication.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/23/2603e90a3a5b45d5a0ff358a02d8e5e6.png" alt="Non-blocking I/O"></p>
+<p>When a process uses non-blocking I/O, it can perform other tasks while waiting to improve CPU utilization. However, the application process continuously polls the kernel to see if an FD is ready, and this operation consumes some CPU resources.</p>
+<h3 id="io-multiplexing-1">I/O Multiplexing</h3>
+<p>I/O multiplexing is an I/O model used by Redis to handle multiple I/Os in the same event loop. I/O multiplexing requires the execution of specific system calls, the most common of which is <code>select</code>, which can listen to up to 1024 file descriptors at once. In Redis, in addition to implementing the cross-platform <code>select</code> function, more efficient multiplexing functions are prioritized as the underlying implementation based on the different system platforms, including <code>evport</code> in Solaries 10, <code>epoll</code> in Linux, and <code>kqueue</code> in macOS/FreeBSD, which can serve hundreds of thousands of file descriptors.</p>
+<p>Take <code>select</code> for example, after calling the I/O multiplexing function, the process blocks on the function and listens to multiple file descriptors. When <code>select</code> returns FD readable, the process then calls <code>recvfrom</code> to copy the corresponding datagram to the application process buffer.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/23/0b864b40080e415299c17caf7a6e292a.png" alt="I/O Multiplexing"></p>
+<p>There is also a slight disadvantage to using I/O multiplexing when we are dealing with a single file descriptor, as two system calls are required while the other model requires only one. The performance advantage becomes more apparent as more I/O events need to be processed.</p>
+<h3 id="signaling-io">Signaling I/O</h3>
+<p>When a process uses a signal, the process notifies the kernel to perform a signal handling function via the <code>sigaction</code> system call, which returns immediately and the process can continue working on other tasks. When the datagram is ready, the kernel sends a <code>SIGIO</code> signal to the process, which then calls <code>recvfrom</code> to copy the datagram to the application process buffer.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/23/fee8dc090cd14c018400be21bc4f0beb.png" alt="signal driven i/o"></p>
+<p>Similar to non-blocking I/O, signal I/O can perform other tasks while waiting, and without initiating a polling operation, the kernel notifies the process to process the data.</p>
+<h3 id="summary">Summary</h3>
+<p>Redis typically processes tens of thousands of data requests per second, so choose efficient I/O multiplexing functions (such as <code>epoll</code>) to reduce unnecessary overhead and support the large number of network requests without blocking when processing multiple tasks.</p>
+<h2 id="time-consuming-task-processing">Time-Consuming Task Processing</h2>
+<p>Redis is an event-driven application that abstracts client commands and timed tasks into events, which are executed by the corresponding event handlers. Normally, events are all processed sequentially within a single thread, with no other threads involved. However, as mentioned earlier, in some cases Redis may create new threads (processes).</p>
+<ul>
+<li>Redis will <code>fork</code> a child process to write in-memory data to disk when generating an RDB snapshot.</li>
+<li>The <code>UNLINK</code> command was introduced in Redis 4.0. When the key deleted with the <code>UNLINK</code> command is large, Redis removes the key from the key space and leaves the deletion of the value to a background thread to be handled asynchronously.</li>
+<li>Redis 6.0 adds multi-threaded I/O, where the I/O thread is responsible for reading, writing, and parsing data, and the main thread is responsible for the specific execution of commands.</li>
+</ul>
+<p>Redis has been optimizing its multitasking capabilities to take advantage of multi-core processors. As you can see from the examples above, Redis is optimized for multi-threaded operations such as data backups, deletion of large key-value pairs (e.g., hash tables of more than a dozen MB), and I/O event processing to reduce the computational pressure on the main thread. These operations, which are relegated to the main thread, have little to no impact on the execution of client commands and do not create a data contention situation.</p>
+<h2 id="summary-1">Summary</h2>
+<p>Redis takes advantage of many features provided by the operating system, making its design and implementation uncomplicated, powerful, and easy to develop. The authors of the project have a deep understanding of the operating system and are skilled at engineering solutions to problems.</p>
+<ul>
+<li>Delegating time-consuming tasks to background threads.</li>
+<li>CPU is not a performance bottleneck for the main thread, even with single threads.</li>
+<li>Use I/O multiplexing to handle I/O-intensive tasks.</li>
+</ul>
+<p>These strategies provide good ideas for programming, and their flexible use can be useful in performance optimization.</p>
+<h2 id="reference">Reference</h2>
+<ul>
+<li><code>[linux五种IO模型](</code><a href="https://juejin.im/post/5c725dbe51882575e37ef9ed%60">https://juejin.im/post/5c725dbe51882575e37ef9ed`</a></li>
+<li><code>[正式支持多线程！Redis 6.0 与老版性能对比评测](</code><a href="https://www.chainnews.com/articles/610212461536.htm%60">https://www.chainnews.com/articles/610212461536.htm`</a></li>
+<li><code>https://wingsxdu.com/posts/database/redis/high-performance/</code></li>
+</ul>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/redis/">redis</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-08/redis-rdb-and-aof/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Redis RDB and AOF Persistence</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-08/cryptographic-hashing-function/">
+            <span class="next-text nav-default">Implementation principle of cryptographic hash algorithm</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  <script type="text/javascript" src="/lib/jquery/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="/lib/slideout/slideout-1.0.1.min.js"></script>
+  <script type="text/javascript" src="/lib/fancybox/jquery.fancybox-3.1.20.min.js"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.4ae89da218555efa0e7093a20b92017d2e1202b66fff9fc2edf4cb8d44b44c6e.js"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
