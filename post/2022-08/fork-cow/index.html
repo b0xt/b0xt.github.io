@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge,chrome=1">
+  <title>Why process fork uses copy-on-write - SoByte</title>
+  <meta name="renderer" content="webkit" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"/>
+
+<meta http-equiv="Cache-Control" content="no-transform" />
+<meta http-equiv="Cache-Control" content="no-siteapp" />
+
+<meta name="theme-color" content="#f8f5ec" />
+<meta name="msapplication-navbutton-color" content="#f8f5ec">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="#f8f5ec">
+
+
+<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-6356451834813761" crossorigin="anonymous"></script>
+
+
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-E8GRRGBTEZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-E8GRRGBTEZ');
+</script>
+
+
+<meta name="author" content="" /><meta name="description" content="Explore why process fork uses copy-on-write." /><meta name="keywords" content="golang 1.19, copy-on-write" />
+
+
+
+
+
+
+<meta name="generator" content="Hugo 0.101.0 with theme even" />
+
+
+<link rel="canonical" href="https://www.sobyte.net/post/2022-08/fork-cow/" />
+<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">
+<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">
+<link rel="manifest" href="/manifest.json">
+<link rel="mask-icon" href="/safari-pinned-tab.svg" color="#5bbad5">
+
+
+
+<link href="/sass/main.min.f92fd13721ddf72129410fd8250e73152cc6f2438082b6c0208dc24ee7c13fc4.css" rel="stylesheet">
+<link href="/lib/fancybox/jquery.fancybox-3.1.20.min.css" rel="stylesheet">
+
+
+<meta property="og:title" content="Why process fork uses copy-on-write" />
+<meta property="og:description" content="Explore why process fork uses copy-on-write." />
+<meta property="og:type" content="article" />
+<meta property="og:url" content="https://www.sobyte.net/post/2022-08/fork-cow/" /><meta property="article:section" content="post" />
+<meta property="article:published_time" content="2022-08-24T12:24:49+08:00" />
+<meta property="article:modified_time" content="2022-08-24T12:24:49+08:00" />
+
+<meta itemprop="name" content="Why process fork uses copy-on-write">
+<meta itemprop="description" content="Explore why process fork uses copy-on-write."><meta itemprop="datePublished" content="2022-08-24T12:24:49+08:00" />
+<meta itemprop="dateModified" content="2022-08-24T12:24:49+08:00" />
+<meta itemprop="wordCount" content="1313">
+<meta itemprop="keywords" content="linux," /><meta name="twitter:card" content="summary"/>
+<meta name="twitter:title" content="Why process fork uses copy-on-write"/>
+<meta name="twitter:description" content="Explore why process fork uses copy-on-write."/>
+
+<!--[if lte IE 9]>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/classlist/1.1.20170427/classList.min.js"></script>
+<![endif]-->
+
+<!--[if lt IE 9]>
+  <script src="https://cdn.jsdelivr.net/npm/html5shiv@3.7.3/dist/html5shiv.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/respond.js@1.4.2/dest/respond.min.js"></script>
+<![endif]-->
+
+</head>
+<body>
+  <div id="mobile-navbar" class="mobile-navbar">
+  <div class="mobile-header-logo">
+    <a href="/" class="logo">SOBYTE</a>
+  </div>
+  <div class="mobile-navbar-icon">
+    <span></span>
+    <span></span>
+    <span></span>
+  </div>
+</div>
+<nav id="mobile-menu" class="mobile-menu slideout-menu">
+  <ul class="mobile-menu-list">
+    <a href="/">
+        <li class="mobile-menu-item">Home</li>
+      </a><a href="/post/">
+        <li class="mobile-menu-item">Archives</li>
+      </a><a href="/tags/">
+        <li class="mobile-menu-item">Tags</li>
+      </a><a href="/categories/">
+        <li class="mobile-menu-item">Categories</li>
+      </a><a href="/about/">
+        <li class="mobile-menu-item">About</li>
+      </a>
+  </ul>
+
+  
+
+
+</nav>
+
+  <div class="container" id="mobile-panel">
+    <header id="header" class="header">
+        <div class="logo-wrapper">
+  <a href="/" class="logo">SOBYTE</a>
+</div>
+
+
+
+
+
+<nav class="site-navbar">
+  <ul id="menu" class="menu">
+    <li class="menu-item">
+        <a class="menu-item-link" href="/">Home</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/post/">Archives</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/tags/">Tags</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/categories/">Categories</a>
+      </li><li class="menu-item">
+        <a class="menu-item-link" href="/about/">About</a>
+      </li>
+  </ul>
+</nav>
+
+    </header>
+
+    <main id="main" class="main">
+      <div class="content-wrapper">
+        <div id="content" class="content">
+          <article class="post">
+    
+    <header class="post-header">
+      <h1 class="post-title">Why process fork uses copy-on-write</h1>
+
+      <div class="post-meta">
+        <span class="post-time"> 2022-08-24 12:24:49 </span>
+        <div class="post-category">
+            <a href="/categories/tutorials/"> tutorials </a>
+            </div>
+          <span class="more-meta"> 1313 words </span>
+          <span class="more-meta"> 7 mins read </span>
+        
+      </div>
+    </header>
+
+    <div class="post-toc" id="post-toc">
+  <h2 class="post-toc-title">Contents</h2>
+  <div class="post-toc-content">
+    <nav id="TableOfContents">
+  <ul>
+    <li>
+      <ul>
+        <li><a href="#overview">Overview</a></li>
+        <li><a href="#fork-flow">fork flow</a>
+          <ul>
+            <li><a href="#memory-layout">Memory layout</a></li>
+            <li><a href="#system-call-exec">System call exec</a></li>
+            <li><a href="#copy-on-write">Copy-on-write</a></li>
+          </ul>
+        </li>
+        <li><a href="#summary">Summary</a></li>
+        <li><a href="#reference">Reference</a></li>
+      </ul>
+    </li>
+  </ul>
+</nav>
+  </div>
+</div>
+    <div class="post-content">
+      <p><code>fork</code> is the most widely used process creation mechanism, where a process can create several new processes, the former called parent processes and the latter called child processes, through the system call <code>fork</code>. In order to reduce the process creation overhead, modern operating systems use <strong>copy-on-write</strong> techniques, where the parent and child processes share the same memory space, thus enabling a &ldquo;copy&rdquo; of the data, which will be analyzed in this article.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/24/071bac46ef5f40e689afe18cec497d98.png" alt="fork copy-on-write"></p>
+<h2 id="overview">Overview</h2>
+<p>Every process in the operating system has a parent process, and all processes form a tree structure. When the system starts, an init process is created (with ID 1), and all other processes are created by the init process through <code>fork</code>. init process has its own parent, and if a process ends before its children, then its children will be <code>adopted</code> by the init process and become direct children of the direct child of the init process.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/24/fde066c84d2a4822a59d2640cd532c5d.png" alt="process fork"></p>
+<p>An existing process can create a new child process by using the fork function. When the fork method is called, it returns two values, which we can use to determine the parent and child processes and perform different actions.</p>
+<ul>
+<li>the <code>fork</code> function returns 0, meaning that the current process is a child process.</li>
+<li>When the <code>fork</code> function returns greater than 0, it means that the current process is the parent process and the return value is the <code>pid</code> of the child process.</li>
+</ul>
+<div class="highlight"><div class="chroma">
+<table class="lntable"><tr><td class="lntd">
+<pre tabindex="0" class="chroma"><code><span class="lnt"> 1
+</span><span class="lnt"> 2
+</span><span class="lnt"> 3
+</span><span class="lnt"> 4
+</span><span class="lnt"> 5
+</span><span class="lnt"> 6
+</span><span class="lnt"> 7
+</span><span class="lnt"> 8
+</span><span class="lnt"> 9
+</span><span class="lnt">10
+</span><span class="lnt">11
+</span><span class="lnt">12
+</span><span class="lnt">13
+</span><span class="lnt">14
+</span></code></pre></td>
+<td class="lntd">
+<pre tabindex="0" class="chroma"><code class="language-c" data-lang="c"><span class="line"><span class="cl"><span class="kt">int</span> <span class="nf">main</span><span class="p">(</span><span class="kt">void</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">    <span class="n">pid_t</span> <span class="n">pid</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="k">if</span> <span class="p">(</span><span class="o">-</span><span class="mi">1</span> <span class="o">==</span> <span class="p">(</span><span class="n">pid</span> <span class="o">=</span> <span class="n">fork</span><span class="p">()))</span> <span class="p">{</span> <span class="c1">//Equal to -1 indicates a fork error
+</span></span></span><span class="line"><span class="cl"><span class="c1"></span>        <span class="n">perror</span><span class="p">(</span><span class="s">&#34;fork error&#34;</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">        <span class="k">return</span> <span class="o">-</span><span class="mi">1</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">else</span> <span class="k">if</span> <span class="p">(</span><span class="mi">0</span> <span class="o">==</span> <span class="n">pid</span><span class="p">)</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">printf</span><span class="p">(</span><span class="s">&#34;I am child，parent pid is %d</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">getppid</span><span class="p">());</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">else</span> <span class="p">{</span>
+</span></span><span class="line"><span class="cl">        <span class="n">printf</span><span class="p">(</span><span class="s">&#34;I am parent, child pid is %d</span><span class="se">\n</span><span class="s">&#34;</span><span class="p">,</span> <span class="n">pid</span><span class="p">);</span>
+</span></span><span class="line"><span class="cl">    <span class="p">}</span>
+</span></span><span class="line"><span class="cl">    <span class="k">return</span> <span class="mi">0</span><span class="p">;</span>
+</span></span><span class="line"><span class="cl"><span class="p">}</span>
+</span></span></code></pre></td></tr></table>
+</div>
+</div><h2 id="fork-flow">fork flow</h2>
+<h3 id="memory-layout">Memory layout</h3>
+<p>When a process is created, the system kernel allocates virtual memory space for the process. The kernel divides the virtual memory into user space and kernel space, with the user space occupying the lower part of the address, size 0 to TASK_SIZE, and the remaining part being the kernel space. The division is shown in the figure below.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/24/bf401e06b8f74b298f03b3292e1eeae0.png" alt="process memory"></p>
+<p>The user space memory areas from low address to high address are arranged as follows</p>
+<ol>
+<li>program segment (Text): the part of the program instruction executed by the CPU, which is normally read-only for the security of the program; the program segment can be shared by parent and child processes.</li>
+<li>initialized data segment (Data): the part of the variable that has been explicitly assigned a value before the program is executed.</li>
+<li>uninitialized data segment (BSS): data for which variables are not initialized before program execution; the kernel defines this data segment as 0 or empty.</li>
+<li>runtime heap (Heap): stores dynamic memory allocations that need to be manually allocated and freed by the programmer, with the heap area growing from low to high addresses.</li>
+<li>memory mapping segment (Memory Mapping): memory mapping file area, load dynamic link library, file descriptors, etc., can be extended to high/low addresses.</li>
+<li>runtime stack (Stack): stores local, temporary variables, return pointers to functions, etc., and is used to control function calls and returns. Memory is automatically allocated at the beginning of the block and automatically freed at the end, and the stack area grows from high to low addresses.</li>
+</ol>
+<p>When <code>fork</code> occurs the child process copies the memory data of the parent process, and the child process is almost a complete copy of the parent process, getting a copy of the parent&rsquo;s data segments, heap and stack. The memory space of both processes has almost identical contents.</p>
+<p>But on the other hand, after calling <code>fork</code>, the parent and child processes will run in separate memory spaces, writing and modifying memory, and mapping files are independent, and the processes will not affect each other.</p>
+<h3 id="system-call-exec">System call exec</h3>
+<p>When the <code>fork</code> function creates a new child process, the child process will often call another system call function: exec. The <code>exec</code> function will load and replace the Text and Data segments of the calling process from the program file, reinitialize the BSS segment, etc. This will cause the memory data copied during <code>fork</code> to be overwritten again, wasting resources for nothing.</p>
+<blockquote>
+<p>exec is the collective name for a series of execxxx() functions, see <a href="https://en.wikipedia.org/wiki/Exec_%28system_call%29">wiki</a></p>
+</blockquote>
+<p>When a process calls the <code>exec</code> function, the source process program is completely replaced by the new program, which starts execution from its main function. Because calling <code>exec</code> does not create a new process, the process IDs before and after do not change. exec simply replaces the body, data, heap, and stack segments of the current process with another new program. In particular, file descriptors that were already open in the original process will remain open in the new process, unless their &ldquo;close on execution flag&rdquo; is set.</p>
+<p>In fact, the new program inherits many properties of the calling process, some of which are listed below.</p>
+<ul>
+<li>Process ID, parent process ID, process group ID</li>
+<li>Actual user ID and actual group ID</li>
+<li>Current working directory</li>
+<li>File lock</li>
+<li>······</li>
+</ul>
+<h3 id="copy-on-write">Copy-on-write</h3>
+<p>Now we understand that the process copies almost all the data of the parent process when <code>fork</code> creates a child process, which may lead to a very inefficient process creation; in addition, the child process usually loads a new program to overwrite the copied data segments, stack, etc., which makes all the previously copied data wasted; even if the <code>exec</code> function is not executed, the large amount of memory data copied from the parent process may have no meaning for the child process.</p>
+<p>As an alternative, the kernel uses Copy-On-Write technology for <code>fork</code>. The main function of Copy-On-Write is to <strong>delay copying until the write operation actually occurs</strong>, which avoids a lot of pointless copying. In most operating systems today, <code>fork</code> does not immediately copy the memory space of the parent process, but takes advantage of sharing the same physical memory.</p>
+<p><img src="https://cdn.jsdelivr.net/gh/b0xt/sobyte-images1/2022/08/24/cd8101527eab4634a3b664334ddfe53f.png" alt="process shared memory"></p>
+<p>When the <code>fork</code> function is called, the parent process and the child process are allocated different virtual memory spaces by the kernel, so from the process perspective they access different memory.</p>
+<ul>
+<li>When a read operation is performed in the virtual memory space, the kernel maps the virtual memory to physical memory and the parent and child processes share the physical memory space.</li>
+<li>When the parent process makes changes to the shared memory, the shared memory is <strong>copied on a page-by-page basis</strong> and the parent process makes changes to the original physical space, while the child process uses the new physical space after the copy.</li>
+<li>When a child process makes a modification to the shared memory, the child process will make the modification on the new physical space after the copy without altering the original physical space to avoid affecting the memory space of the parent process.</li>
+</ul>
+<p>Write-time replication reduces the overhead of unnecessary physical memory, makes process creation very fast, and provides a good idea of shared memory usage. It is useful in some application scenarios such as in-memory database and big data analysis.</p>
+<h2 id="summary">Summary</h2>
+<p>Back to the topic, why is the write-time copy technique used in <code>fork</code>?</p>
+<ul>
+<li>A large amount of memory data needs to be copied during <code>fork</code>.</li>
+<li>The copied data may not be of any use to the child process.</li>
+<li>If the child process calls <code>exec</code> it also overwrites the copied data.</li>
+<li>If the parent process takes up a lot of physical memory resources, the remaining memory space may not be sufficient for the child process.</li>
+</ul>
+<p>However, the copy-on-write technique also has some disadvantages. If the parent and child processes perform frequent write operations, a large number of paging errors (page-fault exceptions) may be generated, which will not be worth the cost. Therefore, when using write-time replication, pay special attention to whether the demand is to write more and read less or write less and read more, and choose the appropriate application scenario.</p>
+<h2 id="reference">Reference</h2>
+<ul>
+<li><code>https://draveness.me/whys-the-design-redis-bgsave-fork</code></li>
+<li><code>https://blog.csdn.net/wangxiaolong_china/article/details/6844325</code></li>
+<li><code>https://www.yanbinghu.com/2019/08/11/28423.html</code></li>
+<li><code>https://wingsxdu.com/posts/linux/concurrency-oriented-programming/fork-and-cow/</code></li>
+</ul>
+
+    </div>
+
+    
+<footer class="post-footer">
+      <div class="post-tags">
+          <a href="/tags/linux/">linux</a>
+          </div>
+      <nav class="post-nav">
+        <a class="prev" href="/post/2022-08/concurrency-sync/">
+            <i class="iconfont icon-left"></i>
+            <span class="prev-text nav-default">Talking about synchronization in concurrent programming</span>
+            <span class="prev-text nav-mobile">Prev</span>
+          </a>
+        <a class="next" href="/post/2022-08/redis-slowlog/">
+            <span class="next-text nav-default">Redis Slowlog</span>
+            <span class="next-text nav-mobile">Next</span>
+            <i class="iconfont icon-right"></i>
+          </a>
+      </nav>
+    </footer>
+  </article>
+        </div>
+        
+
+  
+
+  
+
+      </div>
+    </main>
+
+    <footer id="footer" class="footer">
+      <div class="social-links">
+  <a href="https://www.sobyte.net/index.xml" type="application/rss+xml" class="iconfont icon-rss" title="rss"></a>
+</div>
+
+<div class="copyright">
+  <span class="power-by">
+    Powered by <a class="hexo-link" href="https://gohugo.io">Hugo</a>
+  </span>
+  <span class="division">|</span>
+  <span class="theme-info">
+    Theme - 
+    <a class="theme-link" href="https://github.com/olOwOlo/hugo-theme-even">Even</a>
+  </span>
+
+  
+
+  <span class="copyright-year">
+    &copy; 
+    2021 - 
+    2022<span class="heart"><i class="iconfont icon-heart"></i></span><span></span>
+  </span>
+</div>
+
+    </footer>
+
+    <div class="back-to-top" id="back-to-top">
+      <i class="iconfont icon-up"></i>
+    </div>
+  </div>
+  <script type="text/javascript" src="/lib/jquery/jquery-3.2.1.min.js"></script>
+  <script type="text/javascript" src="/lib/slideout/slideout-1.0.1.min.js"></script>
+  <script type="text/javascript" src="/lib/fancybox/jquery.fancybox-3.1.20.min.js"></script>
+
+
+
+<script type="text/javascript" src="/js/main.min.4ae89da218555efa0e7093a20b92017d2e1202b66fff9fc2edf4cb8d44b44c6e.js"></script>
+
+
+
+
+
+
+
+
+</body>
+</html>
